@@ -1,0 +1,16 @@
+html,
+body {
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  min-height: 100vh;
+  font-family: "Times New Roman", serif;
+  background: #f6f3eb;
+  color: #1d1d1d;
+}
+
+a {
+  color: inherit;
+}
