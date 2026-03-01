@@ -2,11 +2,11 @@
 
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
-**Goal:** Build a production-ready auto writing SaaS that handles file upload, requirement extraction, outline approval, article generation, reference verification, DOCX/PDF delivery, auto de-AI processing, multi-channel payments, quota billing, and an operator-friendly admin console.
+**Goal:** Build a production-ready auto writing SaaS that handles file upload, requirement extraction, outline approval, article generation, reference verification, DOCX/PDF delivery, StealthGPT-based auto de-AI processing, multi-channel payments, subscription lifecycle management, quota billing, and an operator-friendly admin console.
 
 **Architecture:** Use a single Next.js application for both the user-facing product and the admin console. Store users, quota ledgers, task state, and metadata in Supabase; store files in Supabase Storage; run the long AI workflow in Trigger.dev; isolate document export and billing logic behind dedicated services so the system can scale without rewriting core flow control.
 
-**Tech Stack:** Next.js 16 + React + TypeScript, Tailwind CSS, Supabase, Trigger.dev, OpenAI API, python-docx worker, reportlab worker, Stripe, Coinbase Commerce, Alipay, WeChat Pay, Vitest, Playwright.
+**Tech Stack:** Next.js 16 + React + TypeScript, Tailwind CSS, Supabase, Trigger.dev, OpenAI API, StealthGPT API, python-docx worker, reportlab worker, Stripe, Coinbase Commerce, Alipay, WeChat Pay, Vitest, Playwright.
 
 ---
 
@@ -113,6 +113,7 @@ export const env = {
   NEXT_PUBLIC_SUPABASE_ANON_KEY: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? "",
   SUPABASE_SERVICE_ROLE_KEY: process.env.SUPABASE_SERVICE_ROLE_KEY ?? "",
   OPENAI_API_KEY: process.env.OPENAI_API_KEY ?? "",
+  STEALTHGPT_API_KEY: process.env.STEALTHGPT_API_KEY ?? "",
   TRIGGER_SECRET_KEY: process.env.TRIGGER_SECRET_KEY ?? "",
   STRIPE_SECRET_KEY: process.env.STRIPE_SECRET_KEY ?? "",
   COINBASE_COMMERCE_API_KEY: process.env.COINBASE_COMMERCE_API_KEY ?? "",
@@ -198,7 +199,7 @@ Include these tables in `supabase/migrations/202603020001_initial_schema.sql`:
 **Step 2: Add key columns that match the business rules**
 
 Required columns:
-- `quota_wallets`: `available_quota`, `frozen_quota`
+- `quota_wallets`: `recharge_quota`, `subscription_quota`, `frozen_quota`
 - `writing_tasks`: `status`, `target_word_count`, `citation_style`, `special_requirements`, `expires_at`
 - `task_outputs`: `output_kind`, `storage_path`, `expires_at`
 - `reference_checks`: `verdict`, `reasoning`
@@ -268,7 +269,7 @@ Middleware rules:
 Layout must include:
 - Left navigation
 - Top status bar
-- Quota summary
+- Quota summary (show recharge quota and subscription quota separately)
 - Main content area
 
 **Step 4: Add an end-to-end shell test**
@@ -744,10 +745,11 @@ git commit -m "feat: add docx and pdf delivery exporters"
 **Files:**
 - Create: `src/app/api/tasks/[taskId]/humanize/route.ts`
 - Create: `trigger/jobs/humanize-draft.ts`
-- Create: `src/lib/ai/prompts/humanize-draft.ts`
+- Create: `src/lib/humanize/stealthgpt-client.ts`
 - Modify: `src/components/workspace/deliverables-panel.tsx`
 - Create: `src/components/workspace/manual-humanize-card.tsx`
 - Create: `public/images/wechat-contact-qr.png`
+- Create: `tests/unit/stealthgpt-client.test.ts`
 - Test: `tests/unit/humanize-panel.test.tsx`
 
 **Step 1: Add the humanize action API**
@@ -758,13 +760,17 @@ The route must:
 - freeze quota
 - enqueue the humanize job
 
-**Step 2: Implement the humanize job**
+**Step 2: Implement the StealthGPT client and humanize job**
 
 Rules:
+- call `https://stealthgpt.ai/api/stealthify`
+- send the API token from `STEALTHGPT_API_KEY` in the request header
 - only rewrite the article body
 - preserve title
 - preserve section structure
 - preserve `References`
+- split long bodies into smaller section-sized chunks before calling the API, then stitch the result back together
+- if the provider call fails, release frozen quota and keep the original deliverable untouched
 
 **Step 3: Add the deliverables UI state**
 
@@ -775,14 +781,17 @@ When humanize completes, show:
 
 **Step 4: Write a panel test**
 
-Run: `pnpm test tests/unit/humanize-panel.test.tsx`
+Run:
+- `pnpm test tests/unit/stealthgpt-client.test.ts`
+- `pnpm test tests/unit/humanize-panel.test.tsx`
+
 Expected: PASS with the QR card visible only after the humanized result exists
 
 **Step 5: Commit**
 
 ```bash
-git add src/app/api/tasks src/components/workspace trigger/jobs public/images tests/unit/humanize-panel.test.tsx
-git commit -m "feat: add auto de-ai flow and manual service card"
+git add src/app/api/tasks src/components/workspace src/lib/humanize trigger/jobs public/images tests/unit/stealthgpt-client.test.ts tests/unit/humanize-panel.test.tsx
+git commit -m "feat: add stealthgpt de-ai flow and manual service card"
 ```
 
 ### Task 14: Implement Quota Wallet And Billing Rules
@@ -809,6 +818,8 @@ Test cases:
 - failed task releases frozen quota
 - success settles frozen quota into consumed quota
 - generation and de-AI use separate pricing paths
+- monthly subscription quota is spent before recharge quota
+- monthly reset clears only `subscription_quota`
 
 **Step 3: Implement the wallet mutation helpers**
 
@@ -884,7 +895,68 @@ git add src/app/api/payments src/components/billing app/(app)/billing/page.tsx t
 git commit -m "feat: add recharge flow and payment adapters"
 ```
 
-### Task 16: Build The Admin Console
+### Task 16: Implement Subscription Lifecycle
+
+**Files:**
+- Create: `supabase/migrations/202603020002_subscriptions.sql`
+- Modify: `src/app/api/payments/stripe/webhook/route.ts`
+- Create: `src/lib/subscriptions/sync-stripe-subscription.ts`
+- Create: `src/lib/subscriptions/grant-monthly-quota.ts`
+- Create: `trigger/jobs/grant-subscription-quota.ts`
+- Create: `tests/unit/subscription-lifecycle.test.ts`
+
+**Step 1: Add the subscriptions table in a dedicated migration**
+
+Required business columns:
+- `user_id`
+- `stripe_subscription_id`
+- `plan_id`
+- `status`
+- `current_period_end`
+
+Use normal timestamp columns too, but keep the business contract centered on the five fields above.
+
+**Step 2: Extend the Stripe webhook handler to sync subscription lifecycle**
+
+Handle these Stripe events:
+- `customer.subscription.created`
+- `customer.subscription.updated`
+- `customer.subscription.deleted`
+
+Webhook responsibilities:
+- upsert the local subscription row
+- keep `status` and `current_period_end` in sync
+- never credit quota directly inside the webhook
+
+**Step 3: Add the daily Trigger.dev subscription grant job**
+
+The job must:
+- run once per day
+- find subscriptions that are still `active`
+- determine whether the current month has already received its grant
+- clear leftover `subscription_quota` before a new monthly grant
+- grant the new monthly quota for the current period
+- leave `recharge_quota` untouched
+
+To prevent double grants, use a unique monthly ledger key such as `subscription:{subscriptionId}:{YYYY-MM}`.
+
+**Step 4: Write the lifecycle tests**
+
+Run: `pnpm test tests/unit/subscription-lifecycle.test.ts`
+Expected: PASS when:
+- the webhook syncs status correctly
+- only active subscriptions receive monthly quota
+- duplicate daily runs do not grant twice
+- month rollover clears only subscription quota
+
+**Step 5: Commit**
+
+```bash
+git add supabase/migrations src/app/api/payments/stripe/webhook/route.ts src/lib/subscriptions trigger/jobs/grant-subscription-quota.ts tests/unit/subscription-lifecycle.test.ts
+git commit -m "feat: add subscription lifecycle management"
+```
+
+### Task 17: Build The Admin Console
 
 **Files:**
 - Create: `app/(app)/admin/page.tsx`
@@ -941,7 +1013,7 @@ git add app/(app)/admin src/components/admin tests/e2e/admin-shell.spec.ts
 git commit -m "feat: add operator-friendly admin console"
 ```
 
-### Task 17: Implement Expiry Cleanup And Download Guards
+### Task 18: Implement Expiry Cleanup And Download Guards
 
 **Files:**
 - Create: `trigger/jobs/expire-task-assets.ts`
@@ -983,7 +1055,7 @@ git add trigger/jobs/expire-task-assets.ts src/app/api/tasks src/lib/storage/sig
 git commit -m "feat: add expiry cleanup and secure downloads"
 ```
 
-### Task 18: Add Observability, Failure Recovery, And Launch Checks
+### Task 19: Add Observability, Failure Recovery, And Launch Checks
 
 **Files:**
 - Create: `src/lib/observability/logger.ts`
@@ -1033,7 +1105,7 @@ git add src/lib/observability src/lib/tasks/manual-retry.ts docs/runbooks tests/
 git commit -m "chore: add launch checks and recovery tooling"
 ```
 
-### Task 19: Final Verification Before Release
+### Task 20: Final Verification Before Release
 
 **Files:**
 - Modify: `README.md`
@@ -1070,6 +1142,8 @@ Confirm:
 - content files still expire after 3 days
 - reference report still uses only “基本可对应” and “有风险”
 - de-AI still preserves references
+- de-AI is calling StealthGPT instead of a self-written GPT rewrite
+- monthly subscription quota resets without touching paid recharge quota
 
 **Step 4: Update docs with any implementation drift**
 

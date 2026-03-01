@@ -104,6 +104,7 @@
 
 ### 3.5 AI 核心能力
 
+写作与分析：
 - `OpenAI API`
 
 用途：
@@ -119,6 +120,23 @@
 - 本方案不引入 `Unstructured API`
 - 文件处理仍由系统单独做“文本提取步骤”，只是 AI 核心统一使用 `OpenAI API`
 - 不把所有原文件在每一步都重复整份输入模型，避免成本和速度失控
+
+自动降 AI：
+- `StealthGPT API`
+
+用途：
+- 只用于“自动降 AI”阶段
+- 只处理正文，不处理 `References`
+- 输出用于生成“降AI后版本（Word）”
+
+原因：
+- 有现成 API，可直接对接
+- 按字数计费，成本更容易预估
+- 专门做人性化改写，结果比直接用通用写作模型改写更稳定
+
+说明：
+- 自动降 AI 不再使用 `OpenAI API` 自行改写
+- 为提高稳定性，长正文应按章节或分段拆开后再调用 `StealthGPT API`
 
 ### 3.6 文档输出
 
@@ -487,6 +505,7 @@
 
 以下内容长期保留，不随 3 天清理一起删除：
 - 用户账号
+- 订阅记录
 - 余额记录
 - 冻结额度记录
 - 消费记录
@@ -513,8 +532,17 @@
 
 用户账户使用“额度”作为统一消费单位。
 
-无论是一次性充值还是订阅发放：
-- 最终都转成给用户账户增加额度
+但系统内部必须拆成两个额度桶：
+- 充值额度
+- 订阅月度额度
+
+这样做的原因：
+- 充值额度是用户自己买的，不应被月底清零
+- 订阅月度额度是当期权益，可以按周期重发和清零
+
+月底清零规则：
+- 只清空未用完的“订阅月度额度”
+- 不清空“充值额度”
 
 ### 8.2 扣费项目
 
@@ -570,12 +598,32 @@
 2. 月订阅
 - 用户按月付费
 - 每月自动发放额度
+- 月度额度不滚存
+- 到月底或当前周期结束时，未用完的订阅月度额度自动清零
 - 到期自动续费
 
 建议前期只做 3 档，避免套餐过多：
 - 基础
 - 进阶
 - 高级
+
+### 9.3 订阅生命周期
+
+系统需要单独保存每个订阅的生命周期信息，包括：
+- 用户
+- 订阅平台中的订阅 ID
+- 对应套餐
+- 当前状态
+- 当前周期结束时间
+
+同步规则：
+- 接收 `Stripe` 的订阅创建、更新、取消事件
+- 把订阅状态同步到本地数据库
+
+月度发放规则：
+- 使用 `Trigger.dev` 每天检查订阅
+- 只有状态仍然有效的订阅才发放新的月度额度
+- 每个自然月或每个新的订阅周期只发放一次，防止重复发放
 
 ## 10. 任务状态设计
 
@@ -678,6 +726,8 @@
 - [Stripe Subscriptions](https://docs.stripe.com/subscriptions)
 - [Stripe Billing Overview](https://docs.stripe.com/billing/subscriptions/overview)
 - [Coinbase Commerce API](https://docs.cdp.coinbase.com/commerce-onchain/docs/accepting-crypto)
+- [StealthGPT API Authentication](https://docs.stealthgpt.ai/api-reference/authentication)
+- [StealthGPT Writer & Humanizer](https://docs.stealthgpt.ai/api-reference/endpoints/stealthify)
 - [支付宝开放平台](https://open.alipay.com/)
 
 ## 15. 设计结论
@@ -689,7 +739,8 @@
 - 部署：`Vercel`
 - 登录 / 数据库 / 存储：`Supabase`
 - 长流程任务：`Trigger.dev`
-- AI 核心：`OpenAI API`
+- 写作 AI：`OpenAI API`
+- 自动降 AI：`StealthGPT API`
 - Word 导出：`python-docx`
 - PDF 报告：`reportlab`
 - 海外支付：`Stripe` + `Coinbase Commerce`
@@ -700,6 +751,7 @@
 - 大纲先确认，再写正文
 - 内容文件仅保留 3 天
 - 账务与运营记录长期保留
+- 订阅额度与充值额度分开记账
 - 自动降 AI 与文章生成分开扣费
 - 自动降 AI 完成后同时展示下载入口与人工降 AI 微信二维码入口
 
