@@ -1,0 +1,2 @@
+-- Seed file intentionally starts minimal.
+-- Add pricing plans and admin bootstrap rows here when the application layer is ready.
