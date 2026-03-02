@@ -1,6 +1,8 @@
 import {
   rechargePackages,
-  subscriptionPackages
+  subscriptionPackages,
+  supportedCryptoAssets,
+  supportedCryptoNetworks
 } from "@/src/lib/payments/catalog";
 
 type RechargeCardProps = {
@@ -50,9 +52,13 @@ export function RechargeCard({
                 {pkg.quotaAmount} 点额度 / ${pkg.amountUsd}
               </div>
               <p style={{ marginBottom: "10px" }}>{pkg.description}</p>
+              <p style={{ marginTop: 0, marginBottom: "10px", color: "#5a4d34" }}>
+                加密货币支持：{supportedCryptoAssets.join(" / ")}，链路支持：
+                {supportedCryptoNetworks.join(" / ")}
+              </p>
               <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
                 <button type="button">Stripe</button>
-                <button type="button">加密货币</button>
+                <button type="button">USDT / USDC（多链）</button>
                 <button type="button">支付宝</button>
                 <button type="button">微信支付</button>
               </div>

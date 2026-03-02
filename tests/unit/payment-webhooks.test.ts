@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
+  buildCoinbaseChargePayload,
+  completeCoinbaseChargeFromEvent
+} from "../../src/lib/payments/coinbase-charge";
+import {
   completePaidOrder,
   createPaymentOrder,
   getPaymentLedgerEntries,
@@ -82,5 +86,63 @@ describe("payment webhooks", () => {
         amount: 20
       })
     ]);
+  });
+
+  it("builds the crypto charge as USDT and USDC with multiple chain choices", () => {
+    const payload = buildCoinbaseChargePayload({
+      orderId: "order-2",
+      packageName: "进阶包",
+      amountUsd: 49,
+      successUrl: "https://example.com/success",
+      cancelUrl: "https://example.com/cancel"
+    });
+
+    expect(payload.pricing_type).toBe("fixed_price");
+    expect(payload.local_price).toEqual({
+      amount: "49.00",
+      currency: "USD"
+    });
+    expect(payload.metadata.accepted_assets).toEqual(["USDC", "USDT"]);
+    expect(payload.metadata.accepted_networks).toEqual([
+      "base",
+      "ethereum",
+      "solana"
+    ]);
+  });
+
+  it("settles the crypto order when the coinbase event is confirmed", () => {
+    resetPaymentState();
+    seedUserWallet("user-2", {
+      rechargeQuota: 0,
+      subscriptionQuota: 0,
+      frozenQuota: 0
+    });
+    createPaymentOrder({
+      id: "order-2",
+      userId: "user-2",
+      provider: "coinbase",
+      amountUsd: 49,
+      quotaAmount: 60,
+      kind: "recharge"
+    });
+
+    const result = completeCoinbaseChargeFromEvent({
+      event: {
+        type: "charge:confirmed",
+        data: {
+          id: "charge_123",
+          metadata: {
+            order_id: "order-2"
+          }
+        }
+      }
+    });
+
+    expect(result.applied).toBe(true);
+    expect(getUserWallet("user-2")).toEqual({
+      rechargeQuota: 60,
+      subscriptionQuota: 0,
+      frozenQuota: 0
+    });
   });
 });
