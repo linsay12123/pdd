@@ -6,7 +6,7 @@ import {
 } from "../../src/lib/activation-codes/repository";
 import { redeemActivationCode } from "../../src/lib/activation-codes/redeem-activation-code";
 import { getUserWallet, resetPaymentState } from "../../src/lib/payments/repository";
-import { POST as redeemCodeRoute } from "../../app/api/quota/redeem-code/route";
+import { handleRedeemCodeRequest } from "../../app/api/quota/redeem-code/route";
 
 describe("activation codes", () => {
   beforeEach(() => {
@@ -46,18 +46,22 @@ describe("activation codes", () => {
       count: 1
     });
 
-    const response = await redeemCodeRoute(
-      new Request("http://localhost/api/quota/redeem-code", {
-        method: "POST",
-        body: JSON.stringify({
-          userId: "user-9",
-          code: code.code
-        }),
-        headers: {
-          "content-type": "application/json"
-        }
+    const response = await handleRedeemCodeRequest(new Request("http://localhost/api/quota/redeem-code", {
+      method: "POST",
+      body: JSON.stringify({
+        userId: "user-from-page-should-be-ignored",
+        code: code.code
+      }),
+      headers: {
+        "content-type": "application/json"
+      }
+    }), {
+      requireUser: async () => ({
+        id: "user-9",
+        email: "user9@example.com",
+        role: "user"
       })
-    );
+    });
     const payload = await response.json();
 
     expect(response.status).toBe(200);
@@ -65,22 +69,45 @@ describe("activation codes", () => {
     expect(getUserWallet("user-9").rechargeQuota).toBe(5000);
   });
 
+  it("rejects unauthenticated redemption requests", async () => {
+    const response = await handleRedeemCodeRequest(new Request("http://localhost/api/quota/redeem-code", {
+      method: "POST",
+      body: JSON.stringify({
+        code: "PDD-1000-ABCD1234"
+      }),
+      headers: {
+        "content-type": "application/json"
+      }
+    }), {
+      requireUser: async () => {
+        throw new Error("AUTH_REQUIRED");
+      }
+    });
+    const payload = await response.json();
+
+    expect(response.status).toBe(401);
+    expect(payload.message).toContain("登录");
+  });
+
   it("rejects non-uuid user id when supabase persistence mode is enabled", async () => {
     process.env.NEXT_PUBLIC_SUPABASE_URL = "https://example.supabase.co";
     process.env.SUPABASE_SERVICE_ROLE_KEY = "service-role-key";
 
-    const response = await redeemCodeRoute(
-      new Request("http://localhost/api/quota/redeem-code", {
-        method: "POST",
-        body: JSON.stringify({
-          userId: "user-non-uuid",
-          code: "PDD-1000-ABCD1234"
-        }),
-        headers: {
-          "content-type": "application/json"
-        }
+    const response = await handleRedeemCodeRequest(new Request("http://localhost/api/quota/redeem-code", {
+      method: "POST",
+      body: JSON.stringify({
+        code: "PDD-1000-ABCD1234"
+      }),
+      headers: {
+        "content-type": "application/json"
+      }
+    }), {
+      requireUser: async () => ({
+        id: "user-non-uuid",
+        email: "user@example.com",
+        role: "user"
       })
-    );
+    });
     const payload = await response.json();
 
     expect(response.status).toBe(400);

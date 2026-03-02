@@ -1,8 +1,8 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { resetActivationCodeState } from "../../src/lib/activation-codes/repository";
+import { redeemActivationCode } from "../../src/lib/activation-codes/redeem-activation-code";
 import { GET as listActivationCodes } from "../../app/api/admin/activation-codes/list/route";
 import { POST as createActivationCodes } from "../../app/api/admin/activation-codes/create/route";
-import { POST as redeemCodeRoute } from "../../app/api/quota/redeem-code/route";
 
 describe("activation code admin routes", () => {
   beforeEach(() => {
@@ -103,18 +103,10 @@ describe("activation code admin routes", () => {
     );
     const createPayload = await createResponse.json();
     const targetCode = createPayload.codes[0].code as string;
-    await redeemCodeRoute(
-      new Request("http://localhost/api/quota/redeem-code", {
-        method: "POST",
-        body: JSON.stringify({
-          userId: "user-88",
-          code: targetCode
-        }),
-        headers: {
-          "content-type": "application/json"
-        }
-      })
-    );
+    redeemActivationCode({
+      userId: "user-88",
+      code: targetCode
+    });
 
     const usedResponse = await listActivationCodes(
       new Request(

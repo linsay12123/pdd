@@ -1,35 +1,47 @@
 import { NextResponse } from "next/server";
+import { requireCurrentSessionUser } from "@/src/lib/auth/current-user";
 import { redeemActivationCode } from "@/src/lib/activation-codes/redeem-activation-code";
 import { redeemActivationCodeInSupabase } from "@/src/lib/activation-codes/supabase-repository";
+import type { SessionUser } from "@/src/types/auth";
 import {
   isUuidLike,
   shouldUseSupabasePersistence
 } from "@/src/lib/persistence/runtime-mode";
 
-export async function POST(request: Request) {
+type RedeemCodeRouteDependencies = {
+  requireUser?: () => Promise<SessionUser>;
+  shouldUseSupabase?: () => boolean;
+  redeemInSupabase?: typeof redeemActivationCodeInSupabase;
+  redeemLocally?: typeof redeemActivationCode;
+};
+
+export async function handleRedeemCodeRequest(
+  request: Request,
+  dependencies: RedeemCodeRouteDependencies = {}
+) {
   const payload = await request.json().catch(() => null);
 
   if (
     !payload ||
-    typeof payload.userId !== "string" ||
     typeof payload.code !== "string" ||
-    !payload.userId.trim() ||
     !payload.code.trim()
   ) {
     return NextResponse.json(
       {
-        message: "需要用户和激活码，才能兑换积分。"
+        message: "需要激活码，才能兑换积分。"
       },
       { status: 400 }
     );
   }
 
   try {
-    const userId = payload.userId.trim();
+    const user = await (dependencies.requireUser ?? requireCurrentSessionUser)();
     const code = payload.code.trim();
-    const useSupabase = shouldUseSupabasePersistence();
+    const useSupabase = (dependencies.shouldUseSupabase ?? shouldUseSupabasePersistence)();
+    const redeemViaSupabase = dependencies.redeemInSupabase ?? redeemActivationCodeInSupabase;
+    const redeemViaLocal = dependencies.redeemLocally ?? redeemActivationCode;
 
-    if (useSupabase && !isUuidLike(userId)) {
+    if (useSupabase && !isUuidLike(user.id)) {
       return NextResponse.json(
         {
           ok: false,
@@ -40,8 +52,8 @@ export async function POST(request: Request) {
     }
 
     if (useSupabase) {
-      const result = await redeemActivationCodeInSupabase({
-        userId,
+      const result = await redeemViaSupabase({
+        userId: user.id,
         code
       });
 
@@ -53,8 +65,8 @@ export async function POST(request: Request) {
       });
     }
 
-    const result = redeemActivationCode({
-      userId,
+    const result = redeemViaLocal({
+      userId: user.id,
       code
     });
 
@@ -65,6 +77,26 @@ export async function POST(request: Request) {
       currentQuota: result.wallet.rechargeQuota
     });
   } catch (error) {
+    if (error instanceof Error && error.message === "AUTH_REQUIRED") {
+      return NextResponse.json(
+        {
+          ok: false,
+          message: "请先登录后再兑换激活码。"
+        },
+        { status: 401 }
+      );
+    }
+
+    if (error instanceof Error && error.message === "ACCOUNT_FROZEN") {
+      return NextResponse.json(
+        {
+          ok: false,
+          message: "当前账号已被冻结，请联系销售团队处理。"
+        },
+        { status: 403 }
+      );
+    }
+
     return NextResponse.json(
       {
         ok: false,
@@ -73,4 +105,8 @@ export async function POST(request: Request) {
       { status: 400 }
     );
   }
+}
+
+export async function POST(request: Request) {
+  return handleRedeemCodeRequest(request);
 }

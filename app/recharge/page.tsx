@@ -1,5 +1,5 @@
-import BillingPage from "../(app)/billing/page";
+import { redirect } from "next/navigation";
 
-export default function RechargePage() {
-  return <BillingPage />;
+export default function RechargeAliasPage() {
+  redirect("/billing");
 }

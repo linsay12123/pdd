@@ -3,7 +3,6 @@
 import { useState } from "react";
 
 type RedeemCodeFormProps = {
-  userId: string;
   onRedeemSuccess: (payload: {
     code: string;
     creditedQuota: number;
@@ -11,7 +10,7 @@ type RedeemCodeFormProps = {
   }) => void;
 };
 
-export function RedeemCodeForm({ userId, onRedeemSuccess }: RedeemCodeFormProps) {
+export function RedeemCodeForm({ onRedeemSuccess }: RedeemCodeFormProps) {
   const [code, setCode] = useState("");
   const [statusText, setStatusText] = useState("等待输入激活码");
   const [submitting, setSubmitting] = useState(false);
@@ -34,7 +33,6 @@ export function RedeemCodeForm({ userId, onRedeemSuccess }: RedeemCodeFormProps)
           "content-type": "application/json"
         },
         body: JSON.stringify({
-          userId,
           code: code.trim()
         })
       });

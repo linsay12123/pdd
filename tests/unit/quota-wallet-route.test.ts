@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { GET as getQuotaWallet } from "../../app/api/quota/wallet/route";
+import { handleQuotaWalletRequest } from "../../app/api/quota/wallet/route";
 import { resetPaymentState, seedUserWallet } from "../../src/lib/payments/repository";
 
 describe("quota wallet route", () => {
@@ -10,11 +10,13 @@ describe("quota wallet route", () => {
   });
 
   it("returns 401 when user context is missing", async () => {
-    const response = await getQuotaWallet(
-      new Request("http://localhost/api/quota/wallet", {
-        method: "GET"
-      })
-    );
+    const response = await handleQuotaWalletRequest(new Request("http://localhost/api/quota/wallet", {
+      method: "GET"
+    }), {
+      requireUser: async () => {
+        throw new Error("AUTH_REQUIRED");
+      }
+    });
     const payload = await response.json();
 
     expect(response.status).toBe(401);
@@ -28,17 +30,22 @@ describe("quota wallet route", () => {
       frozenQuota: 500
     });
 
-    const response = await getQuotaWallet(
-      new Request("http://localhost/api/quota/wallet", {
-        method: "GET",
-        headers: {
-          "x-user-id": "user-7"
-        }
+    const response = await handleQuotaWalletRequest(new Request("http://localhost/api/quota/wallet?userId=someone-else", {
+      method: "GET",
+      headers: {
+        "x-user-id": "another-user"
+      }
+    }), {
+      requireUser: async () => ({
+        id: "user-7",
+        email: "user7@example.com",
+        role: "user"
       })
-    );
+    });
     const payload = await response.json();
 
     expect(response.status).toBe(200);
+    expect(payload.userId).toBe("user-7");
     expect(payload.wallet).toEqual({
       rechargeQuota: 3200,
       frozenQuota: 500

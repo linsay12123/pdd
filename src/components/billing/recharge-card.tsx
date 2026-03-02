@@ -6,7 +6,6 @@ import { RedeemCodeForm } from "@/src/components/billing/redeem-code-form";
 
 type RechargeCardProps = {
   currentQuota: number;
-  userId: string;
 };
 
 const recordRows = [
@@ -15,7 +14,7 @@ const recordRows = [
   "消耗记录：自动降AI，扣除 500 积分"
 ];
 
-export function RechargeCard({ currentQuota, userId }: RechargeCardProps) {
+export function RechargeCard({ currentQuota }: RechargeCardProps) {
   const [quota, setQuota] = useState(currentQuota);
 
   useEffect(() => {
@@ -23,7 +22,7 @@ export function RechargeCard({ currentQuota, userId }: RechargeCardProps) {
 
     async function syncWallet() {
       try {
-        const response = await fetch(`/api/quota/wallet?userId=${encodeURIComponent(userId)}`);
+        const response = await fetch("/api/quota/wallet");
         const payload = await response.json();
         if (!cancelled && response.ok) {
           setQuota(payload.wallet.rechargeQuota);
@@ -38,7 +37,7 @@ export function RechargeCard({ currentQuota, userId }: RechargeCardProps) {
     return () => {
       cancelled = true;
     };
-  }, [userId]);
+  }, []);
 
   return (
     <section className="pdd-grid-2" style={{ alignItems: "start" }}>
@@ -61,7 +60,6 @@ export function RechargeCard({ currentQuota, userId }: RechargeCardProps) {
           <h2 style={{ marginTop: 0, marginBottom: "6px" }}>输入额度激活码</h2>
           <p className="pdd-sub">每个激活码只能用一次。兑换成功后积分实时到账。</p>
           <RedeemCodeForm
-            userId={userId}
             onRedeemSuccess={(payload) => {
               setQuota(payload.currentQuota);
             }}

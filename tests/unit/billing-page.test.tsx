@@ -1,11 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
-import BillingPage from "../../app/(app)/billing/page";
-import RechargePage from "../../app/recharge/page";
+import { BillingPageClient } from "../../src/components/pages/billing-page-client";
 
 describe("BillingPage", () => {
   it("shows the activation-code quota center", () => {
-    const html = renderToStaticMarkup(<BillingPage />);
+    const html = renderToStaticMarkup(<BillingPageClient initialQuota={1500} />);
 
     expect(html).toContain("激活码兑换");
     expect(html).toContain("立即兑换");
@@ -15,11 +14,5 @@ describe("BillingPage", () => {
     expect(html).not.toContain("支付宝");
     expect(html).not.toContain("微信支付");
     expect(html).not.toContain("USDC");
-  });
-
-  it("exposes the recharge alias page", () => {
-    const html = renderToStaticMarkup(<RechargePage />);
-
-    expect(html).toContain("额度激活码");
   });
 });
