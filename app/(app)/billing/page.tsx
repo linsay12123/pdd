@@ -13,8 +13,8 @@ export default function BillingPage() {
       >
         <h1 style={{ marginTop: 0, marginBottom: "8px" }}>充值中心</h1>
         <p style={{ margin: 0 }}>
-          这里会统一处理充值包、月订阅和不同支付方式。当前先把 Stripe
-          这条主通道接起来。
+          这里统一处理充值包、月订阅和不同支付方式。现在已经有 Stripe、手动稳定币、
+          支付宝、微信支付这几条入口。
         </p>
       </header>
       <RechargeCard currentQuota={120} monthlyQuota={80} />

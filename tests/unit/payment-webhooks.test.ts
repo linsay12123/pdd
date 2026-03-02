@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
+  buildAlipayNotifyPayload,
+  completeAlipayPaymentFromNotify
+} from "../../src/lib/payments/alipay-order";
+import {
   completePaidOrder,
   confirmPaymentOrderProvider,
   createPaymentOrder,
@@ -12,6 +16,10 @@ import {
   confirmManualCryptoPayment,
   createManualCryptoOrder
 } from "../../src/lib/payments/manual-crypto";
+import {
+  buildWeChatNotifyPayload,
+  completeWeChatPaymentFromNotify
+} from "../../src/lib/payments/wechat-order";
 import {
   buildStripeSignatureHeader,
   parseStripeWebhookEvent
@@ -126,6 +134,74 @@ describe("payment webhooks", () => {
     expect(result.applied).toBe(true);
     expect(getUserWallet("user-2")).toEqual({
       rechargeQuota: 60,
+      subscriptionQuota: 0,
+      frozenQuota: 0
+    });
+  });
+
+  it("settles an alipay recharge after a valid notify payload arrives", () => {
+    resetPaymentState();
+    seedUserWallet("user-3", {
+      rechargeQuota: 1,
+      subscriptionQuota: 0,
+      frozenQuota: 0
+    });
+    createPaymentOrder({
+      id: "order-3",
+      userId: "user-3",
+      provider: "alipay",
+      amountUsd: 19,
+      quotaAmount: 20,
+      kind: "recharge"
+    });
+
+    const payload = buildAlipayNotifyPayload({
+      orderId: "order-3",
+      tradeNo: "ali_trade_1",
+      secret: "alipay-secret"
+    });
+    const result = completeAlipayPaymentFromNotify({
+      payload,
+      secret: "alipay-secret"
+    });
+
+    expect(result.applied).toBe(true);
+    expect(getUserWallet("user-3")).toEqual({
+      rechargeQuota: 21,
+      subscriptionQuota: 0,
+      frozenQuota: 0
+    });
+  });
+
+  it("settles a wechat recharge after a valid notify payload arrives", () => {
+    resetPaymentState();
+    seedUserWallet("user-4", {
+      rechargeQuota: 2,
+      subscriptionQuota: 0,
+      frozenQuota: 0
+    });
+    createPaymentOrder({
+      id: "order-4",
+      userId: "user-4",
+      provider: "wechat",
+      amountUsd: 19,
+      quotaAmount: 20,
+      kind: "recharge"
+    });
+
+    const payload = buildWeChatNotifyPayload({
+      orderId: "order-4",
+      transactionId: "wx_tx_1",
+      secret: "wechat-secret"
+    });
+    const result = completeWeChatPaymentFromNotify({
+      payload,
+      secret: "wechat-secret"
+    });
+
+    expect(result.applied).toBe(true);
+    expect(getUserWallet("user-4")).toEqual({
+      rechargeQuota: 22,
       subscriptionQuota: 0,
       frozenQuota: 0
     });
