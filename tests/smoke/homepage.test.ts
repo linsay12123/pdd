@@ -7,9 +7,9 @@ describe("HomePage", () => {
   it("renders the branded sales homepage", () => {
     const html = renderToStaticMarkup(createElement(HomePage));
 
-    expect(html).toContain("拼代代PDD");
-    expect(html).toContain("联系客服购买额度");
-    expect(html).toContain("激活码");
-    expect(html).toContain("生成文章固定扣 500 积分");
+    expect(html).toContain("批量处理，稳定交付。");
+    expect(html).toContain("联系销售购买额度");
+    expect(html).toContain("激活码按需充值");
+    expect(html).toContain("生成文章需500积分");
   });
 });

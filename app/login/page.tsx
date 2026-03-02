@@ -1,60 +1,87 @@
+"use client";
+
+import { Button } from "@/src/components/ui/Button";
+import { Mail, Lock, ArrowRight } from "lucide-react";
 import Link from "next/link";
-import { BrandLogo } from "@/src/components/brand/brand-logo";
-import { ContactSalesCard } from "@/src/components/brand/contact-sales-card";
+import React from "react";
 
-type LoginPageProps = {
-  searchParams?: Promise<{
-    redirect?: string;
-  }>;
-};
-
-export default async function LoginPage({ searchParams }: LoginPageProps) {
-  const resolvedSearchParams = (await searchParams) ?? {};
-  const redirectTarget = resolvedSearchParams.redirect ?? "/workspace";
+export default function Login() {
+  const handleLogin = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (typeof window !== "undefined") {
+      window.location.href = "/workspace";
+    }
+  };
 
   return (
-    <main style={{ padding: "52px 0" }}>
-      <div className="pdd-container pdd-grid-2">
-        <section className="pdd-card" style={{ padding: "30px" }}>
-          <Link href="/" className="pdd-logo-wrap" style={{ marginBottom: "10px" }}>
-            <img src="/logo.jpg" alt="拼代代PDD logo" />
-            <strong style={{ fontSize: "1.2rem" }}>拼代代PDD</strong>
+    <div className="min-h-screen pt-24 pb-16 flex items-center justify-center px-6">
+      <div className="w-full max-w-md">
+        <div className="text-center mb-10">
+          <Link href="/" className="inline-flex items-center gap-2 mb-6 group">
+            <div className="w-16 h-16 rounded-2xl flex items-center justify-center overflow-hidden shadow-[0_0_20px_rgba(220,38,38,0.2)] group-hover:scale-105 transition-transform">
+              <img src="/logo.png" alt="拼代代 Logo" className="w-full h-full object-cover" />
+            </div>
           </Link>
-          <p className="pdd-sub">登录后可继续创建和交付任务</p>
-          <h1 className="pdd-heading" style={{ fontSize: "2.2rem", marginTop: "8px" }}>
-            欢迎回来
-          </h1>
-          <p className="pdd-sub" style={{ marginBottom: "18px" }}>
-            当前登录后将跳转到：<strong>{redirectTarget}</strong>
-          </p>
+          <h1 className="text-3xl font-serif font-bold text-cream-50 mb-2">欢迎回来</h1>
+          <p className="text-brand-700">登录拼代代，继续您的专业创作</p>
+        </div>
 
-          <form className="pdd-list" style={{ gap: "12px" }}>
-            <label className="pdd-list" style={{ gap: "6px" }}>
-              <span>邮箱地址</span>
-              <input className="pdd-input" type="email" placeholder="you@example.com" />
-            </label>
-            <label className="pdd-list" style={{ gap: "6px" }}>
-              <span>密码</span>
-              <input className="pdd-input" type="password" placeholder="请输入密码" />
-            </label>
-            <button className="pdd-btn pdd-btn-primary" type="button">
+        <div className="glass-panel p-8 rounded-2xl border-gold-glow">
+          <form onSubmit={handleLogin} className="space-y-6">
+            <div>
+              <label className="block text-sm font-medium text-cream-100 mb-2">邮箱地址</label>
+              <div className="relative">
+                <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                  <Mail className="h-5 w-5 text-brand-700" />
+                </div>
+                <input
+                  type="email"
+                  required
+                  className="block w-full pl-10 pr-3 py-3 border border-white/10 rounded-xl bg-brand-950/50 text-cream-50 placeholder-brand-700 focus:outline-none focus:ring-2 focus:ring-gold-500/50 focus:border-transparent transition-all"
+                  placeholder="you@example.com"
+                />
+              </div>
+            </div>
+
+            <div>
+              <div className="flex items-center justify-between mb-2">
+                <label className="block text-sm font-medium text-cream-100">密码</label>
+                <a href="#" className="text-xs text-gold-400 hover:text-gold-300">
+                  忘记密码？
+                </a>
+              </div>
+              <div className="relative">
+                <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                  <Lock className="h-5 w-5 text-brand-700" />
+                </div>
+                <input
+                  type="password"
+                  required
+                  className="block w-full pl-10 pr-3 py-3 border border-white/10 rounded-xl bg-brand-950/50 text-cream-50 placeholder-brand-700 focus:outline-none focus:ring-2 focus:ring-gold-500/50 focus:border-transparent transition-all"
+                  placeholder="••••••••"
+                />
+              </div>
+            </div>
+
+            <Button type="submit" fullWidth size="lg" className="mt-8">
               登录工作台
-            </button>
+            </Button>
           </form>
 
-          <div style={{ marginTop: "14px", display: "flex", gap: "10px", flexWrap: "wrap" }}>
-            <Link href="/register">注册新账号</Link>
-            <a href="#sales-tip">联系客服购买额度</a>
+          <div className="mt-8 text-center text-sm text-brand-700">
+            还没有账号？{" "}
+            <Link href="/register" className="text-gold-400 hover:text-gold-300 font-medium inline-flex items-center gap-1">
+              立即注册 <ArrowRight className="w-3 h-3" />
+            </Link>
           </div>
-        </section>
+        </div>
 
-        <aside id="sales-tip">
-          <ContactSalesCard
-            title="没有额度？先联系销售"
-            description="注册后账号长期有效。需要使用时，输入一次性激活码即可到账积分。"
-          />
-        </aside>
+        <div className="mt-8 text-center">
+          <a href="/#contact-sales" className="text-xs text-brand-700 hover:text-cream-50 transition-colors">
+            需要人工客服协助？联系销售团队
+          </a>
+        </div>
       </div>
-    </main>
+    </div>
   );
 }

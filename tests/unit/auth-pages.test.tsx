@@ -6,24 +6,18 @@ import RegisterPage from "../../app/register/page";
 
 describe("auth pages", () => {
   it("renders the branded login page", async () => {
-    const html = renderToStaticMarkup(
-      await LoginPage({
-        searchParams: Promise.resolve({
-          redirect: "/workspace"
-        })
-      })
-    );
+    const html = renderToStaticMarkup(createElement(LoginPage));
 
-    expect(html).toContain("拼代代PDD");
-    expect(html).toContain("登录后可继续创建和交付任务");
-    expect(html).toContain("注册新账号");
+    expect(html).toContain("欢迎回来");
+    expect(html).toContain("登录拼代代");
+    expect(html).toContain("立即注册");
   });
 
   it("renders the branded register page", () => {
     const html = renderToStaticMarkup(createElement(RegisterPage));
 
-    expect(html).toContain("注册拼代代PDD");
-    expect(html).toContain("注册后可长期使用账号");
+    expect(html).toContain("注册拼代代");
     expect(html).toContain("额度激活码");
+    expect(html).toContain("注册并进入工作台");
   });
 });
