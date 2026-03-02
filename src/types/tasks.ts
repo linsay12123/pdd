@@ -22,3 +22,14 @@ export type TaskSummary = {
   targetWordCount: number;
   citationStyle: string;
 };
+
+export type TaskOutputKind =
+  | "final_docx"
+  | "reference_report_pdf"
+  | "humanized_docx";
+
+export type TaskOutputRecord = {
+  taskId: string;
+  outputKind: TaskOutputKind;
+  storagePath: string;
+};
