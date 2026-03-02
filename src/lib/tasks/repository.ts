@@ -1,4 +1,9 @@
-import type { TaskOutputRecord, TaskStatus, TaskSummary } from "@/src/types/tasks";
+import type {
+  TaskOutputRecord,
+  TaskOutputRecordInput,
+  TaskStatus,
+  TaskSummary
+} from "@/src/types/tasks";
 
 const taskStore = new Map<string, TaskSummary>();
 const taskOutputStore = new Map<string, TaskOutputRecord[]>();
@@ -28,16 +33,62 @@ export function updateTaskStatus(taskId: string, status: TaskStatus) {
   return nextTask;
 }
 
-export function saveTaskOutputRecord(record: TaskOutputRecord) {
+export function saveTaskOutputRecord(record: TaskOutputRecordInput) {
   const existing = taskOutputStore.get(record.taskId) ?? [];
-  const nextOutputs = [...existing, record];
+  const normalizedRecord: TaskOutputRecord = {
+    id: record.id || `out_${record.taskId}_${existing.length + 1}`,
+    createdAt: record.createdAt || new Date().toISOString(),
+    expiresAt:
+      record.expiresAt ||
+      new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toISOString(),
+    expired: record.expired ?? false,
+    ...record
+  };
+  const nextOutputs = [...existing, normalizedRecord];
 
   taskOutputStore.set(record.taskId, nextOutputs);
-  return record;
+  return normalizedRecord;
 }
 
 export function getTaskOutputs(taskId: string) {
   return taskOutputStore.get(taskId) ?? [];
+}
+
+export function getTaskOutput(taskId: string, outputId: string) {
+  return getTaskOutputs(taskId).find((output) => output.id === outputId) ?? null;
+}
+
+export function expireTaskOutputs({
+  asOf = new Date().toISOString()
+}: {
+  asOf?: string;
+}) {
+  const expiredOutputIds: string[] = [];
+
+  for (const [taskId, outputs] of taskOutputStore.entries()) {
+    const nextOutputs = outputs.map((output) => {
+      if (output.expired) {
+        return output;
+      }
+
+      if (output.expiresAt > asOf) {
+        return output;
+      }
+
+      expiredOutputIds.push(output.id);
+      return {
+        ...output,
+        expired: true
+      };
+    });
+
+    taskOutputStore.set(taskId, nextOutputs);
+  }
+
+  return {
+    expiredOutputIds,
+    taskHistoryStillVisible: true
+  };
 }
 
 export function resetTaskOutputStore() {

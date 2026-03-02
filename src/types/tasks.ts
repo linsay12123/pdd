@@ -29,7 +29,17 @@ export type TaskOutputKind =
   | "humanized_docx";
 
 export type TaskOutputRecord = {
+  id: string;
   taskId: string;
   outputKind: TaskOutputKind;
   storagePath: string;
+  createdAt: string;
+  expiresAt: string;
+  expired: boolean;
 };
+
+export type TaskOutputRecordInput = Omit<
+  TaskOutputRecord,
+  "id" | "createdAt" | "expiresAt" | "expired"
+> &
+  Partial<Pick<TaskOutputRecord, "id" | "createdAt" | "expiresAt" | "expired">>;
