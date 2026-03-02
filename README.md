@@ -71,5 +71,6 @@ corepack pnpm test:e2e
 ## 相关手册
 
 - 上线检查：`docs/runbooks/launch-checklist.md`
+- 支付账号开通：`docs/runbooks/payment-account-onboarding.md`
 - 支付异常处理：`docs/runbooks/payment-recovery.md`
 - 任务失败处理：`docs/runbooks/task-failure-recovery.md`
