@@ -113,3 +113,15 @@ export function completePaidOrder(input: {
 export function getPaymentLedgerEntries(userId: string) {
   return paymentLedgerStore.get(userId) ?? [];
 }
+
+export function appendPaymentLedgerEntry(
+  userId: string,
+  entry: ReturnType<typeof createLedgerEntry>
+) {
+  paymentLedgerStore.set(userId, [
+    ...(paymentLedgerStore.get(userId) ?? []),
+    entry
+  ]);
+
+  return entry;
+}

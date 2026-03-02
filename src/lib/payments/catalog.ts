@@ -64,3 +64,7 @@ export const subscriptionPackages: SubscriptionPackage[] = [
 export function getRechargePackageById(packageId: string) {
   return rechargePackages.find((pkg) => pkg.id === packageId) ?? null;
 }
+
+export function getSubscriptionPackageById(packageId: string) {
+  return subscriptionPackages.find((pkg) => pkg.id === packageId) ?? null;
+}

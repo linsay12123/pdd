@@ -4,9 +4,13 @@ type StripeWebhookObject = {
   id?: string;
   metadata?: {
     order_id?: string;
+    user_id?: string;
+    plan_id?: string;
   };
   payment_status?: string;
   subscription?: string;
+  status?: string;
+  current_period_end?: number;
 };
 
 export type StripeWebhookEvent = {
