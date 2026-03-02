@@ -14,7 +14,7 @@ describe("DeliverablesPanel humanize state", () => {
     expect(html).toContain("最终版文章（Word）");
     expect(html).toContain("核验报告（PDF）");
     expect(html).toContain("自动降AI");
-    expect(html).not.toContain("人工降ai 请联系客服");
+    expect(html).not.toContain("人工降AI 请联系客服");
   });
 
   it("shows the manual service card only after the humanized file exists", () => {
@@ -27,7 +27,7 @@ describe("DeliverablesPanel humanize state", () => {
     );
 
     expect(html).toContain("降AI后版本（Word）");
-    expect(html).toContain("人工降ai 请联系客服");
-    expect(html).toContain("/images/wechat-contact-qr.png");
+    expect(html).toContain("人工降AI 请联系客服");
+    expect(html).toContain("/qrcode.jpg");
   });
 });

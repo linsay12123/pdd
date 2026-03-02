@@ -4,8 +4,8 @@ type ManualHumanizeCardProps = {
 };
 
 export function ManualHumanizeCard({
-  imageSrc = "/images/wechat-contact-qr.png",
-  contactText = "人工降ai 请联系客服"
+  imageSrc = "/qrcode.jpg",
+  contactText = "人工降AI 请联系客服"
 }: ManualHumanizeCardProps) {
   return (
     <aside
