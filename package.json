@@ -11,6 +11,8 @@
     "test:e2e": "playwright test"
   },
   "dependencies": {
+    "@supabase/ssr": "^0.8.0",
+    "@supabase/supabase-js": "^2.98.0",
     "next": "latest",
     "react": "latest",
     "react-dom": "latest"
@@ -21,8 +23,14 @@
     "@types/react": "latest",
     "@types/react-dom": "latest",
     "postcss": "latest",
+    "supabase": "^2.76.15",
     "tailwindcss": "latest",
     "typescript": "latest",
     "vitest": "latest"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "supabase"
+    ]
   }
 }
