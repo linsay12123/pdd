@@ -48,6 +48,12 @@ corepack pnpm exec supabase db push --db-url "$DB_URL" --include-all
 
 如果显示 `Finished supabase db push.`，说明推送成功。
 
+这一步会把最新的数据库迁移一起推上去，其中包括：
+
+- 激活码相关表
+- 订阅表（保留以后扩展）
+- 新用户注册后自动创建 `profiles` 和 `quota_wallets` 的触发器
+
 ## 第 4 步：验证数据库是否就绪
 
 继续运行：
