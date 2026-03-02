@@ -5,6 +5,9 @@ export const defaultOpenAIModel = "gpt-5.2";
 type OpenAITextResponseRequest = {
   input: string;
   model?: string;
+  reasoningEffort?: "low" | "medium" | "high";
+  apiKey?: string;
+  fetchImpl?: typeof fetch;
 };
 
 type OpenAITextResponse = {
@@ -13,21 +16,31 @@ type OpenAITextResponse = {
 
 export async function requestOpenAITextResponse({
   input,
-  model = defaultOpenAIModel
+  model = defaultOpenAIModel,
+  reasoningEffort,
+  apiKey = env.OPENAI_API_KEY,
+  fetchImpl = fetch
 }: OpenAITextResponseRequest): Promise<OpenAITextResponse> {
-  if (!env.OPENAI_API_KEY) {
+  if (!apiKey) {
     throw new Error("OPENAI_API_KEY is not configured");
   }
 
-  const response = await fetch("https://api.openai.com/v1/responses", {
+  const response = await fetchImpl("https://api.openai.com/v1/responses", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      Authorization: `Bearer ${env.OPENAI_API_KEY}`
+      Authorization: `Bearer ${apiKey}`
     },
     body: JSON.stringify({
       model,
-      input
+      input,
+      ...(reasoningEffort
+        ? {
+            reasoning: {
+              effort: reasoningEffort
+            }
+          }
+        : {})
     })
   });
 

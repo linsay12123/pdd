@@ -22,6 +22,7 @@ export type TaskSummary = {
   status: TaskStatus;
   targetWordCount: number;
   citationStyle: string;
+  specialRequirements?: string;
 };
 
 export type TaskOutputKind =

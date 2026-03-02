@@ -15,6 +15,10 @@ export function saveTaskSummary(task: TaskSummary) {
   return task;
 }
 
+export function resetTaskStore() {
+  taskStore.clear();
+}
+
 export function getTaskSummary(taskId: string) {
   return taskStore.get(taskId) ?? null;
 }
