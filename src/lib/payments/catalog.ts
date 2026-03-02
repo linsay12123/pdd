@@ -9,6 +9,9 @@ export type RechargePackage = {
 export const supportedCryptoAssets = ["USDC", "USDT"] as const;
 export const supportedCryptoNetworks = ["base", "ethereum", "solana"] as const;
 
+export type SupportedCryptoAsset = (typeof supportedCryptoAssets)[number];
+export type SupportedCryptoNetwork = (typeof supportedCryptoNetworks)[number];
+
 export type SubscriptionPackage = {
   id: string;
   title: string;

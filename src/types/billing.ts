@@ -34,7 +34,7 @@ export type QuotaLedgerEntry = {
 
 export type PaymentProvider =
   | "stripe"
-  | "coinbase"
+  | "crypto"
   | "alipay"
   | "wechat";
 

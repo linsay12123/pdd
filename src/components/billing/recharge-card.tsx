@@ -56,6 +56,9 @@ export function RechargeCard({
                 加密货币支持：{supportedCryptoAssets.join(" / ")}，链路支持：
                 {supportedCryptoNetworks.join(" / ")}
               </p>
+              <p style={{ marginTop: 0, marginBottom: "10px", color: "#5a4d34" }}>
+                稳定币付款后需要人工确认到账，再手动给你的账号充值。
+              </p>
               <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
                 <button type="button">Stripe</button>
                 <button type="button">USDT / USDC（多链）</button>

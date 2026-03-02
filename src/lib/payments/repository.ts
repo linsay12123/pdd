@@ -52,6 +52,10 @@ export function getPaymentOrder(orderId: string) {
   return orderStore.get(orderId) ?? null;
 }
 
+export function confirmPaymentOrderProvider(orderId: string) {
+  return getPaymentOrder(orderId)?.provider ?? null;
+}
+
 export function completePaidOrder(input: {
   orderId: string;
   providerPaymentId: string;

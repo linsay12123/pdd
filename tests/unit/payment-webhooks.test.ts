@@ -1,16 +1,17 @@
 import { describe, expect, it } from "vitest";
 import {
-  buildCoinbaseChargePayload,
-  completeCoinbaseChargeFromEvent
-} from "../../src/lib/payments/coinbase-charge";
-import {
   completePaidOrder,
+  confirmPaymentOrderProvider,
   createPaymentOrder,
   getPaymentLedgerEntries,
   getUserWallet,
   resetPaymentState,
   seedUserWallet
 } from "../../src/lib/payments/repository";
+import {
+  confirmManualCryptoPayment,
+  createManualCryptoOrder
+} from "../../src/lib/payments/manual-crypto";
 import {
   buildStripeSignatureHeader,
   parseStripeWebhookEvent
@@ -88,54 +89,38 @@ describe("payment webhooks", () => {
     ]);
   });
 
-  it("builds the crypto charge as USDT and USDC with multiple chain choices", () => {
-    const payload = buildCoinbaseChargePayload({
-      orderId: "order-2",
-      packageName: "进阶包",
-      amountUsd: 49,
-      successUrl: "https://example.com/success",
-      cancelUrl: "https://example.com/cancel"
+  it("builds a manual stablecoin order with USDT and USDC on multiple chains", () => {
+    const order = createManualCryptoOrder({
+      userId: "user-2",
+      packageId: "recharge-growth"
     });
 
-    expect(payload.pricing_type).toBe("fixed_price");
-    expect(payload.local_price).toEqual({
-      amount: "49.00",
-      currency: "USD"
-    });
-    expect(payload.metadata.accepted_assets).toEqual(["USDC", "USDT"]);
-    expect(payload.metadata.accepted_networks).toEqual([
+    expect(order.amountUsd).toBe(49);
+    expect(order.acceptedAssets).toEqual(["USDC", "USDT"]);
+    expect(order.acceptedNetworks).toEqual([
       "base",
       "ethereum",
       "solana"
     ]);
+    expect(order.addresses).toHaveLength(6);
   });
 
-  it("settles the crypto order when the coinbase event is confirmed", () => {
+  it("settles the manual crypto order only after an operator confirms payment", () => {
     resetPaymentState();
     seedUserWallet("user-2", {
       rechargeQuota: 0,
       subscriptionQuota: 0,
       frozenQuota: 0
     });
-    createPaymentOrder({
-      id: "order-2",
+    const order = createManualCryptoOrder({
       userId: "user-2",
-      provider: "coinbase",
-      amountUsd: 49,
-      quotaAmount: 60,
-      kind: "recharge"
+      packageId: "recharge-growth"
     });
+    expect(confirmPaymentOrderProvider(order.orderId)).toBe("crypto");
 
-    const result = completeCoinbaseChargeFromEvent({
-      event: {
-        type: "charge:confirmed",
-        data: {
-          id: "charge_123",
-          metadata: {
-            order_id: "order-2"
-          }
-        }
-      }
+    const result = confirmManualCryptoPayment({
+      orderId: order.orderId,
+      transferReference: "0xabc123"
     });
 
     expect(result.applied).toBe(true);
