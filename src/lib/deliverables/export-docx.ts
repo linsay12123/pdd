@@ -2,6 +2,7 @@ import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { spawn } from "node:child_process";
 import { saveTaskOutputRecord } from "@/src/lib/tasks/repository";
+import type { TaskOutputKind } from "@/src/types/tasks";
 
 export type DocxSection = {
   heading: string;
@@ -14,10 +15,15 @@ export type DocxExportInput = {
   sections: DocxSection[];
   references: string[];
   citationStyle: string;
+  variant?: "final" | "humanized";
+  outputKind?: TaskOutputKind;
 };
 
-export function resolveDocxOutputPath(taskId: string) {
-  return path.join(process.cwd(), "output", "doc", `${taskId}-final.docx`);
+export function resolveDocxOutputPath(
+  taskId: string,
+  variant: "final" | "humanized" = "final"
+) {
+  return path.join(process.cwd(), "output", "doc", `${taskId}-${variant}.docx`);
 }
 
 export function prepareDocxExportPayload(input: DocxExportInput) {
@@ -33,7 +39,8 @@ export function prepareDocxExportPayload(input: DocxExportInput) {
 
 export async function exportDocx(input: DocxExportInput) {
   const payload = prepareDocxExportPayload(input);
-  const outputPath = resolveDocxOutputPath(input.taskId);
+  const variant = input.variant ?? "final";
+  const outputPath = resolveDocxOutputPath(input.taskId, variant);
   const tempDir = path.join(process.cwd(), "tmp", "docs");
   const payloadPath = path.join(tempDir, `${input.taskId}-docx-payload.json`);
 
@@ -48,7 +55,8 @@ export async function exportDocx(input: DocxExportInput) {
 
   saveTaskOutputRecord({
     taskId: input.taskId,
-    outputKind: "final_docx",
+    outputKind:
+      input.outputKind ?? (variant === "humanized" ? "humanized_docx" : "final_docx"),
     storagePath: outputPath
   });
 
