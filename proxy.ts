@@ -15,6 +15,10 @@ export function isProtectedPath(pathname: string) {
   );
 }
 
+export function isAdminPath(pathname: string) {
+  return pathname === "/admin" || pathname.startsWith("/admin/");
+}
+
 export function hasSupabaseSessionCookie(request: NextRequest) {
   return request.cookies
     .getAll()
@@ -24,12 +28,20 @@ export function hasSupabaseSessionCookie(request: NextRequest) {
     );
 }
 
+export function hasAdminRoleCookie(request: NextRequest) {
+  return request.cookies.get("aw-role")?.value === "admin";
+}
+
 export function proxy(request: NextRequest) {
   if (!isProtectedPath(request.nextUrl.pathname)) {
     return NextResponse.next();
   }
 
   if (hasSupabaseSessionCookie(request)) {
+    if (isAdminPath(request.nextUrl.pathname) && !hasAdminRoleCookie(request)) {
+      return NextResponse.redirect(new URL("/workspace", request.url));
+    }
+
     return NextResponse.next();
   }
 
