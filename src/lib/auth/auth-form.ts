@@ -1,0 +1,59 @@
+export function normalizeRedirectTarget(input?: string | null) {
+  const value = input?.trim();
+
+  if (!value || !value.startsWith("/") || value.startsWith("//")) {
+    return "/workspace";
+  }
+
+  return value;
+}
+
+export function validateRegisterInput(input: {
+  displayName: string;
+  email: string;
+  password: string;
+  confirmPassword: string;
+}) {
+  if (!input.displayName.trim()) {
+    return "请输入用户名";
+  }
+
+  if (!input.email.trim()) {
+    return "请输入邮箱地址";
+  }
+
+  if (input.password.length < 8) {
+    return "密码至少需要 8 位";
+  }
+
+  if (input.password !== input.confirmPassword) {
+    return "两次输入的密码不一致";
+  }
+
+  return null;
+}
+
+export function getAuthErrorMessage(
+  error: { message?: string | null } | null | undefined,
+  action: "login" | "register"
+) {
+  const message = error?.message?.trim().toLowerCase() ?? "";
+
+  if (message.includes("invalid login credentials")) {
+    return "邮箱或密码不正确";
+  }
+
+  if (message.includes("email not confirmed")) {
+    return "这个邮箱还没有完成验证";
+  }
+
+  if (message.includes("user already registered")) {
+    return "这个邮箱已经注册过了，请直接登录";
+  }
+
+  if (message.includes("password should be at least")) {
+    return "密码至少需要 8 位";
+  }
+
+  return action === "login" ? "登录失败，请稍后再试" : "注册失败，请稍后再试";
+}

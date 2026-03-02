@@ -6,7 +6,8 @@ import RegisterPage from "../../app/register/page";
 
 describe("auth pages", () => {
   it("renders the branded login page", async () => {
-    const html = renderToStaticMarkup(createElement(LoginPage));
+    const page = await LoginPage({});
+    const html = renderToStaticMarkup(page);
 
     expect(html).toContain("欢迎回来");
     expect(html).toContain("登录拼代代");
