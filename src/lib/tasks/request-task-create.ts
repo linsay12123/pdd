@@ -1,4 +1,4 @@
-type TaskCreatePayload = {
+export type TaskCreatePayload = {
   task: {
     id: string;
     status: string;

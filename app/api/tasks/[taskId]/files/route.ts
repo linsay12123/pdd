@@ -87,9 +87,11 @@ export async function handleTaskFileUploadRequest(
         task: toSessionTaskPayload(persistedResult.task),
         files: persistedResult.files,
         classification,
+        ruleCard: persistedResult.ruleCard,
+        outline: persistedResult.outline,
         message: classification.needsUserConfirmation
           ? "系统发现多个文件都像任务书，请先确认主任务文件。"
-          : "文件已上传，系统已识别主任务文件并进入下一步。"
+          : "文件已上传，系统已识别主任务文件并生成第一版大纲。"
       },
       { status: 201 }
     );

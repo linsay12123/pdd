@@ -50,8 +50,10 @@ export async function handleConfirmPrimaryFileRequest(
       ok: true,
       task: toSessionTaskPayload(result.task),
       files: result.files,
+      ruleCard: result.ruleCard,
+      outline: result.outline,
       primaryRequirementFileId: fileId,
-      message: "主任务文件已确认，系统开始进入下一步。"
+      message: "主任务文件已确认，系统已生成第一版大纲。"
     });
   } catch (error) {
     if (error instanceof Error && error.message === "AUTH_REQUIRED") {

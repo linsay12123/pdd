@@ -3,6 +3,7 @@ import type { FileClassificationResult } from "@/src/lib/ai/services/classify-fi
 import { shouldUseSupabasePersistence } from "@/src/lib/persistence/runtime-mode";
 import { createTaskStoragePath } from "@/src/lib/storage/upload";
 import { createSupabaseAdminClient } from "@/src/lib/supabase/admin";
+import { buildTaskOutlineBundle, type TaskOutlineBundle } from "@/src/lib/tasks/build-task-outline";
 import {
   getTaskSummary,
   listTaskFiles,
@@ -37,6 +38,8 @@ type ApplyFileClassificationInput = {
 type PersistedTaskFilesResult = {
   task: TaskSummary;
   files: TaskFileRecord[];
+  ruleCard: TaskOutlineBundle["ruleCard"] | null;
+  outline: TaskOutlineBundle["outline"] | null;
 };
 
 export async function getOwnedTaskSummary(taskId: string, userId: string) {
@@ -188,9 +191,35 @@ async function applyFileClassificationLocally({
     throw new Error("TASK_NOT_FOUND");
   }
 
-  return {
+  if (!classification.primaryRequirementFileId) {
+    return {
+      task: nextTask,
+      files: nextFiles,
+      ruleCard: null,
+      outline: null
+    };
+  }
+
+  const outlineBundle = await buildTaskOutlineBundle({
     task: nextTask,
-    files: nextFiles
+    files: nextFiles,
+    primaryRequirementFileId: classification.primaryRequirementFileId
+  });
+  const outlinedTask = patchTaskSummary(taskId, {
+    status: "awaiting_outline_approval",
+    targetWordCount: outlineBundle.ruleCard.targetWordCount,
+    citationStyle: outlineBundle.ruleCard.citationStyle
+  });
+
+  if (!outlinedTask) {
+    throw new Error("TASK_NOT_FOUND");
+  }
+
+  return {
+    task: outlinedTask,
+    files: nextFiles,
+    ruleCard: outlineBundle.ruleCard,
+    outline: outlineBundle.outline
   };
 }
 
@@ -282,13 +311,56 @@ async function applyFileClassificationWithSupabase({
     throw new Error(`更新任务状态失败：${taskError.message}`);
   }
 
-  return {
+  if (!classification.primaryRequirementFileId) {
+    return {
+      task: {
+        ...ownedTask,
+        status: nextStatus,
+        primaryRequirementFileId: classification.primaryRequirementFileId
+      },
+      files: await listTaskFilesWithSupabase(taskId, userId),
+      ruleCard: null,
+      outline: null
+    };
+  }
+
+  const files = await listTaskFilesWithSupabase(taskId, userId);
+  const outlineBundle = await buildTaskOutlineBundle({
     task: {
       ...ownedTask,
       status: nextStatus,
       primaryRequirementFileId: classification.primaryRequirementFileId
     },
-    files: await listTaskFilesWithSupabase(taskId, userId)
+    files,
+    primaryRequirementFileId: classification.primaryRequirementFileId
+  });
+  const { error: outlinedTaskError } = await client
+    .from("writing_tasks")
+    .update({
+      status: "awaiting_outline_approval",
+      target_word_count: outlineBundle.ruleCard.targetWordCount,
+      citation_style: outlineBundle.ruleCard.citationStyle,
+      topic: outlineBundle.ruleCard.topic,
+      requested_chapter_count: outlineBundle.ruleCard.chapterCountOverride
+    })
+    .eq("id", taskId)
+    .eq("user_id", userId);
+
+  if (outlinedTaskError) {
+    throw new Error(`更新写作规则失败：${outlinedTaskError.message}`);
+  }
+
+  return {
+    task: {
+      ...ownedTask,
+      status: "awaiting_outline_approval",
+      targetWordCount: outlineBundle.ruleCard.targetWordCount,
+      citationStyle: outlineBundle.ruleCard.citationStyle,
+      primaryRequirementFileId: classification.primaryRequirementFileId
+    },
+    files,
+    ruleCard: outlineBundle.ruleCard,
+    outline: outlineBundle.outline
   };
 }
 
@@ -328,9 +400,26 @@ async function confirmPrimaryTaskFileLocally({
     throw new Error("TASK_NOT_FOUND");
   }
 
-  return {
+  const outlineBundle = await buildTaskOutlineBundle({
     task: nextTask,
-    files: nextFiles
+    files: nextFiles,
+    primaryRequirementFileId: fileId
+  });
+  const outlinedTask = patchTaskSummary(taskId, {
+    status: "awaiting_outline_approval",
+    targetWordCount: outlineBundle.ruleCard.targetWordCount,
+    citationStyle: outlineBundle.ruleCard.citationStyle
+  });
+
+  if (!outlinedTask) {
+    throw new Error("TASK_NOT_FOUND");
+  }
+
+  return {
+    task: outlinedTask,
+    files: nextFiles,
+    ruleCard: outlineBundle.ruleCard,
+    outline: outlineBundle.outline
   };
 }
 
@@ -401,13 +490,43 @@ async function confirmPrimaryTaskFileWithSupabase({
     throw new Error(`更新任务状态失败：${taskError.message}`);
   }
 
-  return {
+  const files = await listTaskFilesWithSupabase(taskId, userId);
+  const outlineBundle = await buildTaskOutlineBundle({
     task: {
       ...ownedTask,
       status: "building_rule_card",
       primaryRequirementFileId: fileId
     },
-    files: await listTaskFilesWithSupabase(taskId, userId)
+    files,
+    primaryRequirementFileId: fileId
+  });
+  const { error: outlinedTaskError } = await client
+    .from("writing_tasks")
+    .update({
+      status: "awaiting_outline_approval",
+      target_word_count: outlineBundle.ruleCard.targetWordCount,
+      citation_style: outlineBundle.ruleCard.citationStyle,
+      topic: outlineBundle.ruleCard.topic,
+      requested_chapter_count: outlineBundle.ruleCard.chapterCountOverride
+    })
+    .eq("id", taskId)
+    .eq("user_id", userId);
+
+  if (outlinedTaskError) {
+    throw new Error(`更新写作规则失败：${outlinedTaskError.message}`);
+  }
+
+  return {
+    task: {
+      ...ownedTask,
+      status: "awaiting_outline_approval",
+      targetWordCount: outlineBundle.ruleCard.targetWordCount,
+      citationStyle: outlineBundle.ruleCard.citationStyle,
+      primaryRequirementFileId: fileId
+    },
+    files,
+    ruleCard: outlineBundle.ruleCard,
+    outline: outlineBundle.outline
   };
 }
 

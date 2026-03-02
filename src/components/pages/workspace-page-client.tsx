@@ -1,6 +1,12 @@
 "use client";
 
 import { Button } from "@/src/components/ui/Button";
+import { requestConfirmPrimaryFile } from "@/src/lib/tasks/request-confirm-primary-file";
+import {
+  requestTaskBootstrap,
+  type TaskBootstrapPayload
+} from "@/src/lib/tasks/request-task-bootstrap";
+import type { TaskWorkflowPayload } from "@/src/lib/tasks/request-task-file-upload";
 import {
   UploadCloud,
   FileText,
@@ -22,12 +28,26 @@ type WorkspacePageClientProps = {
   initialQuota: number;
 };
 
+type NoticeState = {
+  tone: "success" | "error" | "info";
+  text: string;
+};
+
+type WorkspaceTaskState = TaskWorkflowPayload & {
+  frozenQuota?: number;
+};
+
 export function WorkspacePageClient({ initialQuota }: WorkspacePageClientProps) {
   const [step, setStep] = useState(1);
   const [files, setFiles] = useState<File[]>([]);
   const [requirements, setRequirements] = useState("");
   const [outlineFeedback, setOutlineFeedback] = useState("");
   const [quota, setQuota] = useState(initialQuota);
+  const [notice, setNotice] = useState<NoticeState | null>(null);
+  const [activeTask, setActiveTask] = useState<WorkspaceTaskState | null>(null);
+  const [selectedPrimaryFileId, setSelectedPrimaryFileId] = useState("");
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isConfirmingPrimaryFile, setIsConfirmingPrimaryFile] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -57,6 +77,97 @@ export function WorkspacePageClient({ initialQuota }: WorkspacePageClientProps) 
       setFiles(Array.from(e.target.files));
     }
   };
+
+  const handleStartAnalysis = async () => {
+    if (files.length === 0) {
+      setNotice({
+        tone: "error",
+        text: "请先选择至少一个文件，再开始分析。"
+      });
+      return;
+    }
+
+    setIsSubmitting(true);
+    setNotice({
+      tone: "info",
+      text: "系统正在创建任务并读取文件内容，请稍等。"
+    });
+
+    try {
+      const result = await requestTaskBootstrap({
+        specialRequirements: requirements,
+        files
+      });
+
+      setActiveTask(result);
+      setSelectedPrimaryFileId(result.classification.primaryRequirementFileId ?? "");
+      setQuota((currentQuota) => Math.max(0, currentQuota - result.frozenQuota));
+      setNotice({
+        tone: result.classification.needsUserConfirmation ? "info" : "success",
+        text: result.message
+      });
+      setStep(2);
+    } catch (error) {
+      setNotice({
+        tone: "error",
+        text:
+          error instanceof Error ? error.message : "任务创建失败，请稍后再试。"
+      });
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleConfirmPrimary = async () => {
+    if (!activeTask) {
+      setNotice({
+        tone: "error",
+        text: "当前还没有可确认的任务，请先上传文件。"
+      });
+      return;
+    }
+
+    if (!selectedPrimaryFileId) {
+      setNotice({
+        tone: "error",
+        text: "请先选中一份主任务文件。"
+      });
+      return;
+    }
+
+    setIsConfirmingPrimaryFile(true);
+    setNotice({
+      tone: "info",
+      text: "系统正在确认主任务文件并生成第一版大纲。"
+    });
+
+    try {
+      const result = await requestConfirmPrimaryFile({
+        taskId: activeTask.task.id,
+        fileId: selectedPrimaryFileId
+      });
+
+      setActiveTask({
+        ...result,
+        frozenQuota: activeTask.frozenQuota
+      });
+      setSelectedPrimaryFileId(result.primaryRequirementFileId);
+      setNotice({
+        tone: "success",
+        text: result.message
+      });
+    } catch (error) {
+      setNotice({
+        tone: "error",
+        text:
+          error instanceof Error ? error.message : "主任务文件确认失败，请稍后再试。"
+      });
+    } finally {
+      setIsConfirmingPrimaryFile(false);
+    }
+  };
+
+  const outlineSections = activeTask?.outline?.sections ?? [];
 
   return (
     <div className="min-h-screen pt-24 pb-16 bg-brand-950">
@@ -149,6 +260,20 @@ export function WorkspacePageClient({ initialQuota }: WorkspacePageClientProps) 
                 <h2 className="text-2xl font-bold text-cream-50 mb-6">创建新任务</h2>
 
                 <div className="space-y-8">
+                  {notice && (
+                    <div
+                      className={`rounded-xl border px-4 py-3 text-sm ${
+                        notice.tone === "error"
+                          ? "border-red-500/30 bg-red-500/10 text-red-200"
+                          : notice.tone === "success"
+                            ? "border-green-500/30 bg-green-500/10 text-green-200"
+                            : "border-gold-500/30 bg-gold-500/10 text-gold-200"
+                      }`}
+                    >
+                      {notice.text}
+                    </div>
+                  )}
+
                   <div>
                     <label className="block text-sm font-medium text-cream-100 mb-3">
                       1. 上传参考材料与要求文档
@@ -195,8 +320,13 @@ export function WorkspacePageClient({ initialQuota }: WorkspacePageClientProps) 
                       </div>
                       <div className="text-xs text-brand-700 ml-6">生成失败全额返还积分</div>
                     </div>
-                    <Button size="lg" onClick={() => setStep(2)} className="gap-2">
-                      开始分析并生成大纲
+                    <Button
+                      size="lg"
+                      onClick={() => void handleStartAnalysis()}
+                      className="gap-2"
+                      disabled={isSubmitting}
+                    >
+                      {isSubmitting ? "系统分析中..." : "开始分析并生成大纲"}
                       <ArrowRight className="w-4 h-4" />
                     </Button>
                   </div>
@@ -206,6 +336,68 @@ export function WorkspacePageClient({ initialQuota }: WorkspacePageClientProps) 
 
             {step === 2 && (
               <div className="space-y-6">
+                {notice && (
+                  <div
+                    className={`rounded-xl border px-4 py-3 text-sm ${
+                      notice.tone === "error"
+                        ? "border-red-500/30 bg-red-500/10 text-red-200"
+                        : notice.tone === "success"
+                          ? "border-green-500/30 bg-green-500/10 text-green-200"
+                          : "border-gold-500/30 bg-gold-500/10 text-gold-200"
+                    }`}
+                  >
+                    {notice.text}
+                  </div>
+                )}
+
+                {activeTask?.classification.needsUserConfirmation ? (
+                  <div className="glass-panel p-6 rounded-2xl border border-gold-500/30 shadow-[0_0_15px_rgba(245,158,11,0.1)]">
+                    <div className="flex items-center justify-between mb-6 pb-4 border-b border-white/10">
+                      <h2 className="text-xl font-bold text-cream-50 flex items-center gap-2">
+                        <FileSearch className="w-5 h-5 text-gold-400" />
+                        请确认主任务文件
+                      </h2>
+                      <span className="px-3 py-1 bg-gold-500/20 text-gold-300 text-xs rounded-full border border-gold-500/30">需要你确认</span>
+                    </div>
+
+                    <div className="bg-brand-950 rounded-xl p-6 border border-white/5 space-y-4">
+                      <p className="text-sm text-brand-700">
+                        系统发现多份文件都像任务要求文档。为了避免选错，请你手动选一份主任务文件，系统再继续生成大纲。
+                      </p>
+
+                      <div className="space-y-3">
+                        {activeTask.files.map((file) => (
+                          <label
+                            key={file.id}
+                            className="flex cursor-pointer items-center gap-3 rounded-xl border border-white/5 bg-brand-900/50 px-4 py-3 text-sm text-cream-100"
+                          >
+                            <input
+                              type="radio"
+                              name="primary-file"
+                              value={file.id}
+                              checked={selectedPrimaryFileId === file.id}
+                              onChange={(event) => setSelectedPrimaryFileId(event.target.value)}
+                              className="h-4 w-4 accent-[#ef4444]"
+                            />
+                            <FileText className="h-4 w-4 text-gold-400" />
+                            <span className="flex-1 truncate">{file.originalFilename}</span>
+                          </label>
+                        ))}
+                      </div>
+
+                      <div className="flex items-center justify-end pt-4">
+                        <Button
+                          onClick={() => void handleConfirmPrimary()}
+                          className="gap-2"
+                          disabled={isConfirmingPrimaryFile}
+                        >
+                          {isConfirmingPrimaryFile ? "正在确认..." : "确认主任务文件"}
+                          <CheckCircle2 className="w-4 h-4" />
+                        </Button>
+                      </div>
+                    </div>
+                  </div>
+                ) : (
                 <div className="glass-panel p-6 rounded-2xl border border-gold-500/30 shadow-[0_0_15px_rgba(245,158,11,0.1)]">
                   <div className="flex items-center justify-between mb-6 pb-4 border-b border-white/10">
                     <h2 className="text-xl font-bold text-cream-50 flex items-center gap-2">
@@ -219,36 +411,41 @@ export function WorkspacePageClient({ initialQuota }: WorkspacePageClientProps) 
                     <div className="grid grid-cols-2 gap-4 mb-6 pb-6 border-b border-white/5 text-sm">
                       <div>
                         <span className="text-brand-700 block mb-1">提取标题</span>
-                        <span className="text-cream-50 font-medium">The Impact of AI on Modern Education</span>
+                        <span className="text-cream-50 font-medium">
+                          {activeTask?.outline?.articleTitle ?? "General Academic Essay: A Structured Analysis"}
+                        </span>
                       </div>
                       <div>
                         <span className="text-brand-700 block mb-1">目标字数</span>
-                        <span className="text-cream-50 font-mono">2,500 Words</span>
+                        <span className="text-cream-50 font-mono">
+                          {(activeTask?.task.targetWordCount ?? 2000).toLocaleString("en-US")} Words
+                        </span>
                       </div>
                       <div>
                         <span className="text-brand-700 block mb-1">引用格式</span>
-                        <span className="text-cream-50">APA 7th Edition</span>
+                        <span className="text-cream-50">
+                          {activeTask?.task.citationStyle ?? "APA 7"}
+                        </span>
                       </div>
                       <div>
                         <span className="text-brand-700 block mb-1">参考文件数</span>
-                        <span className="text-cream-50 font-mono">3 Files</span>
+                        <span className="text-cream-50 font-mono">
+                          {activeTask?.files.length ?? files.length} Files
+                        </span>
                       </div>
                     </div>
 
                     <div className="space-y-6">
                       <h3 className="text-sm font-bold text-gold-400 uppercase tracking-wider">Outline Structure</h3>
 
-                      {[
-                        { title: "I. Introduction", items: ["Hook: The rapid integration of AI in classrooms.", "Background: Traditional vs. AI-assisted learning.", "Thesis Statement: AI enhances personalized learning but raises ethical concerns regarding academic integrity."] },
-                        { title: "II. Benefits of AI in Education", items: ["Personalized learning paths (Adaptive learning systems).", "Automated grading and administrative efficiency.", "24/7 tutoring and support for students."] },
-                        { title: "III. Challenges and Ethical Concerns", items: ["The digital divide and accessibility issues.", "Data privacy and security of student information.", "Academic integrity and the risk of plagiarism."] },
-                        { title: "IV. Case Studies", items: ["Implementation of AI in University A.", "Outcomes and feedback from educators and students."] },
-                        { title: "V. Conclusion", items: ["Summary of main points.", "Future outlook on AI in education.", "Final thought: Balancing innovation with ethical responsibility."] }
-                      ].map((section, i) => (
+                      {outlineSections.map((section, i) => (
                         <div key={i}>
-                          <h4 className="text-cream-50 font-medium mb-2">{section.title}</h4>
+                          <h4 className="text-cream-50 font-medium mb-2">
+                            {`${i + 1}. ${section.title}`}
+                          </h4>
+                          <p className="mb-2 text-sm text-brand-700">{section.summary}</p>
                           <ul className="list-disc list-inside text-sm text-brand-700 space-y-1 pl-2">
-                            {section.items.map((item, j) => (
+                            {section.bulletPoints.map((item, j) => (
                               <li key={j}>{item}</li>
                             ))}
                           </ul>
@@ -278,6 +475,7 @@ export function WorkspacePageClient({ initialQuota }: WorkspacePageClientProps) 
                     </div>
                   </div>
                 </div>
+                )}
               </div>
             )}
 

@@ -71,7 +71,13 @@ describe("task file routes", () => {
     expect(response.status).toBe(201);
     expect(payload.classification.primaryRequirementFileId).toBeTruthy();
     expect(payload.classification.needsUserConfirmation).toBe(false);
-    expect(payload.task.status).toBe("building_rule_card");
+    expect(payload.task.status).toBe("awaiting_outline_approval");
+    expect(payload.task.targetWordCount).toBe(1800);
+    expect(payload.task.citationStyle).toBe("Harvard");
+    expect(payload.ruleCard.targetWordCount).toBe(1800);
+    expect(payload.ruleCard.citationStyle).toBe("Harvard");
+    expect(payload.outline.articleTitle).toContain("General Academic Essay");
+    expect(payload.outline.sections).toHaveLength(4);
 
     const files = listTaskFiles("task-1");
     expect(files).toHaveLength(2);
@@ -80,6 +86,7 @@ describe("task file routes", () => {
     expect(getTaskSummary("task-1")?.primaryRequirementFileId).toBe(
       payload.classification.primaryRequirementFileId
     );
+    expect(getTaskSummary("task-1")?.targetWordCount).toBe(1800);
   });
 
   it("asks the user to confirm when two files both look like task briefs", async () => {
@@ -132,6 +139,8 @@ describe("task file routes", () => {
     expect(payload.classification.primaryRequirementFileId).toBe(null);
     expect(payload.classification.needsUserConfirmation).toBe(true);
     expect(payload.task.status).toBe("awaiting_primary_file_confirmation");
+    expect(payload.ruleCard).toBe(null);
+    expect(payload.outline).toBe(null);
   });
 
   it("lets the signed-in user confirm the primary file and move the task forward", async () => {
@@ -205,12 +214,16 @@ describe("task file routes", () => {
     const confirmPayload = await confirmResponse.json();
 
     expect(confirmResponse.status).toBe(200);
-    expect(confirmPayload.task.status).toBe("building_rule_card");
+    expect(confirmPayload.task.status).toBe("awaiting_outline_approval");
     expect(confirmPayload.primaryRequirementFileId).toBe(selectedFileId);
+    expect(confirmPayload.ruleCard.targetWordCount).toBe(2000);
+    expect(confirmPayload.ruleCard.citationStyle).toBe("Harvard");
+    expect(confirmPayload.outline.sections).toHaveLength(4);
 
     const files = listTaskFiles("task-3");
     expect(files.find((file) => file.id === selectedFileId)?.isPrimary).toBe(true);
     expect(files.find((file) => file.id === selectedFileId)?.role).toBe("requirement");
     expect(getTaskSummary("task-3")?.primaryRequirementFileId).toBe(selectedFileId);
+    expect(getTaskSummary("task-3")?.citationStyle).toBe("Harvard");
   });
 });
