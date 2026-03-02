@@ -66,39 +66,19 @@ export function RedeemCodeForm({ userId, onRedeemSuccess }: RedeemCodeFormProps)
         placeholder="请输入你的额度激活码"
         value={code}
         onChange={(event) => setCode(event.target.value)}
-        style={{
-          width: "100%",
-          borderRadius: "0.9rem",
-          border: "1px solid rgba(117, 96, 57, 0.18)",
-          background: "#fffdf8",
-          padding: "0.9rem 1rem",
-          fontSize: "0.95rem"
-        }}
+        className="pdd-input pdd-mono"
       />
       <button
         type="submit"
         disabled={submitting}
-        style={{
-          border: 0,
-          borderRadius: "999px",
-          padding: "0.95rem 1.2rem",
-          background: "#201b13",
-          color: "#fff7e5",
-          fontWeight: 700,
-          cursor: "pointer",
-          opacity: submitting ? 0.8 : 1
-        }}
+        className="pdd-btn pdd-btn-primary"
+        style={{ opacity: submitting ? 0.8 : 1 }}
       >
         {submitting ? "兑换中..." : "立即兑换激活码"}
       </button>
       <div
-        style={{
-          padding: "0.8rem 0.9rem",
-          borderRadius: "0.8rem",
-          background: "#fffaf2",
-          border: "1px solid rgba(117, 96, 57, 0.1)",
-          lineHeight: 1.6
-        }}
+        className="pdd-card-plain"
+        style={{ padding: "10px 12px", lineHeight: 1.6 }}
       >
         <strong>兑换状态</strong>
         <div>{statusText}</div>

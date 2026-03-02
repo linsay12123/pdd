@@ -15,52 +15,32 @@ const navigationItems = [
 
 export default function AppLayout({ children }: AppLayoutProps) {
   return (
-    <div
-      style={{
-        minHeight: "100vh",
-        display: "grid",
-        gridTemplateColumns: "260px 1fr",
-        background:
-          "radial-gradient(circle at top left, #fff7de 0%, #f4efe6 45%, #efe8db 100%)"
-      }}
-    >
-      <aside
-        style={{
-          padding: "24px",
-          borderRight: "1px solid #d7cfbe",
-          background: "rgba(255, 250, 240, 0.88)"
-        }}
-      >
+    <div className="pdd-app-shell">
+      <aside className="pdd-app-aside">
         <BrandLogo />
-        <p style={{ marginTop: "14px", marginBottom: "24px", lineHeight: 1.7, color: "#5d523f" }}>
-          登录后，任务、积分、下载入口都集中在这个主工作区里。
+        <p className="pdd-sub" style={{ fontSize: "14px" }}>
+          在同一个工作区里完成上传、确认、生成、下载，不用来回跳页面。
         </p>
-        <nav style={{ display: "grid", gap: "12px" }}>
+        <nav>
           {navigationItems.map((item) => (
-            <Link key={item.href} href={item.href}>
+            <Link key={item.href} className="pdd-app-link" href={item.href}>
               {item.label}
             </Link>
           ))}
         </nav>
       </aside>
-      <div style={{ display: "grid", gridTemplateRows: "auto 1fr" }}>
-        <header
-          style={{
-            padding: "20px 24px",
-            borderBottom: "1px solid #d7cfbe",
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "center",
-            background: "rgba(255, 255, 255, 0.72)"
-          }}
-        >
-          <div>
+
+      <div className="pdd-app-main">
+        <header className="pdd-app-header">
+          <div className="pdd-list" style={{ gap: "2px" }}>
             <strong>当前积分</strong>
-            <div>账户积分 0 | 生成文章固定扣 500 | 自动降AI固定扣 500</div>
+            <span style={{ color: "#475569", fontSize: "14px" }}>
+              账户积分 12000 | 生成文章固定扣 500 | 自动降AI固定扣 500
+            </span>
           </div>
-          <div style={{ fontSize: "14px" }}>登录接通后这里显示用户信息</div>
+          <div style={{ fontSize: "14px", color: "#475569" }}>演示账号：demo-user</div>
         </header>
-        <main style={{ padding: "24px" }}>{children}</main>
+        <main className="pdd-app-content">{children}</main>
       </div>
     </div>
   );

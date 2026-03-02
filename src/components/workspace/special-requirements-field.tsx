@@ -1,28 +1,15 @@
 export function SpecialRequirementsField() {
   return (
-    <section
-      style={{
-        padding: "20px",
-        border: "1px solid #d7cfbe",
-        borderRadius: "16px",
-        background: "rgba(255, 255, 255, 0.82)"
-      }}
-    >
-      <h2 style={{ marginTop: 0 }}>特殊要求</h2>
-      <p style={{ marginTop: 0 }}>
-        这里给用户填写行业方向、课程重点、分析偏好等额外要求。
+    <section className="pdd-card" style={{ padding: "18px" }}>
+      <h2 style={{ marginTop: 0, marginBottom: "8px" }}>特殊要求</h2>
+      <p className="pdd-sub">
+        这里填写行业方向、课程重点、分析偏好。第一版大纲就会使用这些要求，不会拖到后面才生效。
       </p>
-      <div
-        style={{
-          minHeight: "96px",
-          borderRadius: "12px",
-          background: "#f6f1e8",
-          border: "1px solid #e0d5c2",
-          padding: "12px"
-        }}
-      >
-        输入框占位区
-      </div>
+      <textarea
+        className="pdd-textarea"
+        placeholder="例如：重点比较两种理论，引用近五年文献，突出批判性分析。"
+        style={{ marginTop: "12px" }}
+      />
     </section>
   );
 }

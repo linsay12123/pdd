@@ -11,18 +11,13 @@ const progressSteps = [
 
 export function TaskProgressPanel() {
   return (
-    <section
-      style={{
-        padding: "20px",
-        border: "1px solid #d7cfbe",
-        borderRadius: "16px",
-        background: "rgba(255, 255, 255, 0.82)"
-      }}
-    >
-      <h2 style={{ marginTop: 0 }}>当前进度</h2>
-      <ul style={{ margin: 0, paddingLeft: "20px", display: "grid", gap: "8px" }}>
-        {progressSteps.map((step) => (
-          <li key={step}>{step}</li>
+    <section className="pdd-card" style={{ padding: "18px" }}>
+      <h2 style={{ marginTop: 0, marginBottom: "8px" }}>当前进度</h2>
+      <ul style={{ margin: 0, paddingLeft: "18px", display: "grid", gap: "7px" }}>
+        {progressSteps.map((step, index) => (
+          <li key={step} style={{ color: index < 2 ? "#0f172a" : "#64748b" }}>
+            {step}
+          </li>
         ))}
       </ul>
     </section>

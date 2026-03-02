@@ -3,18 +3,12 @@ type BrandLogoProps = {
 };
 
 export function BrandLogo({ variant = "compact" }: BrandLogoProps) {
-  const imageSize = variant === "large" ? 56 : 40;
-  const titleSize = variant === "large" ? "1.25rem" : "1rem";
+  const imageSize = variant === "large" ? 56 : 42;
+  const titleSize = variant === "large" ? "1.25rem" : "1.02rem";
   const subtitleSize = variant === "large" ? "0.8rem" : "0.72rem";
 
   return (
-    <div
-      style={{
-        display: "inline-flex",
-        alignItems: "center",
-        gap: "0.75rem"
-      }}
-    >
+    <div style={{ display: "inline-flex", alignItems: "center", gap: "0.75rem" }}>
       <img
         src="/logo.jpg"
         alt="拼代代PDD logo"
@@ -22,7 +16,7 @@ export function BrandLogo({ variant = "compact" }: BrandLogoProps) {
         height={imageSize}
         style={{
           borderRadius: "0.9rem",
-          boxShadow: "0 10px 24px rgba(18, 24, 38, 0.14)",
+          boxShadow: "0 12px 22px rgba(15, 23, 42, 0.16)",
           objectFit: "cover"
         }}
       />
@@ -39,7 +33,7 @@ export function BrandLogo({ variant = "compact" }: BrandLogoProps) {
         <span
           style={{
             fontSize: subtitleSize,
-            color: "#5b5345"
+            color: "#64748b"
           }}
         >
           Pin Dai Dai PDD
