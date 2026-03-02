@@ -31,3 +31,24 @@ export type QuotaLedgerEntry = {
   taskId: string;
   note: string;
 };
+
+export type PaymentProvider =
+  | "stripe"
+  | "coinbase"
+  | "alipay"
+  | "wechat";
+
+export type PaymentOrderKind = "recharge" | "subscription";
+
+export type PaymentOrderStatus = "pending" | "paid";
+
+export type PaymentOrderRecord = {
+  id: string;
+  userId: string;
+  provider: PaymentProvider;
+  amountUsd: number;
+  quotaAmount: number;
+  kind: PaymentOrderKind;
+  status: PaymentOrderStatus;
+  providerPaymentId?: string;
+};
