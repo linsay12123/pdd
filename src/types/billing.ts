@@ -13,3 +13,21 @@ export type WalletSnapshot = {
   subscriptionQuota: number;
   frozenQuota: number;
 };
+
+export type TaskChargePath = "generation" | "humanize";
+
+export type FrozenQuotaReservation = {
+  taskId: string;
+  chargePath: TaskChargePath;
+  totalAmount: number;
+  fromSubscription: number;
+  fromRecharge: number;
+};
+
+export type QuotaLedgerEntry = {
+  ledgerKey: string;
+  kind: QuotaLedgerKind;
+  amount: number;
+  taskId: string;
+  note: string;
+};
