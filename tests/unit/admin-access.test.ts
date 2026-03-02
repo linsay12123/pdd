@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { hasAdminRoleCookie, isAdminPath } from "../../proxy";
+import { hasSupabaseSessionCookie, isAdminPath } from "../../proxy";
 
 describe("admin access", () => {
   it("recognizes admin routes", () => {
@@ -8,35 +8,28 @@ describe("admin access", () => {
     expect(isAdminPath("/workspace")).toBe(false);
   });
 
-  it("only treats the admin role cookie as operator access", () => {
-    const adminRequest = {
+  it("recognizes the signed supabase session cookie", () => {
+    const signedInRequest = {
       cookies: {
-        get(name: string) {
-          if (name === "aw-role") {
-            return {
-              value: "admin"
-            };
-          }
-
-          return undefined;
+        getAll() {
+          return [
+            {
+              name: "sb-test-auth-token",
+              value: "present"
+            }
+          ];
         }
       }
     };
-    const userRequest = {
+    const anonymousRequest = {
       cookies: {
-        get(name: string) {
-          if (name === "aw-role") {
-            return {
-              value: "user"
-            };
-          }
-
-          return undefined;
+        getAll() {
+          return [];
         }
       }
     };
 
-    expect(hasAdminRoleCookie(adminRequest as never)).toBe(true);
-    expect(hasAdminRoleCookie(userRequest as never)).toBe(false);
+    expect(hasSupabaseSessionCookie(signedInRequest as never)).toBe(true);
+    expect(hasSupabaseSessionCookie(anonymousRequest as never)).toBe(false);
   });
 });

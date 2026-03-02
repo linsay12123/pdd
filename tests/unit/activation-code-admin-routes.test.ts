@@ -1,8 +1,8 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { resetActivationCodeState } from "../../src/lib/activation-codes/repository";
 import { redeemActivationCode } from "../../src/lib/activation-codes/redeem-activation-code";
-import { GET as listActivationCodes } from "../../app/api/admin/activation-codes/list/route";
-import { POST as createActivationCodes } from "../../app/api/admin/activation-codes/create/route";
+import { handleListActivationCodesRequest } from "../../app/api/admin/activation-codes/list/route";
+import { handleCreateActivationCodesRequest as createActivationCodesRequest } from "../../app/api/admin/activation-codes/create/route";
 
 describe("activation code admin routes", () => {
   beforeEach(() => {
@@ -12,18 +12,22 @@ describe("activation code admin routes", () => {
   });
 
   it("rejects non-admin requests", async () => {
-    const response = await createActivationCodes(
-      new Request("http://localhost/api/admin/activation-codes/create", {
-        method: "POST",
-        body: JSON.stringify({
-          tier: 1000,
-          count: 1
-        }),
-        headers: {
-          "content-type": "application/json"
-        }
+    const response = await createActivationCodesRequest(new Request("http://localhost/api/admin/activation-codes/create", {
+      method: "POST",
+      body: JSON.stringify({
+        tier: 1000,
+        count: 1
+      }),
+      headers: {
+        "content-type": "application/json"
+      }
+    }), {
+      requireUser: async () => ({
+        id: "user-1",
+        email: "user@example.com",
+        role: "user"
       })
-    );
+    });
     const payload = await response.json();
 
     expect(response.status).toBe(403);
@@ -31,33 +35,37 @@ describe("activation code admin routes", () => {
   });
 
   it("creates and lists activation codes for admin requests", async () => {
-    const createResponse = await createActivationCodes(
-      new Request("http://localhost/api/admin/activation-codes/create", {
-        method: "POST",
-        body: JSON.stringify({
-          tier: 5000,
-          count: 2
-        }),
-        headers: {
-          "content-type": "application/json",
-          cookie: "aw-role=admin"
-        }
+    const createResponse = await createActivationCodesRequest(new Request("http://localhost/api/admin/activation-codes/create", {
+      method: "POST",
+      body: JSON.stringify({
+        tier: 5000,
+        count: 2
+      }),
+      headers: {
+        "content-type": "application/json"
+      }
+    }), {
+      requireUser: async () => ({
+        id: "admin-1",
+        email: "admin@example.com",
+        role: "admin"
       })
-    );
+    });
     const createPayload = await createResponse.json();
 
     expect(createResponse.status).toBe(200);
     expect(createPayload.codes).toHaveLength(2);
     expect(createPayload.codes[0].code).not.toBe(createPayload.codes[1].code);
 
-    const listResponse = await listActivationCodes(
-      new Request("http://localhost/api/admin/activation-codes/list", {
-        method: "GET",
-        headers: {
-          cookie: "aw-role=admin"
-        }
+    const listResponse = await handleListActivationCodesRequest(new Request("http://localhost/api/admin/activation-codes/list", {
+      method: "GET"
+    }), {
+      requireUser: async () => ({
+        id: "admin-1",
+        email: "admin@example.com",
+        role: "admin"
       })
-    );
+    });
     const listPayload = await listResponse.json();
 
     expect(listResponse.status).toBe(200);
@@ -68,19 +76,22 @@ describe("activation code admin routes", () => {
   });
 
   it("rejects generation count larger than 50", async () => {
-    const response = await createActivationCodes(
-      new Request("http://localhost/api/admin/activation-codes/create", {
-        method: "POST",
-        body: JSON.stringify({
-          tier: 10000,
-          count: 51
-        }),
-        headers: {
-          "content-type": "application/json",
-          cookie: "aw-role=admin"
-        }
+    const response = await createActivationCodesRequest(new Request("http://localhost/api/admin/activation-codes/create", {
+      method: "POST",
+      body: JSON.stringify({
+        tier: 10000,
+        count: 51
+      }),
+      headers: {
+        "content-type": "application/json"
+      }
+    }), {
+      requireUser: async () => ({
+        id: "admin-2",
+        email: "admin2@example.com",
+        role: "admin"
       })
-    );
+    });
     const payload = await response.json();
 
     expect(response.status).toBe(400);
@@ -88,19 +99,22 @@ describe("activation code admin routes", () => {
   });
 
   it("filters list by status and keyword", async () => {
-    const createResponse = await createActivationCodes(
-      new Request("http://localhost/api/admin/activation-codes/create", {
-        method: "POST",
-        body: JSON.stringify({
-          tier: 1000,
-          count: 2
-        }),
-        headers: {
-          "content-type": "application/json",
-          cookie: "aw-role=admin"
-        }
+    const createResponse = await createActivationCodesRequest(new Request("http://localhost/api/admin/activation-codes/create", {
+      method: "POST",
+      body: JSON.stringify({
+        tier: 1000,
+        count: 2
+      }),
+      headers: {
+        "content-type": "application/json"
+      }
+    }), {
+      requireUser: async () => ({
+        id: "admin-3",
+        email: "admin3@example.com",
+        role: "admin"
       })
-    );
+    });
     const createPayload = await createResponse.json();
     const targetCode = createPayload.codes[0].code as string;
     redeemActivationCode({
@@ -108,16 +122,20 @@ describe("activation code admin routes", () => {
       code: targetCode
     });
 
-    const usedResponse = await listActivationCodes(
+    const usedResponse = await handleListActivationCodesRequest(
       new Request(
         `http://localhost/api/admin/activation-codes/list?status=used&keyword=${encodeURIComponent(targetCode.slice(-4))}`,
         {
-          method: "GET",
-          headers: {
-            cookie: "aw-role=admin"
-          }
+          method: "GET"
         }
-      )
+      ),
+      {
+        requireUser: async () => ({
+          id: "admin-3",
+          email: "admin3@example.com",
+          role: "admin"
+        })
+      }
     );
     const usedPayload = await usedResponse.json();
 

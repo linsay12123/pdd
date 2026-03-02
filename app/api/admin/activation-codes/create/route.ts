@@ -1,22 +1,44 @@
 import { NextResponse } from "next/server";
-import { isAdminRequest } from "@/src/lib/auth/admin-guard";
+import { requireAdminSession } from "@/src/lib/auth/admin-guard";
 import { createActivationCodes } from "@/src/lib/activation-codes/repository";
 import { createActivationCodesInSupabase } from "@/src/lib/activation-codes/supabase-repository";
 import { shouldUseSupabasePersistence } from "@/src/lib/persistence/runtime-mode";
+import type { SessionUser } from "@/src/types/auth";
 
 type CreateActivationCodesBody = {
   tier?: number;
   count?: number;
 };
 
-export async function POST(request: Request) {
-  if (!isAdminRequest(request)) {
+type CreateActivationCodesRouteDependencies = {
+  requireUser?: () => Promise<SessionUser>;
+};
+
+export async function handleCreateActivationCodesRequest(
+  request: Request,
+  dependencies: CreateActivationCodesRouteDependencies = {}
+) {
+  try {
+    await requireAdminSession({
+      requireUser: dependencies.requireUser
+    });
+  } catch (error) {
+    if (error instanceof Error && error.message === "ADMIN_REQUIRED") {
+      return NextResponse.json(
+        {
+          ok: false,
+          message: "只有管理员可以生成激活码。"
+        },
+        { status: 403 }
+      );
+    }
+
     return NextResponse.json(
       {
         ok: false,
-        message: "只有管理员可以生成激活码。"
+        message: "请先登录管理员账号。"
       },
-      { status: 403 }
+      { status: 401 }
     );
   }
 
@@ -54,4 +76,8 @@ export async function POST(request: Request) {
       { status: 400 }
     );
   }
+}
+
+export async function POST(request: Request) {
+  return handleCreateActivationCodesRequest(request);
 }

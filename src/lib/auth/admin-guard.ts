@@ -1,21 +1,18 @@
-export function isAdminRequest(request: Request) {
-  const cookieHeader = request.headers.get("cookie") ?? "";
-  const cookieMap = cookieHeader
-    .split(";")
-    .map((item) => item.trim())
-    .filter(Boolean)
-    .reduce<Record<string, string>>((result, cookieItem) => {
-      const separatorIndex = cookieItem.indexOf("=");
+import { requireCurrentSessionUser } from "@/src/lib/auth/current-user";
+import type { SessionUser } from "@/src/types/auth";
 
-      if (separatorIndex === -1) {
-        return result;
-      }
+type AdminGuardOptions = {
+  requireUser?: () => Promise<SessionUser>;
+};
 
-      const key = cookieItem.slice(0, separatorIndex).trim();
-      const value = cookieItem.slice(separatorIndex + 1).trim();
-      result[key] = value;
-      return result;
-    }, {});
+export async function requireAdminSession(
+  options: AdminGuardOptions = {}
+): Promise<SessionUser> {
+  const user = await (options.requireUser ?? requireCurrentSessionUser)();
 
-  return cookieMap["aw-role"] === "admin";
+  if (user.role !== "admin") {
+    throw new Error("ADMIN_REQUIRED");
+  }
+
+  return user;
 }

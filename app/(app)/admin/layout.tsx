@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 import Link from "next/link";
-import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
+import { requireAdminSession } from "@/src/lib/auth/admin-guard";
 
 type AdminLayoutProps = {
   children: ReactNode;
@@ -18,10 +18,9 @@ const adminNavigationItems = [
 ];
 
 export default async function AdminLayout({ children }: AdminLayoutProps) {
-  const cookieStore = await cookies();
-  const role = cookieStore.get("aw-role")?.value ?? "user";
-
-  if (role !== "admin") {
+  try {
+    await requireAdminSession();
+  } catch {
     redirect("/workspace");
   }
 
