@@ -1,6 +1,8 @@
 import { incrementMetric } from "@/src/lib/observability/metrics";
 import { logTaskTransition } from "@/src/lib/observability/logger";
 import type {
+  TaskFileRecord,
+  TaskFileRecordInput,
   TaskOutputRecord,
   TaskOutputRecordInput,
   TaskStatus,
@@ -8,6 +10,7 @@ import type {
 } from "@/src/types/tasks";
 
 const taskStore = new Map<string, TaskSummary>();
+const taskFileStore = new Map<string, TaskFileRecord[]>();
 const taskOutputStore = new Map<string, TaskOutputRecord[]>();
 
 export function saveTaskSummary(task: TaskSummary) {
@@ -21,6 +24,22 @@ export function resetTaskStore() {
 
 export function getTaskSummary(taskId: string) {
   return taskStore.get(taskId) ?? null;
+}
+
+export function patchTaskSummary(taskId: string, patch: Partial<TaskSummary>) {
+  const existing = taskStore.get(taskId);
+
+  if (!existing) {
+    return null;
+  }
+
+  const nextTask = {
+    ...existing,
+    ...patch
+  };
+
+  taskStore.set(taskId, nextTask);
+  return nextTask;
 }
 
 export function updateTaskStatus(taskId: string, status: TaskStatus) {
@@ -44,6 +63,41 @@ export function updateTaskStatus(taskId: string, status: TaskStatus) {
   });
   incrementMetric("task_status_transition");
   return nextTask;
+}
+
+export function saveTaskFileRecord(record: TaskFileRecordInput) {
+  const existing = taskFileStore.get(record.taskId) ?? [];
+  const normalizedRecord: TaskFileRecord = {
+    id: record.id || `file_${record.taskId}_${existing.length + 1}`,
+    createdAt: record.createdAt || new Date().toISOString(),
+    updatedAt: record.updatedAt || new Date().toISOString(),
+    ...record
+  };
+  const nextFiles = [...existing, normalizedRecord];
+
+  taskFileStore.set(record.taskId, nextFiles);
+  return normalizedRecord;
+}
+
+export function saveTaskFileRecords(records: TaskFileRecordInput[]) {
+  return records.map((record) => saveTaskFileRecord(record));
+}
+
+export function listTaskFiles(taskId: string) {
+  return taskFileStore.get(taskId) ?? [];
+}
+
+export function getTaskFile(taskId: string, fileId: string) {
+  return listTaskFiles(taskId).find((file) => file.id === fileId) ?? null;
+}
+
+export function replaceTaskFiles(taskId: string, files: TaskFileRecord[]) {
+  taskFileStore.set(taskId, files);
+  return files;
+}
+
+export function resetTaskFileStore() {
+  taskFileStore.clear();
 }
 
 export function saveTaskOutputRecord(record: TaskOutputRecordInput) {

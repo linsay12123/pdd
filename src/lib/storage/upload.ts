@@ -3,7 +3,7 @@ export type StoredUpload = {
   storagePath: string;
 };
 
-export async function createTaskStoragePath(userId: string, taskId: string, filename: string) {
+export function createTaskStoragePath(userId: string, taskId: string, filename: string) {
   const safeName = filename.replaceAll(/\s+/g, "-").toLowerCase();
   return `users/${userId}/tasks/${taskId}/uploads/${safeName}`;
 }
@@ -15,6 +15,6 @@ export async function saveUploadPlaceholder(
 ): Promise<StoredUpload> {
   return {
     originalFilename: filename,
-    storagePath: await createTaskStoragePath(userId, taskId, filename)
+    storagePath: createTaskStoragePath(userId, taskId, filename)
   };
 }

@@ -23,7 +23,29 @@ export type TaskSummary = {
   targetWordCount: number;
   citationStyle: string;
   specialRequirements?: string;
+  primaryRequirementFileId?: string | null;
 };
+
+export type TaskFileRole = "requirement" | "background" | "irrelevant" | "unknown";
+
+export type TaskFileRecord = {
+  id: string;
+  taskId: string;
+  userId: string;
+  originalFilename: string;
+  storagePath: string;
+  extractedText: string;
+  role: TaskFileRole;
+  isPrimary: boolean;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type TaskFileRecordInput = Omit<
+  TaskFileRecord,
+  "id" | "createdAt" | "updatedAt"
+> &
+  Partial<Pick<TaskFileRecord, "id" | "createdAt" | "updatedAt">>;
 
 export type TaskOutputKind =
   | "final_docx"
