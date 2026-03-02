@@ -6,7 +6,7 @@
 
 **Architecture:** Use a single Next.js application for both the user-facing product and the admin console. Store users, quota ledgers, task state, and metadata in Supabase; store files in Supabase Storage; run the long AI workflow in Trigger.dev; isolate document export and billing logic behind dedicated services so the system can scale without rewriting core flow control.
 
-**Tech Stack:** Next.js 16 + React + TypeScript, Tailwind CSS, Supabase, Trigger.dev, OpenAI API, StealthGPT API, python-docx worker, reportlab worker, Stripe, Coinbase Commerce, Alipay, WeChat Pay, Vitest, Playwright.
+**Tech Stack:** Next.js 16 + React + TypeScript, Tailwind CSS, Supabase, Trigger.dev, OpenAI API, StealthGPT API, python-docx worker, reportlab worker, Stripe, manual stablecoin payment flow, Alipay, WeChat Pay, Vitest, Playwright.
 
 ---
 
@@ -1133,6 +1133,23 @@ Manual checks:
 - approve an outline
 - download DOCX and PDF
 - trigger auto de-AI
+
+### Delivery Status Snapshot (2026-03-02)
+
+Local work has now covered Tasks 1 through 20 on the `codex/bootstrap-shell` branch.
+
+Completed local verification:
+- `corepack pnpm lint`
+- `corepack pnpm test`
+- `corepack pnpm build`
+- `corepack pnpm test:e2e`
+
+Important production blockers that still need human setup:
+- real Stripe merchant keys
+- real Alipay merchant setup
+- real WeChat Pay merchant setup
+- real USDT / USDC receiving addresses
+- final production domain and callback URLs
 - verify QR card appears
 
 **Step 3: Reconcile the system against the design**
