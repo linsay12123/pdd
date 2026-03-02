@@ -5,6 +5,7 @@ export const protectedPathPrefixes = [
   "/workspace",
   "/tasks",
   "/billing",
+  "/recharge",
   "/account",
   "/admin"
 ] as const;
@@ -56,6 +57,7 @@ export const config = {
     "/workspace/:path*",
     "/tasks/:path*",
     "/billing/:path*",
+    "/recharge/:path*",
     "/account/:path*",
     "/admin/:path*"
   ]

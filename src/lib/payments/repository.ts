@@ -19,6 +19,10 @@ export function resetPaymentState() {
 }
 
 export function seedUserWallet(userId: string, wallet: WalletSnapshot) {
+  return setUserWallet(userId, wallet);
+}
+
+export function setUserWallet(userId: string, wallet: WalletSnapshot) {
   walletStore.set(userId, wallet);
   return wallet;
 }

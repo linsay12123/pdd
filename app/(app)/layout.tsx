@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import Link from "next/link";
+import { BrandLogo } from "@/src/components/brand/brand-logo";
 
 type AppLayoutProps = {
   children: ReactNode;
@@ -8,7 +9,7 @@ type AppLayoutProps = {
 const navigationItems = [
   { href: "/workspace", label: "开始写作" },
   { href: "/tasks", label: "我的任务" },
-  { href: "/billing", label: "充值中心" },
+  { href: "/billing", label: "额度中心" },
   { href: "/account", label: "账户中心" }
 ];
 
@@ -30,10 +31,10 @@ export default function AppLayout({ children }: AppLayoutProps) {
           background: "rgba(255, 250, 240, 0.88)"
         }}
       >
-        <p style={{ margin: 0, fontSize: "12px", letterSpacing: "0.08em" }}>
-          Auto Writing
+        <BrandLogo />
+        <p style={{ marginTop: "14px", marginBottom: "24px", lineHeight: 1.7, color: "#5d523f" }}>
+          登录后，任务、积分、下载入口都集中在这个主工作区里。
         </p>
-        <h2 style={{ marginTop: "8px", marginBottom: "24px" }}>工作台</h2>
         <nav style={{ display: "grid", gap: "12px" }}>
           {navigationItems.map((item) => (
             <Link key={item.href} href={item.href}>
@@ -54,8 +55,8 @@ export default function AppLayout({ children }: AppLayoutProps) {
           }}
         >
           <div>
-            <strong>当前余额</strong>
-            <div>充值额度 0 | 订阅额度 0</div>
+            <strong>当前积分</strong>
+            <div>账户积分 0 | 生成文章固定扣 500 | 自动降AI固定扣 500</div>
           </div>
           <div style={{ fontSize: "14px" }}>登录接通后这里显示用户信息</div>
         </header>

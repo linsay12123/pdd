@@ -4,33 +4,29 @@ export const adminUsers = [
     email: "client-a@example.com",
     role: "user",
     status: "active",
-    rechargeQuota: 120,
-    subscriptionQuota: 80
+    currentQuota: 12000
   },
   {
     id: "usr_002",
     email: "client-b@example.com",
     role: "user",
     status: "frozen",
-    rechargeQuota: 14,
-    subscriptionQuota: 0
+    currentQuota: 1400
   }
 ];
 
-export const adminOrders = [
+export const activationCodeRows = [
   {
-    id: "ord_001",
-    provider: "alipay",
-    amount: "$49.00",
-    quota: 60,
-    status: "paid"
+    code: "PDD-1000-A19F3C2D",
+    tier: "1000 积分",
+    status: "未使用",
+    usedBy: "待兑换"
   },
   {
-    id: "ord_002",
-    provider: "crypto",
-    amount: "$99.00",
-    quota: 140,
-    status: "pending_manual_check"
+    code: "PDD-5000-CE28B441",
+    tier: "5000 积分",
+    status: "已使用",
+    usedBy: "client-a@example.com"
   }
 ];
 
@@ -68,28 +64,26 @@ export const adminFiles = [
 
 export const pricingRows = [
   {
-    label: "2000 字文章生成",
-    quota: 20,
-    paymentMethod: "全渠道"
+    label: "生成文章",
+    quota: 500
   },
   {
-    label: "2000 字自动降AI",
-    quota: 10,
-    paymentMethod: "仅任务完成后可用"
+    label: "自动降AI",
+    quota: 500
   }
 ];
 
 export const financeRows = [
   {
-    label: "今日充值收入",
-    value: "$168.00"
+    label: "今日发出的激活码",
+    value: "18 个"
   },
   {
-    label: "待人工确认稳定币",
-    value: "2 笔"
+    label: "今日已兑换激活码",
+    value: "11 个"
   },
   {
     label: "今日消耗额度",
-    value: "96 点"
+    value: "6500 点"
   }
 ];

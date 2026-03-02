@@ -1,4 +1,5 @@
 export type QuotaLedgerKind =
+  | "activation_credit"
   | "recharge_credit"
   | "subscription_credit"
   | "task_freeze"

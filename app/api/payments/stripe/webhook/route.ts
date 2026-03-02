@@ -6,7 +6,7 @@ export async function POST(request: Request) {
   return NextResponse.json(
     {
       ok: false,
-      message: "Stripe Webhook 已关闭，因为当前产品不再使用 Stripe 收款。"
+      message: "在线支付入口已关闭，请改用额度激活码充值。"
     },
     { status: 410 }
   );

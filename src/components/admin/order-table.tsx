@@ -1,4 +1,4 @@
-import { adminOrders } from "@/src/lib/admin/mock-data";
+import { activationCodeRows } from "@/src/lib/admin/mock-data";
 
 export function OrderTable() {
   return (
@@ -10,11 +10,11 @@ export function OrderTable() {
         background: "#ffffff"
       }}
     >
-      <h2 style={{ marginTop: 0 }}>订单管理</h2>
+      <h2 style={{ marginTop: 0 }}>激活码管理</h2>
       <div style={{ display: "grid", gap: "10px" }}>
-        {adminOrders.map((order) => (
+        {activationCodeRows.map((row) => (
           <div
-            key={order.id}
+            key={row.code}
             style={{
               display: "grid",
               gridTemplateColumns: "1.2fr 1fr 1fr 1fr",
@@ -24,10 +24,10 @@ export function OrderTable() {
               background: "#f8f3e8"
             }}
           >
-            <span>{order.id}</span>
-            <span>{order.provider}</span>
-            <span>{order.amount}</span>
-            <span>{order.status}</span>
+            <span>{row.code}</span>
+            <span>{row.tier}</span>
+            <span>{row.status}</span>
+            <span>{row.usedBy}</span>
           </div>
         ))}
       </div>

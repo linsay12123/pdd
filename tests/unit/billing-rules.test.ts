@@ -3,7 +3,6 @@ import { quoteGenerationTaskCost, quoteHumanizeTaskCost } from "../../src/lib/bi
 import { freezeQuota } from "../../src/lib/billing/freeze-quota";
 import { releaseQuota } from "../../src/lib/billing/release-quota";
 import { settleQuota } from "../../src/lib/billing/settle-quota";
-import { clearSubscriptionQuota } from "../../src/lib/billing/ledger";
 
 describe("billing rules", () => {
   it("freezes quota when the wallet has enough balance", () => {
@@ -80,11 +79,11 @@ describe("billing rules", () => {
     expect(settled.entry.kind).toBe("humanize_settle");
   });
 
-  it("uses different pricing paths for article generation and auto de-ai", () => {
-    expect(quoteGenerationTaskCost(2000)).toBeGreaterThan(quoteHumanizeTaskCost(2000));
-    expect(
-      quoteGenerationTaskCost(2000, [{ maxWords: 2000, quotaCost: 99 }])
-    ).toBe(99);
+  it("uses fixed 500-point pricing for both article generation and auto de-ai", () => {
+    expect(quoteGenerationTaskCost(2000)).toBe(500);
+    expect(quoteGenerationTaskCost(5000)).toBe(500);
+    expect(quoteHumanizeTaskCost(2000)).toBe(500);
+    expect(quoteHumanizeTaskCost(5000)).toBe(500);
   });
 
   it("spends monthly subscription quota before recharge quota", () => {
@@ -107,20 +106,6 @@ describe("billing rules", () => {
     expect(result.reservation).toMatchObject({
       fromSubscription: 4,
       fromRecharge: 3
-    });
-  });
-
-  it("clears only the monthly subscription quota at reset time", () => {
-    expect(
-      clearSubscriptionQuota({
-        rechargeQuota: 11,
-        subscriptionQuota: 7,
-        frozenQuota: 3
-      })
-    ).toEqual({
-      rechargeQuota: 11,
-      subscriptionQuota: 0,
-      frozenQuota: 3
     });
   });
 });

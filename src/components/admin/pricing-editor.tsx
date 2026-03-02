@@ -10,7 +10,7 @@ export function PricingEditor() {
         background: "#ffffff"
       }}
     >
-      <h2 style={{ marginTop: 0 }}>价格策略</h2>
+      <h2 style={{ marginTop: 0 }}>积分规则</h2>
       <div style={{ display: "grid", gap: "10px" }}>
         {pricingRows.map((row) => (
           <div
@@ -25,11 +25,11 @@ export function PricingEditor() {
           >
             <strong>{row.label}</strong>
             <div style={{ fontSize: "13px", color: "#5a4d34" }}>
-              当前消耗：{row.quota} 点 | 支付方式：{row.paymentMethod}
+              当前消耗：固定 {row.quota} 点
             </div>
             <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
-              <button type="button">修改价格</button>
-              <button type="button">停用支付方式</button>
+              <button type="button">修改扣点</button>
+              <button type="button">生成新激活码</button>
             </div>
           </div>
         ))}

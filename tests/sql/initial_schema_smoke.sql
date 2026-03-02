@@ -11,6 +11,7 @@ where table_schema = 'public'
     'writing_tasks',
     'task_files',
     'task_outputs',
+    'activation_codes',
     'outline_versions',
     'draft_versions',
     'reference_checks',

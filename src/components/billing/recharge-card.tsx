@@ -1,101 +1,162 @@
-import {
-  rechargePackages,
-  subscriptionPackages,
-  supportedCryptoAssets
-} from "@/src/lib/payments/catalog";
+"use client";
+
+import { useEffect, useState } from "react";
+import { ContactSalesCard } from "@/src/components/brand/contact-sales-card";
+import { RedeemCodeForm } from "@/src/components/billing/redeem-code-form";
 
 type RechargeCardProps = {
   currentQuota: number;
-  monthlyQuota: number;
+  userId: string;
 };
 
-function cardStyle(background: string) {
-  return {
-    padding: "16px",
-    borderRadius: "16px",
-    border: "1px solid #d7cfbe",
-    background
-  } as const;
-}
+const cardStyle = {
+  padding: "1.4rem",
+  borderRadius: "1.4rem",
+  border: "1px solid rgba(117, 96, 57, 0.14)",
+  background: "rgba(255, 255, 255, 0.9)",
+  boxShadow: "0 20px 40px rgba(54, 45, 28, 0.08)"
+} as const;
 
-const cryptoPaymentLabel = "USDC（Solana / Ethereum / TRON）";
-const cryptoNetworkLabel = "Solana / Ethereum / TRON";
+const recordRows = [
+  "兑换记录：10000 积分激活码，今天 14:20 到账",
+  "消耗记录：生成文章，扣除 500 积分",
+  "消耗记录：自动降AI，扣除 500 积分"
+];
 
-export function RechargeCard({
-  currentQuota,
-  monthlyQuota
-}: RechargeCardProps) {
+export function RechargeCard({ currentQuota, userId }: RechargeCardProps) {
+  const [quota, setQuota] = useState(currentQuota);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function syncWallet() {
+      try {
+        const response = await fetch(
+          `/api/quota/wallet?userId=${encodeURIComponent(userId)}`,
+          {
+            method: "GET"
+          }
+        );
+        const payload = await response.json();
+
+        if (!cancelled && response.ok) {
+          setQuota(payload.wallet.rechargeQuota);
+        }
+      } catch {
+        // Keep existing local balance when sync fails.
+      }
+    }
+
+    void syncWallet();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [userId]);
+
   return (
-    <section style={{ display: "grid", gap: "16px" }}>
-      <section style={cardStyle("#fffaf1")}>
-        <h2 style={{ marginTop: 0 }}>当前额度</h2>
-        <p style={{ margin: "8px 0" }}>充值额度：{currentQuota} 点</p>
-        <p style={{ margin: "8px 0" }}>本月订阅额度：{monthlyQuota} 点</p>
-        <p style={{ margin: "8px 0 0", color: "#5a4d34" }}>
-          订阅额度月底清零，充值额度会一直保留。
-        </p>
-      </section>
+    <section
+      style={{
+        display: "grid",
+        gap: "1rem",
+        gridTemplateColumns: "minmax(0, 1.4fr) minmax(280px, 0.9fr)"
+      }}
+    >
+      <div style={{ display: "grid", gap: "1rem" }}>
+        <section style={cardStyle}>
+          <h2 style={{ marginTop: 0, marginBottom: "0.5rem" }}>当前账户积分</h2>
+          <div
+            style={{
+              fontSize: "2.2rem",
+              fontWeight: 700,
+              marginBottom: "0.75rem"
+            }}
+          >
+            {quota} 点
+          </div>
+          <p style={{ marginTop: 0, marginBottom: 0, lineHeight: 1.7, color: "#584e3d" }}>
+            现在先按激活码充值模式处理，不展示任何在线支付方式。
+          </p>
+        </section>
 
-      <section style={cardStyle("#ffffff")}>
-        <h2 style={{ marginTop: 0 }}>充值包</h2>
-        <div style={{ display: "grid", gap: "12px" }}>
-          {rechargePackages.map((pkg) => (
-            <article
-              key={pkg.id}
-              style={{
-                padding: "14px",
-                borderRadius: "14px",
-                border: "1px solid #e3d8c2",
-                background: "#f9f4ea"
-              }}
-            >
-              <strong>{pkg.title}</strong>
-              <div style={{ marginTop: "6px" }}>
-                {pkg.quotaAmount} 点额度 / ${pkg.amountUsd}
-              </div>
-              <p style={{ marginBottom: "10px" }}>{pkg.description}</p>
-              <p style={{ marginTop: 0, marginBottom: "10px", color: "#5a4d34" }}>
-                加密货币支持：{supportedCryptoAssets.join(" / ")}，链路支持：
-                {cryptoNetworkLabel}
-              </p>
-              <p style={{ marginTop: 0, marginBottom: "10px", color: "#5a4d34" }}>
-                稳定币付款后需要人工确认到账，再手动给你的账号充值。
-              </p>
-              <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
-                <button type="button">{cryptoPaymentLabel}</button>
-                <button type="button">支付宝</button>
-                <button type="button">微信支付</button>
-              </div>
-            </article>
-          ))}
-        </div>
-      </section>
+        <section style={cardStyle}>
+          <h2 style={{ marginTop: 0, marginBottom: "0.5rem" }}>输入额度激活码</h2>
+          <p style={{ marginTop: 0, lineHeight: 1.7, color: "#584e3d" }}>
+            每个额度激活码只能使用一次。兑换成功后，积分会直接加到当前账户。
+          </p>
+          <RedeemCodeForm
+            userId={userId}
+            onRedeemSuccess={(payload) => {
+              setQuota(payload.currentQuota);
+            }}
+          />
+        </section>
 
-      <section style={cardStyle("#f5efe2")}>
-        <h2 style={{ marginTop: 0 }}>月订阅</h2>
-        <div style={{ display: "grid", gap: "12px" }}>
-          {subscriptionPackages.map((pkg) => (
-            <article
-              key={pkg.id}
-              style={{
-                padding: "14px",
-                borderRadius: "14px",
-                border: "1px solid #d9cdb5",
-                background: "#fffdf8"
-              }}
-            >
-              <strong>{pkg.title}</strong>
-              <div style={{ marginTop: "6px" }}>
-                每月 {pkg.monthlyQuota} 点 / ${pkg.amountUsd}
+        <section style={cardStyle}>
+          <h2 style={{ marginTop: 0, marginBottom: "0.75rem" }}>固定额度档位</h2>
+          <div
+            style={{
+              display: "grid",
+              gap: "0.8rem",
+              gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))"
+            }}
+          >
+            {["1000 积分", "5000 积分", "10000 积分", "20000 积分"].map((item) => (
+              <div
+                key={item}
+                style={{
+                  padding: "0.95rem",
+                  borderRadius: "1rem",
+                  background: "#fff9ee",
+                  border: "1px solid rgba(117, 96, 57, 0.1)",
+                  textAlign: "center",
+                  fontWeight: 700
+                }}
+              >
+                {item}
               </div>
-              <p style={{ marginBottom: "10px" }}>{pkg.description}</p>
-              <p style={{ margin: 0, color: "#5a4d34" }}>
-                月订阅先保留方案，等你后面确认具体收款方式后再开放在线购买。
-              </p>
-            </article>
-          ))}
-        </div>
-      </section>
+            ))}
+          </div>
+          <div
+            style={{
+              marginTop: "1rem",
+              display: "grid",
+              gap: "0.4rem",
+              color: "#4e4538"
+            }}
+          >
+            <span>生成文章固定扣 500 积分</span>
+            <span>自动降AI固定扣 500 积分</span>
+          </div>
+        </section>
+
+        <section style={cardStyle}>
+          <h2 style={{ marginTop: 0, marginBottom: "0.75rem" }}>最近记录</h2>
+          <div style={{ display: "grid", gap: "0.75rem" }}>
+            {recordRows.map((item) => (
+              <div
+                key={item}
+                style={{
+                  padding: "0.9rem",
+                  borderRadius: "1rem",
+                  background: "#fffaf2",
+                  border: "1px solid rgba(117, 96, 57, 0.08)",
+                  lineHeight: 1.7
+                }}
+              >
+                {item}
+              </div>
+            ))}
+          </div>
+        </section>
+      </div>
+
+      <div style={{ display: "grid", alignContent: "start" }}>
+        <ContactSalesCard
+          title="需要购买额度？联系销售团队"
+          description="如果积分不够，直接扫码联系销售团队购买新的激活码。后续你可以继续输入新的码，反复给同一个账号充值。"
+        />
+      </div>
     </section>
   );
 }

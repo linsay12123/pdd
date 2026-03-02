@@ -6,6 +6,7 @@ describe("isProtectedPath", () => {
     expect(isProtectedPath("/workspace")).toBe(true);
     expect(isProtectedPath("/tasks")).toBe(true);
     expect(isProtectedPath("/billing")).toBe(true);
+    expect(isProtectedPath("/recharge")).toBe(true);
     expect(isProtectedPath("/account")).toBe(true);
     expect(isProtectedPath("/admin")).toBe(true);
   });

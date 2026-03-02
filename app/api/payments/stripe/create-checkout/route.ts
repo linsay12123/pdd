@@ -6,7 +6,7 @@ export async function POST(request: Request) {
   return NextResponse.json(
     {
       ok: false,
-      message: "Stripe 收款入口已关闭，请改用 USDC、支付宝或微信支付。"
+      message: "在线支付入口已关闭，请改用额度激活码充值。"
     },
     { status: 410 }
   );
