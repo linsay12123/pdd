@@ -97,20 +97,36 @@ describe("payment webhooks", () => {
     ]);
   });
 
-  it("builds a manual stablecoin order with USDT and USDC on multiple chains", () => {
+  it("builds a manual stablecoin order with USDC on the three supported chains", () => {
     const order = createManualCryptoOrder({
       userId: "user-2",
       packageId: "recharge-growth"
     });
 
     expect(order.amountUsd).toBe(49);
-    expect(order.acceptedAssets).toEqual(["USDC", "USDT"]);
+    expect(order.acceptedAssets).toEqual(["USDC"]);
     expect(order.acceptedNetworks).toEqual([
-      "base",
+      "solana",
       "ethereum",
-      "solana"
+      "tron"
     ]);
-    expect(order.addresses).toHaveLength(6);
+    expect(order.addresses).toEqual([
+      expect.objectContaining({
+        asset: "USDC",
+        network: "solana",
+        address: "5dY6hPSYFvH3N3NAKqge5rbymVxBrqoLFAJZ25HBhZMn"
+      }),
+      expect.objectContaining({
+        asset: "USDC",
+        network: "ethereum",
+        address: "0x746C5FD7084588f17e915CCebdDD8b4E8A7293C1"
+      }),
+      expect.objectContaining({
+        asset: "USDC",
+        network: "tron",
+        address: "TCF5CTNcAxriK7yiohZn92zmExok2zqhaq"
+      })
+    ]);
   });
 
   it("settles the manual crypto order only after an operator confirms payment", () => {

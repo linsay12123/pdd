@@ -6,8 +6,8 @@ export type RechargePackage = {
   description: string;
 };
 
-export const supportedCryptoAssets = ["USDC", "USDT"] as const;
-export const supportedCryptoNetworks = ["base", "ethereum", "solana"] as const;
+export const supportedCryptoAssets = ["USDC"] as const;
+export const supportedCryptoNetworks = ["solana", "ethereum", "tron"] as const;
 
 export type SupportedCryptoAsset = (typeof supportedCryptoAssets)[number];
 export type SupportedCryptoNetwork = (typeof supportedCryptoNetworks)[number];

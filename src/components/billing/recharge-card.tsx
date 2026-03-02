@@ -1,8 +1,7 @@
 import {
   rechargePackages,
   subscriptionPackages,
-  supportedCryptoAssets,
-  supportedCryptoNetworks
+  supportedCryptoAssets
 } from "@/src/lib/payments/catalog";
 
 type RechargeCardProps = {
@@ -18,6 +17,9 @@ function cardStyle(background: string) {
     background
   } as const;
 }
+
+const cryptoPaymentLabel = "USDC（Solana / Ethereum / TRON）";
+const cryptoNetworkLabel = "Solana / Ethereum / TRON";
 
 export function RechargeCard({
   currentQuota,
@@ -54,14 +56,13 @@ export function RechargeCard({
               <p style={{ marginBottom: "10px" }}>{pkg.description}</p>
               <p style={{ marginTop: 0, marginBottom: "10px", color: "#5a4d34" }}>
                 加密货币支持：{supportedCryptoAssets.join(" / ")}，链路支持：
-                {supportedCryptoNetworks.join(" / ")}
+                {cryptoNetworkLabel}
               </p>
               <p style={{ marginTop: 0, marginBottom: "10px", color: "#5a4d34" }}>
                 稳定币付款后需要人工确认到账，再手动给你的账号充值。
               </p>
               <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
-                <button type="button">Stripe</button>
-                <button type="button">USDT / USDC（多链）</button>
+                <button type="button">{cryptoPaymentLabel}</button>
                 <button type="button">支付宝</button>
                 <button type="button">微信支付</button>
               </div>
@@ -88,7 +89,9 @@ export function RechargeCard({
                 每月 {pkg.monthlyQuota} 点 / ${pkg.amountUsd}
               </div>
               <p style={{ marginBottom: "10px" }}>{pkg.description}</p>
-              <button type="button">Stripe 订阅</button>
+              <p style={{ margin: 0, color: "#5a4d34" }}>
+                月订阅先保留方案，等你后面确认具体收款方式后再开放在线购买。
+              </p>
             </article>
           ))}
         </div>

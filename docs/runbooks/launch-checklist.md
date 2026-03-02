@@ -2,7 +2,7 @@
 
 ## 1. 环境变量
 
-- 确认 `.env.local` 已填写 Supabase、OpenAI、StealthGPT、Stripe、支付宝、微信支付所需密钥。
+- 确认 `.env.local` 已填写 Supabase、OpenAI、StealthGPT、支付宝、微信支付所需密钥。
 - 确认 `STEALTHGPT_API_KEY` 已设置，否则“自动降AI”会失败。
 - 确认支付回调地址使用正式域名，不要继续用本地地址。
 
@@ -20,10 +20,9 @@
 
 ## 4. 支付
 
-- Stripe: 检查 `checkout` 地址、Webhook 地址、签名密钥。
 - 支付宝: 检查异步通知地址是否能回到站点。
 - 微信支付: 检查回调地址和商户参数。
-- 稳定币: 检查 USDT / USDC 的 Base、Ethereum、Solana 地址是否已经填入系统。
+- 稳定币: 检查 USDC 的 Solana、Ethereum、TRON 地址是否已经填入系统。
 
 ## 5. 交付文件
 

@@ -20,7 +20,7 @@ export const adminUsers = [
 export const adminOrders = [
   {
     id: "ord_001",
-    provider: "stripe",
+    provider: "alipay",
     amount: "$49.00",
     quota: 60,
     status: "paid"
