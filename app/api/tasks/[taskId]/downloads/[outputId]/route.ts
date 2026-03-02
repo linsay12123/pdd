@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
+import { requireCurrentSessionUser } from "@/src/lib/auth/current-user";
 import { createSignedDownloadUrl } from "@/src/lib/storage/signed-url";
 import { getTaskOutput } from "@/src/lib/tasks/repository";
+import type { SessionUser } from "@/src/types/auth";
 
 type RouteContext = {
   params: Promise<{
@@ -9,21 +11,33 @@ type RouteContext = {
   }>;
 };
 
-export async function GET(request: Request, context: RouteContext) {
-  const { taskId, outputId } = await context.params;
-  const userId = new URL(request.url).searchParams.get("userId");
+type TaskDownloadRouteDependencies = {
+  requireUser?: () => Promise<SessionUser>;
+};
 
-  if (!userId) {
+export async function handleTaskDownloadRequest(
+  request: Request,
+  params: {
+    taskId: string;
+    outputId: string;
+  },
+  dependencies: TaskDownloadRouteDependencies = {}
+) {
+  let user: SessionUser;
+
+  try {
+    user = await (dependencies.requireUser ?? requireCurrentSessionUser)();
+  } catch {
     return NextResponse.json(
       {
         ok: false,
-        message: "下载前必须先确认当前用户。"
+        message: "请先登录后再下载文件。"
       },
-      { status: 400 }
+      { status: 401 }
     );
   }
 
-  const output = getTaskOutput(taskId, outputId);
+  const output = getTaskOutput(params.taskId, params.outputId);
 
   if (!output) {
     return NextResponse.json(
@@ -38,7 +52,7 @@ export async function GET(request: Request, context: RouteContext) {
   try {
     const signedUrl = createSignedDownloadUrl({
       output,
-      userId
+      userId: user.id
     });
 
     return NextResponse.json({
@@ -57,4 +71,9 @@ export async function GET(request: Request, context: RouteContext) {
       { status: 410 }
     );
   }
+}
+
+export async function GET(request: Request, context: RouteContext) {
+  const params = await context.params;
+  return handleTaskDownloadRequest(request, params);
 }
