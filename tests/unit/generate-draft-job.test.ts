@@ -1,4 +1,7 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+
+vi.mock("server-only", () => ({}));
+
 import { generateDraftFromOutline } from "../../trigger/jobs/generate-draft";
 
 describe("generate draft job", () => {
@@ -24,6 +27,7 @@ describe("generate draft job", () => {
         ]
       },
       specialRequirements: "Use a formal academic tone.",
+      safetyIdentifier: "pdd_user_hash_123",
       requestText: async (request) => {
         calls.push(request);
         return {
@@ -35,7 +39,8 @@ describe("generate draft job", () => {
     expect(calls).toHaveLength(1);
     expect(calls[0]).toMatchObject({
       model: "gpt-5.2",
-      reasoningEffort: "high"
+      reasoningEffort: "high",
+      safetyIdentifier: "pdd_user_hash_123"
     });
     expect(result.draft).toContain("Formal article body");
   });

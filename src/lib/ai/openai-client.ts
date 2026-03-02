@@ -1,3 +1,4 @@
+import "server-only";
 import { env } from "@/src/config/env";
 
 export const defaultOpenAIModel = "gpt-5.2";
@@ -6,6 +7,7 @@ type OpenAITextResponseRequest = {
   input: string;
   model?: string;
   reasoningEffort?: "low" | "medium" | "high";
+  safetyIdentifier?: string;
   apiKey?: string;
   fetchImpl?: typeof fetch;
 };
@@ -18,6 +20,7 @@ export async function requestOpenAITextResponse({
   input,
   model = defaultOpenAIModel,
   reasoningEffort,
+  safetyIdentifier,
   apiKey = env.OPENAI_API_KEY,
   fetchImpl = fetch
 }: OpenAITextResponseRequest): Promise<OpenAITextResponse> {
@@ -39,6 +42,11 @@ export async function requestOpenAITextResponse({
             reasoning: {
               effort: reasoningEffort
             }
+          }
+        : {}),
+      ...(safetyIdentifier
+        ? {
+            safety_identifier: safetyIdentifier
           }
         : {})
     })

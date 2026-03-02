@@ -8,12 +8,14 @@ import type { OutlineScaffold } from "@/src/lib/ai/prompts/generate-outline";
 type GenerateDraftInput = {
   outline: OutlineScaffold;
   specialRequirements?: string;
+  safetyIdentifier?: string;
   requestText?: typeof requestOpenAITextResponse;
 };
 
 export async function generateDraftFromOutline({
   outline,
   specialRequirements,
+  safetyIdentifier,
   requestText = requestOpenAITextResponse
 }: GenerateDraftInput) {
   const prompt = buildGenerateDraftPrompt({
@@ -30,7 +32,8 @@ export async function generateDraftFromOutline({
   const response = await requestText({
     input: prompt,
     model: defaultOpenAIModel,
-    reasoningEffort: "high"
+    reasoningEffort: "high",
+    safetyIdentifier
   });
 
   return {
