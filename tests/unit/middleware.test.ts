@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isProtectedPath } from "../../proxy";
+import { isAdminPath, isProtectedPath } from "../../proxy";
 
 describe("isProtectedPath", () => {
   it("marks app routes as protected", () => {
@@ -14,5 +14,11 @@ describe("isProtectedPath", () => {
   it("leaves public routes open", () => {
     expect(isProtectedPath("/")).toBe(false);
     expect(isProtectedPath("/login")).toBe(false);
+  });
+
+  it("marks admin paths separately", () => {
+    expect(isAdminPath("/admin")).toBe(true);
+    expect(isAdminPath("/admin/users")).toBe(true);
+    expect(isAdminPath("/workspace")).toBe(false);
   });
 });
