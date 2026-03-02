@@ -1,4 +1,6 @@
 import { createLedgerEntry } from "@/src/lib/billing/ledger";
+import { incrementMetric } from "@/src/lib/observability/metrics";
+import { logPaymentEvent } from "@/src/lib/observability/logger";
 import type {
   PaymentOrderKind,
   PaymentOrderRecord,
@@ -103,6 +105,14 @@ export function completePaidOrder(input: {
     ...(paymentLedgerStore.get(order.userId) ?? []),
     ledgerEntry
   ]);
+  logPaymentEvent({
+    orderId: order.id,
+    userId: order.userId,
+    provider: order.provider,
+    providerEventId: input.providerPaymentId,
+    note: `Payment settled via ${order.provider}`
+  });
+  incrementMetric("payment_paid");
 
   return {
     applied: true,

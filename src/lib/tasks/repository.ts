@@ -1,3 +1,5 @@
+import { incrementMetric } from "@/src/lib/observability/metrics";
+import { logTaskTransition } from "@/src/lib/observability/logger";
 import type {
   TaskOutputRecord,
   TaskOutputRecordInput,
@@ -30,6 +32,13 @@ export function updateTaskStatus(taskId: string, status: TaskStatus) {
   };
 
   taskStore.set(taskId, nextTask);
+  logTaskTransition({
+    taskId,
+    userId: existing.userId ?? "unknown",
+    oldStatus: existing.status,
+    newStatus: status
+  });
+  incrementMetric("task_status_transition");
   return nextTask;
 }
 

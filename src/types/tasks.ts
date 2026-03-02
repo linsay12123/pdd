@@ -18,6 +18,7 @@ export type TaskStatus =
 
 export type TaskSummary = {
   id: string;
+  userId?: string;
   status: TaskStatus;
   targetWordCount: number;
   citationStyle: string;
