@@ -1,6 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 import { requestTaskBootstrap } from "../../src/lib/tasks/request-task-bootstrap";
 import { requestConfirmPrimaryFile } from "../../src/lib/tasks/request-confirm-primary-file";
+import { requestOutlineApproval } from "../../src/lib/tasks/request-outline-approval";
+import { requestOutlineFeedback } from "../../src/lib/tasks/request-outline-feedback";
 
 describe("task bootstrap requests", () => {
   it("creates the task first, then uploads the selected files", async () => {
@@ -166,5 +168,74 @@ describe("task bootstrap requests", () => {
     expect(result.primaryRequirementFileId).toBe("file-2");
     expect(result.ruleCard).not.toBeNull();
     expect(result.ruleCard?.citationStyle).toBe("Harvard");
+  });
+
+  it("sends outline feedback to the server and returns the new version", async () => {
+    const fetchSpy = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        task: {
+          id: "task-4",
+          status: "awaiting_outline_approval",
+          targetWordCount: 2000,
+          citationStyle: "APA 7",
+          specialRequirements: ""
+        },
+        outlineVersion: {
+          id: "outline-2",
+          versionNumber: 2
+        },
+        outline: {
+          articleTitle: "General Academic Essay: A Structured Analysis",
+          targetWordCount: 2000,
+          citationStyle: "APA 7",
+          chineseMirrorPending: true,
+          sections: []
+        },
+        message: "已生成新一版大纲"
+      })
+    });
+
+    const result = await requestOutlineFeedback({
+      taskId: "task-4",
+      feedback: "Shorter please.",
+      fetchImpl: fetchSpy as typeof fetch
+    });
+
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    expect(fetchSpy.mock.calls[0][0]).toBe("/api/tasks/task-4/outline/feedback");
+    expect(fetchSpy.mock.calls[0][1]?.method).toBe("POST");
+    expect(result.outlineVersion.versionNumber).toBe(2);
+  });
+
+  it("approves the latest outline without requiring the page to know internal ids", async () => {
+    const fetchSpy = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        task: {
+          id: "task-5",
+          status: "drafting",
+          targetWordCount: 2000,
+          citationStyle: "APA 7",
+          specialRequirements: ""
+        },
+        outlineVersion: {
+          id: "outline-3",
+          isApproved: true
+        },
+        message: "大纲已确认"
+      })
+    });
+
+    const result = await requestOutlineApproval({
+      taskId: "task-5",
+      fetchImpl: fetchSpy as typeof fetch
+    });
+
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    expect(fetchSpy.mock.calls[0][0]).toBe("/api/tasks/task-5/outline/approve");
+    expect(fetchSpy.mock.calls[0][1]?.method).toBe("POST");
+    expect(result.outlineVersion.isApproved).toBe(true);
+    expect(result.task.status).toBe("drafting");
   });
 });

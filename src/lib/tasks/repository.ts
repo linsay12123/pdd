@@ -3,6 +3,8 @@ import { logTaskTransition } from "@/src/lib/observability/logger";
 import type {
   TaskFileRecord,
   TaskFileRecordInput,
+  TaskOutlineVersion,
+  TaskOutlineVersionInput,
   TaskOutputRecord,
   TaskOutputRecordInput,
   TaskStatus,
@@ -11,6 +13,7 @@ import type {
 
 const taskStore = new Map<string, TaskSummary>();
 const taskFileStore = new Map<string, TaskFileRecord[]>();
+const taskOutlineStore = new Map<string, TaskOutlineVersion[]>();
 const taskOutputStore = new Map<string, TaskOutputRecord[]>();
 
 export function saveTaskSummary(task: TaskSummary) {
@@ -98,6 +101,36 @@ export function replaceTaskFiles(taskId: string, files: TaskFileRecord[]) {
 
 export function resetTaskFileStore() {
   taskFileStore.clear();
+}
+
+export function saveTaskOutlineVersion(record: TaskOutlineVersionInput) {
+  const existing = taskOutlineStore.get(record.taskId) ?? [];
+  const normalizedRecord: TaskOutlineVersion = {
+    id: record.id || `outline_${record.taskId}_${existing.length + 1}`,
+    createdAt: record.createdAt || new Date().toISOString(),
+    ...record
+  };
+  const nextVersions = [...existing, normalizedRecord];
+
+  taskOutlineStore.set(record.taskId, nextVersions);
+  return normalizedRecord;
+}
+
+export function listTaskOutlineVersions(taskId: string) {
+  return taskOutlineStore.get(taskId) ?? [];
+}
+
+export function getTaskOutlineVersion(taskId: string, outlineVersionId: string) {
+  return listTaskOutlineVersions(taskId).find((item) => item.id === outlineVersionId) ?? null;
+}
+
+export function replaceTaskOutlineVersions(taskId: string, versions: TaskOutlineVersion[]) {
+  taskOutlineStore.set(taskId, versions);
+  return versions;
+}
+
+export function resetTaskOutlineStore() {
+  taskOutlineStore.clear();
 }
 
 export function saveTaskOutputRecord(record: TaskOutputRecordInput) {

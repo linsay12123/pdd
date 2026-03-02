@@ -2,9 +2,10 @@
 
 import { Button } from "@/src/components/ui/Button";
 import { requestConfirmPrimaryFile } from "@/src/lib/tasks/request-confirm-primary-file";
+import { requestOutlineApproval } from "@/src/lib/tasks/request-outline-approval";
+import { requestOutlineFeedback } from "@/src/lib/tasks/request-outline-feedback";
 import {
   requestTaskBootstrap,
-  type TaskBootstrapPayload
 } from "@/src/lib/tasks/request-task-bootstrap";
 import type { TaskWorkflowPayload } from "@/src/lib/tasks/request-task-file-upload";
 import {
@@ -48,6 +49,8 @@ export function WorkspacePageClient({ initialQuota }: WorkspacePageClientProps) 
   const [selectedPrimaryFileId, setSelectedPrimaryFileId] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isConfirmingPrimaryFile, setIsConfirmingPrimaryFile] = useState(false);
+  const [isRegeneratingOutline, setIsRegeneratingOutline] = useState(false);
+  const [isApprovingOutline, setIsApprovingOutline] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -164,6 +167,102 @@ export function WorkspacePageClient({ initialQuota }: WorkspacePageClientProps) 
       });
     } finally {
       setIsConfirmingPrimaryFile(false);
+    }
+  };
+
+  const handleRegenerateOutline = async () => {
+    if (!activeTask) {
+      setNotice({
+        tone: "error",
+        text: "当前还没有可修改的大纲。"
+      });
+      return;
+    }
+
+    if (!outlineFeedback.trim()) {
+      setNotice({
+        tone: "error",
+        text: "请先输入你希望系统怎么改大纲。"
+      });
+      return;
+    }
+
+    setIsRegeneratingOutline(true);
+    setNotice({
+      tone: "info",
+      text: "系统正在根据你的意见重生成大纲。"
+    });
+
+    try {
+      const result = await requestOutlineFeedback({
+        taskId: activeTask.task.id,
+        feedback: outlineFeedback
+      });
+
+      setActiveTask((currentTask) =>
+        currentTask
+          ? {
+              ...currentTask,
+              task: result.task,
+              outline: result.outline
+            }
+          : currentTask
+      );
+      setNotice({
+        tone: "success",
+        text: result.message
+      });
+    } catch (error) {
+      setNotice({
+        tone: "error",
+        text:
+          error instanceof Error ? error.message : "重新生成大纲失败，请稍后再试。"
+      });
+    } finally {
+      setIsRegeneratingOutline(false);
+    }
+  };
+
+  const handleApproveOutline = async () => {
+    if (!activeTask) {
+      setNotice({
+        tone: "error",
+        text: "当前还没有可确认的大纲。"
+      });
+      return;
+    }
+
+    setIsApprovingOutline(true);
+    setNotice({
+      tone: "info",
+      text: "系统正在锁定这版大纲，并进入正文写作阶段。"
+    });
+
+    try {
+      const result = await requestOutlineApproval({
+        taskId: activeTask.task.id
+      });
+
+      setActiveTask((currentTask) =>
+        currentTask
+          ? {
+              ...currentTask,
+              task: result.task
+            }
+          : currentTask
+      );
+      setNotice({
+        tone: "success",
+        text: result.message
+      });
+    } catch (error) {
+      setNotice({
+        tone: "error",
+        text:
+          error instanceof Error ? error.message : "确认大纲失败，请稍后再试。"
+      });
+    } finally {
+      setIsApprovingOutline(false);
     }
   };
 
@@ -464,13 +563,22 @@ export function WorkspacePageClient({ initialQuota }: WorkspacePageClientProps) 
                     />
 
                     <div className="flex items-center justify-end gap-4 pt-4">
-                      <Button variant="secondary" className="gap-2">
+                      <Button
+                        variant="secondary"
+                        className="gap-2"
+                        onClick={() => void handleRegenerateOutline()}
+                        disabled={isRegeneratingOutline || activeTask?.task.status === "drafting"}
+                      >
                         <Settings className="w-4 h-4" />
-                        重新生成大纲
+                        {isRegeneratingOutline ? "重生成中..." : "重新生成大纲"}
                       </Button>
-                      <Button onClick={() => setStep(3)} className="gap-2">
+                      <Button
+                        onClick={() => void handleApproveOutline()}
+                        className="gap-2"
+                        disabled={isApprovingOutline || activeTask?.task.status === "drafting"}
+                      >
                         <CheckCircle2 className="w-4 h-4" />
-                        确认大纲并生成正文
+                        {isApprovingOutline ? "确认中..." : "确认大纲并生成正文"}
                       </Button>
                     </div>
                   </div>

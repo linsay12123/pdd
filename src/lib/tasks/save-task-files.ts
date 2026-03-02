@@ -4,6 +4,7 @@ import { shouldUseSupabasePersistence } from "@/src/lib/persistence/runtime-mode
 import { createTaskStoragePath } from "@/src/lib/storage/upload";
 import { createSupabaseAdminClient } from "@/src/lib/supabase/admin";
 import { buildTaskOutlineBundle, type TaskOutlineBundle } from "@/src/lib/tasks/build-task-outline";
+import { saveOutlineVersion } from "@/src/lib/tasks/save-outline-version";
 import {
   getTaskSummary,
   listTaskFiles,
@@ -156,6 +157,7 @@ async function saveTaskFilesWithSupabase({
 
 async function applyFileClassificationLocally({
   taskId,
+  userId,
   classification
 }: ApplyFileClassificationInput): Promise<PersistedTaskFilesResult> {
   const task = getTaskSummary(taskId);
@@ -205,10 +207,21 @@ async function applyFileClassificationLocally({
     files: nextFiles,
     primaryRequirementFileId: classification.primaryRequirementFileId
   });
+  const savedOutlineVersion = await saveOutlineVersion({
+    task: {
+      ...nextTask,
+      topic: outlineBundle.ruleCard.topic
+    },
+    userId,
+    outline: outlineBundle.outline
+  });
   const outlinedTask = patchTaskSummary(taskId, {
     status: "awaiting_outline_approval",
+    topic: outlineBundle.ruleCard.topic,
+    requestedChapterCount: outlineBundle.ruleCard.chapterCountOverride,
     targetWordCount: outlineBundle.ruleCard.targetWordCount,
-    citationStyle: outlineBundle.ruleCard.citationStyle
+    citationStyle: outlineBundle.ruleCard.citationStyle,
+    latestOutlineVersionId: savedOutlineVersion.id
   });
 
   if (!outlinedTask) {
@@ -334,6 +347,16 @@ async function applyFileClassificationWithSupabase({
     files,
     primaryRequirementFileId: classification.primaryRequirementFileId
   });
+  const savedOutlineVersion = await saveOutlineVersion({
+    task: {
+      ...ownedTask,
+      status: nextStatus,
+      topic: outlineBundle.ruleCard.topic,
+      primaryRequirementFileId: classification.primaryRequirementFileId
+    },
+    userId,
+    outline: outlineBundle.outline
+  });
   const { error: outlinedTaskError } = await client
     .from("writing_tasks")
     .update({
@@ -341,7 +364,8 @@ async function applyFileClassificationWithSupabase({
       target_word_count: outlineBundle.ruleCard.targetWordCount,
       citation_style: outlineBundle.ruleCard.citationStyle,
       topic: outlineBundle.ruleCard.topic,
-      requested_chapter_count: outlineBundle.ruleCard.chapterCountOverride
+      requested_chapter_count: outlineBundle.ruleCard.chapterCountOverride,
+      latest_outline_version_id: savedOutlineVersion.id
     })
     .eq("id", taskId)
     .eq("user_id", userId);
@@ -356,6 +380,8 @@ async function applyFileClassificationWithSupabase({
       status: "awaiting_outline_approval",
       targetWordCount: outlineBundle.ruleCard.targetWordCount,
       citationStyle: outlineBundle.ruleCard.citationStyle,
+      topic: outlineBundle.ruleCard.topic,
+      requestedChapterCount: outlineBundle.ruleCard.chapterCountOverride,
       primaryRequirementFileId: classification.primaryRequirementFileId
     },
     files,
@@ -405,10 +431,21 @@ async function confirmPrimaryTaskFileLocally({
     files: nextFiles,
     primaryRequirementFileId: fileId
   });
+  const savedOutlineVersion = await saveOutlineVersion({
+    task: {
+      ...nextTask,
+      topic: outlineBundle.ruleCard.topic
+    },
+    userId,
+    outline: outlineBundle.outline
+  });
   const outlinedTask = patchTaskSummary(taskId, {
     status: "awaiting_outline_approval",
+    topic: outlineBundle.ruleCard.topic,
+    requestedChapterCount: outlineBundle.ruleCard.chapterCountOverride,
     targetWordCount: outlineBundle.ruleCard.targetWordCount,
-    citationStyle: outlineBundle.ruleCard.citationStyle
+    citationStyle: outlineBundle.ruleCard.citationStyle,
+    latestOutlineVersionId: savedOutlineVersion.id
   });
 
   if (!outlinedTask) {
@@ -500,6 +537,16 @@ async function confirmPrimaryTaskFileWithSupabase({
     files,
     primaryRequirementFileId: fileId
   });
+  const savedOutlineVersion = await saveOutlineVersion({
+    task: {
+      ...ownedTask,
+      status: "building_rule_card",
+      topic: outlineBundle.ruleCard.topic,
+      primaryRequirementFileId: fileId
+    },
+    userId,
+    outline: outlineBundle.outline
+  });
   const { error: outlinedTaskError } = await client
     .from("writing_tasks")
     .update({
@@ -507,7 +554,8 @@ async function confirmPrimaryTaskFileWithSupabase({
       target_word_count: outlineBundle.ruleCard.targetWordCount,
       citation_style: outlineBundle.ruleCard.citationStyle,
       topic: outlineBundle.ruleCard.topic,
-      requested_chapter_count: outlineBundle.ruleCard.chapterCountOverride
+      requested_chapter_count: outlineBundle.ruleCard.chapterCountOverride,
+      latest_outline_version_id: savedOutlineVersion.id
     })
     .eq("id", taskId)
     .eq("user_id", userId);
@@ -522,6 +570,8 @@ async function confirmPrimaryTaskFileWithSupabase({
       status: "awaiting_outline_approval",
       targetWordCount: outlineBundle.ruleCard.targetWordCount,
       citationStyle: outlineBundle.ruleCard.citationStyle,
+      topic: outlineBundle.ruleCard.topic,
+      requestedChapterCount: outlineBundle.ruleCard.chapterCountOverride,
       primaryRequirementFileId: fileId
     },
     files,

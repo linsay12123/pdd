@@ -23,7 +23,11 @@ export type TaskSummary = {
   targetWordCount: number;
   citationStyle: string;
   specialRequirements?: string;
+  topic?: string;
+  requestedChapterCount?: number | null;
+  outlineRevisionCount?: number;
   primaryRequirementFileId?: string | null;
+  latestOutlineVersionId?: string | null;
 };
 
 export type TaskFileRole = "requirement" | "background" | "irrelevant" | "unknown";
@@ -46,6 +50,35 @@ export type TaskFileRecordInput = Omit<
   "id" | "createdAt" | "updatedAt"
 > &
   Partial<Pick<TaskFileRecord, "id" | "createdAt" | "updatedAt">>;
+
+export type TaskOutlineVersion = {
+  id: string;
+  taskId: string;
+  userId: string;
+  versionNumber: number;
+  outline: {
+    articleTitle: string;
+    targetWordCount: number;
+    citationStyle: string;
+    sections: Array<{
+      title: string;
+      summary: string;
+      bulletPoints: string[];
+    }>;
+    chineseMirrorPending: boolean;
+  };
+  feedback: string;
+  isApproved: boolean;
+  targetWordCount: number;
+  citationStyle: string;
+  createdAt: string;
+};
+
+export type TaskOutlineVersionInput = Omit<
+  TaskOutlineVersion,
+  "id" | "createdAt"
+> &
+  Partial<Pick<TaskOutlineVersion, "id" | "createdAt">>;
 
 export type TaskOutputKind =
   | "final_docx"
