@@ -22,5 +22,6 @@ describe("auth pages", () => {
     expect(html).toContain("额度激活码");
     expect(html).toContain("注册账号");
     expect(html).toContain("去邮箱点击确认邮件");
+    expect(html).toContain("重新发送确认邮件");
   });
 });

@@ -11,7 +11,8 @@ import {
 } from "@/src/lib/auth/auth-form";
 import {
   buildSignupEmailRedirectTo,
-  getRegisterCompletionMessage
+  getRegisterCompletionMessage,
+  resendSignupConfirmation
 } from "@/src/lib/auth/register-flow";
 
 export function RegisterForm() {
@@ -21,6 +22,7 @@ export function RegisterForm() {
   const [confirmPassword, setConfirmPassword] = useState("");
   const [statusText, setStatusText] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const [resending, setResending] = useState(false);
 
   async function handleRegister(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -84,6 +86,28 @@ export function RegisterForm() {
       setStatusText("注册失败，请稍后再试");
     } finally {
       setSubmitting(false);
+    }
+  }
+
+  async function handleResendConfirmation() {
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    setResending(true);
+
+    try {
+      const supabase = createSupabaseBrowserClient();
+      const message = await resendSignupConfirmation({
+        email,
+        origin: window.location.origin,
+        supabase
+      });
+      setStatusText(message);
+    } catch (error) {
+      setStatusText(error instanceof Error ? error.message : "重新发送确认邮件失败，请稍后再试。");
+    } finally {
+      setResending(false);
     }
   }
 
@@ -160,6 +184,17 @@ export function RegisterForm() {
 
         <Button type="submit" fullWidth size="lg" className="mt-8" disabled={submitting}>
           {submitting ? "注册中..." : "注册账号"}
+        </Button>
+
+        <Button
+          type="button"
+          fullWidth
+          variant="secondary"
+          className="mt-3"
+          disabled={submitting || resending}
+          onClick={() => void handleResendConfirmation()}
+        >
+          {resending ? "确认邮件发送中..." : "重新发送确认邮件"}
         </Button>
       </form>
 

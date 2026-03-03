@@ -1,6 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
-import { getRegisterCompletionMessage, buildSignupEmailRedirectTo } from "../../src/lib/auth/register-flow";
+import {
+  getRegisterCompletionMessage,
+  buildSignupEmailRedirectTo,
+  resendSignupConfirmation
+} from "../../src/lib/auth/register-flow";
 import { handleAuthConfirmRequest } from "../../app/auth/confirm/route";
 import Navbar from "../../src/components/layout/Navbar";
 import Footer from "../../src/components/layout/Footer";
@@ -22,6 +26,30 @@ describe("register flow", () => {
     expect(buildSignupEmailRedirectTo("https://pindaidai.vercel.app")).toBe(
       "https://pindaidai.vercel.app/auth/confirm?next=%2Fworkspace"
     );
+  });
+
+  it("resends the signup confirmation for the same email address", async () => {
+    const resend = vi.fn().mockResolvedValue({ error: null });
+
+    const message = await resendSignupConfirmation({
+      email: "1318823634@qq.com",
+      origin: "https://pindaidai.vercel.app",
+      supabase: {
+        auth: {
+          resend
+        }
+      } as never
+    });
+
+    expect(resend).toHaveBeenCalledWith({
+      type: "signup",
+      email: "1318823634@qq.com",
+      options: {
+        emailRedirectTo: "https://pindaidai.vercel.app/auth/confirm?next=%2Fworkspace"
+      }
+    });
+    expect(message).toContain("重新发送");
+    expect(message).toContain("1318823634@qq.com");
   });
 });
 
