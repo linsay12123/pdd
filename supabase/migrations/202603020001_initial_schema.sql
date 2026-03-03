@@ -10,6 +10,21 @@ begin
 end;
 $$;
 
+create or replace function public.is_current_user_admin()
+returns boolean
+language sql
+security definer
+set search_path = public
+stable
+as $$
+  select exists (
+    select 1
+    from public.profiles
+    where id = auth.uid()
+      and role = 'admin'
+  );
+$$;
+
 create type public.user_role as enum ('user', 'admin');
 create type public.pricing_plan_kind as enum ('recharge', 'subscription');
 create type public.pricing_plan_status as enum ('active', 'inactive');
@@ -326,22 +341,8 @@ create policy "profiles self update"
 create policy "profiles admin all"
   on public.profiles
   for all
-  using (
-    exists (
-      select 1
-      from public.profiles as admin_profile
-      where admin_profile.id = auth.uid()
-        and admin_profile.role = 'admin'
-    )
-  )
-  with check (
-    exists (
-      select 1
-      from public.profiles as admin_profile
-      where admin_profile.id = auth.uid()
-        and admin_profile.role = 'admin'
-    )
-  );
+  using (public.is_current_user_admin())
+  with check (public.is_current_user_admin());
 
 create policy "quota wallets user read"
   on public.quota_wallets
@@ -351,22 +352,8 @@ create policy "quota wallets user read"
 create policy "quota wallets admin all"
   on public.quota_wallets
   for all
-  using (
-    exists (
-      select 1
-      from public.profiles as admin_profile
-      where admin_profile.id = auth.uid()
-        and admin_profile.role = 'admin'
-    )
-  )
-  with check (
-    exists (
-      select 1
-      from public.profiles as admin_profile
-      where admin_profile.id = auth.uid()
-        and admin_profile.role = 'admin'
-    )
-  );
+  using (public.is_current_user_admin())
+  with check (public.is_current_user_admin());
 
 create policy "user owned rows readable"
   on public.quota_ledger_entries
@@ -427,223 +414,69 @@ create policy "user owned rows all reference checks"
 create policy "admin readable ledger"
   on public.quota_ledger_entries
   for all
-  using (
-    exists (
-      select 1
-      from public.profiles as admin_profile
-      where admin_profile.id = auth.uid()
-        and admin_profile.role = 'admin'
-    )
-  )
-  with check (
-    exists (
-      select 1
-      from public.profiles as admin_profile
-      where admin_profile.id = auth.uid()
-        and admin_profile.role = 'admin'
-    )
-  );
+  using (public.is_current_user_admin())
+  with check (public.is_current_user_admin());
 
 create policy "admin readable orders"
   on public.orders
   for all
-  using (
-    exists (
-      select 1
-      from public.profiles as admin_profile
-      where admin_profile.id = auth.uid()
-        and admin_profile.role = 'admin'
-    )
-  )
-  with check (
-    exists (
-      select 1
-      from public.profiles as admin_profile
-      where admin_profile.id = auth.uid()
-        and admin_profile.role = 'admin'
-    )
-  );
+  using (public.is_current_user_admin())
+  with check (public.is_current_user_admin());
 
 create policy "admin readable payment attempts"
   on public.payment_attempts
   for all
-  using (
-    exists (
-      select 1
-      from public.profiles as admin_profile
-      where admin_profile.id = auth.uid()
-        and admin_profile.role = 'admin'
-    )
-  )
-  with check (
-    exists (
-      select 1
-      from public.profiles as admin_profile
-      where admin_profile.id = auth.uid()
-        and admin_profile.role = 'admin'
-    )
-  );
+  using (public.is_current_user_admin())
+  with check (public.is_current_user_admin());
 
 create policy "admin readable pricing plans"
   on public.pricing_plans
   for all
-  using (
-    exists (
-      select 1
-      from public.profiles as admin_profile
-      where admin_profile.id = auth.uid()
-        and admin_profile.role = 'admin'
-    )
-  )
-  with check (
-    exists (
-      select 1
-      from public.profiles as admin_profile
-      where admin_profile.id = auth.uid()
-        and admin_profile.role = 'admin'
-    )
-  );
+  using (public.is_current_user_admin())
+  with check (public.is_current_user_admin());
 
 create policy "admin readable task rows"
   on public.writing_tasks
   for all
-  using (
-    exists (
-      select 1
-      from public.profiles as admin_profile
-      where admin_profile.id = auth.uid()
-        and admin_profile.role = 'admin'
-    )
-  )
-  with check (
-    exists (
-      select 1
-      from public.profiles as admin_profile
-      where admin_profile.id = auth.uid()
-        and admin_profile.role = 'admin'
-    )
-  );
+  using (public.is_current_user_admin())
+  with check (public.is_current_user_admin());
 
 create policy "admin readable task file rows"
   on public.task_files
   for all
-  using (
-    exists (
-      select 1
-      from public.profiles as admin_profile
-      where admin_profile.id = auth.uid()
-        and admin_profile.role = 'admin'
-    )
-  )
-  with check (
-    exists (
-      select 1
-      from public.profiles as admin_profile
-      where admin_profile.id = auth.uid()
-        and admin_profile.role = 'admin'
-    )
-  );
+  using (public.is_current_user_admin())
+  with check (public.is_current_user_admin());
 
 create policy "admin readable task output rows"
   on public.task_outputs
   for all
-  using (
-    exists (
-      select 1
-      from public.profiles as admin_profile
-      where admin_profile.id = auth.uid()
-        and admin_profile.role = 'admin'
-    )
-  )
-  with check (
-    exists (
-      select 1
-      from public.profiles as admin_profile
-      where admin_profile.id = auth.uid()
-        and admin_profile.role = 'admin'
-    )
-  );
+  using (public.is_current_user_admin())
+  with check (public.is_current_user_admin());
 
 create policy "admin readable outline rows"
   on public.outline_versions
   for all
-  using (
-    exists (
-      select 1
-      from public.profiles as admin_profile
-      where admin_profile.id = auth.uid()
-        and admin_profile.role = 'admin'
-    )
-  )
-  with check (
-    exists (
-      select 1
-      from public.profiles as admin_profile
-      where admin_profile.id = auth.uid()
-        and admin_profile.role = 'admin'
-    )
-  );
+  using (public.is_current_user_admin())
+  with check (public.is_current_user_admin());
 
 create policy "admin readable draft rows"
   on public.draft_versions
   for all
-  using (
-    exists (
-      select 1
-      from public.profiles as admin_profile
-      where admin_profile.id = auth.uid()
-        and admin_profile.role = 'admin'
-    )
-  )
-  with check (
-    exists (
-      select 1
-      from public.profiles as admin_profile
-      where admin_profile.id = auth.uid()
-        and admin_profile.role = 'admin'
-    )
-  );
+  using (public.is_current_user_admin())
+  with check (public.is_current_user_admin());
 
 create policy "admin readable reference rows"
   on public.reference_checks
   for all
-  using (
-    exists (
-      select 1
-      from public.profiles as admin_profile
-      where admin_profile.id = auth.uid()
-        and admin_profile.role = 'admin'
-    )
-  )
-  with check (
-    exists (
-      select 1
-      from public.profiles as admin_profile
-      where admin_profile.id = auth.uid()
-        and admin_profile.role = 'admin'
-    )
-  );
+  using (public.is_current_user_admin())
+  with check (public.is_current_user_admin());
 
 create policy "admin audit logs read"
   on public.admin_audit_logs
   for select
-  using (
-    exists (
-      select 1
-      from public.profiles as admin_profile
-      where admin_profile.id = auth.uid()
-        and admin_profile.role = 'admin'
-    )
-  );
+  using (public.is_current_user_admin());
 
 create policy "admin audit logs insert"
   on public.admin_audit_logs
   for insert
-  with check (
-    exists (
-      select 1
-      from public.profiles as admin_profile
-      where admin_profile.id = auth.uid()
-        and admin_profile.role = 'admin'
-    )
-  );
+  with check (public.is_current_user_admin());
