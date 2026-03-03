@@ -64,10 +64,10 @@ describe("support entrypoints", () => {
     expect(html).toContain("客服支持团队");
   });
 
-  it("routes navbar workspace entry through the safe workspace-entry page", () => {
+  it("routes navbar workspace entry through the login page first", () => {
     const html = renderToStaticMarkup(<Navbar />);
 
-    expect(html).toContain('href="/workspace-entry?next=%2Fworkspace"');
+    expect(html).toContain('href="/login?redirect=%2Fworkspace"');
   });
 
   it("uses the homepage contact anchor from the footer", () => {
@@ -77,10 +77,10 @@ describe("support entrypoints", () => {
     expect(html).toContain("客服支持团队");
   });
 
-  it("routes footer workspace entry through the safe workspace-entry page", () => {
+  it("routes footer workspace entry through the login page first", () => {
     const html = renderToStaticMarkup(<Footer />);
 
-    expect(html).toContain('href="/workspace-entry?next=%2Fworkspace"');
+    expect(html).toContain('href="/login?redirect=%2Fworkspace"');
   });
 
   it("shows support-team wording on the login page", async () => {

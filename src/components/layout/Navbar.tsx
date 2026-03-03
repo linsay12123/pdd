@@ -7,7 +7,7 @@ import { LogIn, Menu, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import { cn } from "@/src/lib/utils";
 import { HOME_SECTION_LINKS } from "@/src/lib/brand/support-links";
-import { buildWorkspaceEntryPath } from "@/src/lib/auth/auth-form";
+import { buildLoginRedirectPath } from "@/src/lib/auth/auth-form";
 
 export default function Navbar() {
   const [isScrolled, setIsScrolled] = useState(false);
@@ -32,7 +32,7 @@ export default function Navbar() {
     { name: "成功案例", path: HOME_SECTION_LINKS.cases },
     { name: "常见问题", path: HOME_SECTION_LINKS.faq }
   ];
-  const workspaceEntryPath = buildWorkspaceEntryPath("/workspace");
+  const loginWorkspacePath = buildLoginRedirectPath("/workspace");
 
   return (
     <header
@@ -72,7 +72,7 @@ export default function Navbar() {
               登录
             </Button>
           </Link>
-          <Link href={workspaceEntryPath}>
+          <Link href={loginWorkspacePath}>
             <Button size="sm">进入工作台</Button>
           </Link>
           <a href={HOME_SECTION_LINKS.contactSupport}>
@@ -105,7 +105,7 @@ export default function Navbar() {
                 登录
               </Button>
             </Link>
-            <Link href={workspaceEntryPath} onClick={() => setMobileMenuOpen(false)}>
+            <Link href={loginWorkspacePath} onClick={() => setMobileMenuOpen(false)}>
               <Button fullWidth>进入工作台</Button>
             </Link>
             <a href={HOME_SECTION_LINKS.contactSupport} onClick={() => setMobileMenuOpen(false)}>
