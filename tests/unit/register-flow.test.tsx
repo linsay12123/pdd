@@ -5,6 +5,7 @@ import {
   buildSignupEmailRedirectTo
 } from "../../src/lib/auth/register-flow";
 import { handleAuthConfirmRequest } from "../../app/auth/confirm/route";
+import Home from "../../app/page";
 import Navbar from "../../src/components/layout/Navbar";
 import Footer from "../../src/components/layout/Footer";
 import LoginPage from "../../app/login/page";
@@ -71,6 +72,13 @@ describe("support entrypoints", () => {
     expect(html).toContain('href="/workspace-entry?next=%2Fbilling"');
   });
 
+  it("uses workspace-entry for the navbar workspace button", () => {
+    const html = renderToStaticMarkup(<Navbar />);
+
+    expect(html).toContain('href="/workspace-entry?next=%2Fworkspace"');
+    expect(html).not.toContain('href="/login?redirect=%2Fworkspace"');
+  });
+
   it("uses the homepage contact anchor from the footer", () => {
     const html = renderToStaticMarkup(<Footer />);
 
@@ -83,6 +91,20 @@ describe("support entrypoints", () => {
 
     expect(html).toContain("积分兑换");
     expect(html).toContain('href="/workspace-entry?next=%2Fbilling"');
+  });
+
+  it("uses workspace-entry for the footer workspace button", () => {
+    const html = renderToStaticMarkup(<Footer />);
+
+    expect(html).toContain('href="/workspace-entry?next=%2Fworkspace"');
+    expect(html).not.toContain('href="/login?redirect=%2Fworkspace"');
+  });
+
+  it("routes the homepage workspace CTA through workspace-entry", () => {
+    const html = renderToStaticMarkup(<Home />);
+
+    expect(html).toContain('href="/workspace-entry?next=%2Fworkspace"');
+    expect(html).not.toContain('href="/login"');
   });
 
   it("shows support-team wording on the login page", async () => {

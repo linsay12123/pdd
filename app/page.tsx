@@ -19,8 +19,11 @@ import {
 import { Link } from "@/src/lib/router";
 import { HOME_SECTION_LINKS } from "@/src/lib/brand/support-links";
 import { motion } from "motion/react";
+import { buildWorkspaceEntryPath } from "@/src/lib/auth/auth-form";
 
 export default function Home() {
+  const workspaceEntryPath = buildWorkspaceEntryPath("/workspace");
+
   return (
     <div className="pt-24 pb-16">
       <section className="container mx-auto px-6 md:px-12 pt-12 pb-24 relative">
@@ -46,7 +49,7 @@ export default function Home() {
             </p>
 
             <div className="flex flex-col sm:flex-row items-center gap-4">
-              <Link to="/login" className="w-full sm:w-auto">
+              <Link to={workspaceEntryPath} className="w-full sm:w-auto">
                 <Button size="lg" fullWidth className="gap-2">
                   立即登录工作台
                   <ArrowRight className="w-5 h-5" />

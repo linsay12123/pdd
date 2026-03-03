@@ -1,10 +1,10 @@
 import Link from "next/link";
 import { Mail, MessageCircle } from "lucide-react";
 import { HOME_SECTION_LINKS } from "@/src/lib/brand/support-links";
-import { buildBillingEntryPath, buildLoginRedirectPath } from "@/src/lib/auth/auth-form";
+import { buildBillingEntryPath, buildWorkspaceEntryPath } from "@/src/lib/auth/auth-form";
 
 export default function Footer() {
-  const loginWorkspacePath = buildLoginRedirectPath("/workspace");
+  const workspaceEntryPath = buildWorkspaceEntryPath("/workspace");
   const billingEntryPath = buildBillingEntryPath();
 
   return (
@@ -71,7 +71,7 @@ export default function Footer() {
                 </a>
               </li>
               <li>
-                <Link href={loginWorkspacePath} className="hover:text-gold-400 transition-colors">
+                <Link href={workspaceEntryPath} className="hover:text-gold-400 transition-colors">
                   进入工作台
                 </Link>
               </li>

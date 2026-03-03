@@ -26,6 +26,10 @@ export function buildWorkspaceEntryPath(input?: string | null) {
   return `/workspace-entry?${query.toString()}`;
 }
 
+export function buildPostAuthEntryPath(input?: string | null) {
+  return buildWorkspaceEntryPath(input);
+}
+
 export function buildBillingEntryPath() {
   return buildWorkspaceEntryPath("/billing");
 }

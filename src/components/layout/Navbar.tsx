@@ -7,7 +7,7 @@ import { Menu, WalletCards, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import { cn } from "@/src/lib/utils";
 import { HOME_SECTION_LINKS } from "@/src/lib/brand/support-links";
-import { buildBillingEntryPath, buildLoginRedirectPath } from "@/src/lib/auth/auth-form";
+import { buildBillingEntryPath, buildWorkspaceEntryPath } from "@/src/lib/auth/auth-form";
 
 export default function Navbar() {
   const [isScrolled, setIsScrolled] = useState(false);
@@ -32,7 +32,7 @@ export default function Navbar() {
     { name: "成功案例", path: HOME_SECTION_LINKS.cases },
     { name: "常见问题", path: HOME_SECTION_LINKS.faq }
   ];
-  const loginWorkspacePath = buildLoginRedirectPath("/workspace");
+  const workspaceEntryPath = buildWorkspaceEntryPath("/workspace");
   const billingEntryPath = buildBillingEntryPath();
 
   return (
@@ -73,7 +73,7 @@ export default function Navbar() {
               积分兑换
             </Button>
           </Link>
-          <Link href={loginWorkspacePath}>
+          <Link href={workspaceEntryPath}>
             <Button size="sm">进入工作台</Button>
           </Link>
           <a href={HOME_SECTION_LINKS.contactSupport}>
@@ -106,7 +106,7 @@ export default function Navbar() {
                 积分兑换
               </Button>
             </Link>
-            <Link href={loginWorkspacePath} onClick={() => setMobileMenuOpen(false)}>
+            <Link href={workspaceEntryPath} onClick={() => setMobileMenuOpen(false)}>
               <Button fullWidth>进入工作台</Button>
             </Link>
             <a href={HOME_SECTION_LINKS.contactSupport} onClick={() => setMobileMenuOpen(false)}>

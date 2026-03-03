@@ -3,6 +3,7 @@ import {
   buildAuthCompletePath,
   buildBillingEntryPath,
   buildLoginRedirectPath,
+  buildPostAuthEntryPath,
   buildWorkspaceEntryPath,
   getAuthErrorMessage,
   normalizeRedirectTarget,
@@ -35,6 +36,13 @@ describe("auth form helpers", () => {
 
   it("builds a smart billing entry path", () => {
     expect(buildBillingEntryPath()).toBe("/workspace-entry?next=%2Fbilling");
+  });
+
+  it("funnels post-login redirects through workspace-entry", () => {
+    expect(buildPostAuthEntryPath("/tasks")).toBe("/workspace-entry?next=%2Ftasks");
+    expect(buildPostAuthEntryPath("https://evil.example.com")).toBe(
+      "/workspace-entry?next=%2Fworkspace"
+    );
   });
 
   it("builds a safe login redirect path", () => {
