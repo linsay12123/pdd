@@ -1,11 +1,31 @@
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import AuthCompletePage from "../../app/auth/complete/page";
 import ForgotPasswordPage from "../../app/forgot-password/page";
 import LoginPage from "../../app/login/page";
 import RegisterPage from "../../app/register/page";
 import WorkspaceEntryPage from "../../app/workspace-entry/page";
+
+vi.mock("next/headers", () => ({
+  cookies: vi.fn()
+}));
+
+vi.mock("../../src/lib/auth/current-user", () => ({
+  getCurrentSessionUserResolution: vi.fn()
+}));
+
+beforeEach(async () => {
+  const { cookies } = await import("next/headers");
+  const { getCurrentSessionUserResolution } = await import("../../src/lib/auth/current-user");
+
+  vi.mocked(cookies).mockResolvedValue({
+    getAll: () => [{ name: "sb-test-auth-token", value: "1" }]
+  } as never);
+  vi.mocked(getCurrentSessionUserResolution).mockResolvedValue({
+    status: "anonymous"
+  });
+});
 
 describe("auth pages", () => {
   it("renders the branded login page", async () => {

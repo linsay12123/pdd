@@ -1,5 +1,7 @@
+import { cookies } from "next/headers";
+import { createServerClient } from "@supabase/ssr";
 import { NextResponse } from "next/server";
-import { createSupabaseServerClient } from "@/src/lib/supabase/server";
+import { env } from "@/src/config/env";
 
 type SyncSessionRequestBody = {
   accessToken?: string;
@@ -22,6 +24,27 @@ type SyncSessionClient = {
 type HandleSyncSessionDependencies = {
   createClient?: () => Promise<SyncSessionClient> | SyncSessionClient;
 };
+
+async function createResponseBoundClient(response: NextResponse) {
+  const cookieStore = await cookies();
+
+  return createServerClient(
+    env.NEXT_PUBLIC_SUPABASE_URL,
+    env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
+    {
+      cookies: {
+        getAll() {
+          return cookieStore.getAll();
+        },
+        setAll(cookieValues) {
+          cookieValues.forEach(({ name, value, options }) => {
+            response.cookies.set(name, value, options);
+          });
+        }
+      }
+    }
+  ) as SyncSessionClient;
+}
 
 export async function handleSyncSessionRequest(
   request: Request,
@@ -49,9 +72,10 @@ export async function handleSyncSessionRequest(
   }
 
   try {
+    const response = NextResponse.json({ ok: true });
     const client =
       (await dependencies.createClient?.()) ??
-      ((await createSupabaseServerClient()) as SyncSessionClient);
+      (await createResponseBoundClient(response));
     const { error } = await client.auth.setSession({
       access_token: accessToken,
       refresh_token: refreshToken
@@ -64,7 +88,7 @@ export async function handleSyncSessionRequest(
       );
     }
 
-    return NextResponse.json({ ok: true });
+    return response;
   } catch {
     return NextResponse.json(
       { message: "同步登录状态失败，请重新登录。" },

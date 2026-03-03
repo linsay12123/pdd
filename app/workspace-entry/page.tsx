@@ -1,6 +1,10 @@
+import { cookies } from "next/headers";
 import Link from "next/link";
+import { redirect } from "next/navigation";
 import { AuthCompletePageClient } from "@/src/components/auth/auth-complete-page-client";
 import { normalizeRedirectTarget } from "@/src/lib/auth/auth-form";
+import { getCurrentSessionUserResolution } from "@/src/lib/auth/current-user";
+import { decideWorkspaceEntry } from "@/src/lib/auth/workspace-entry";
 
 type WorkspaceEntryPageProps = {
   searchParams?: Promise<{
@@ -11,6 +15,24 @@ type WorkspaceEntryPageProps = {
 export default async function WorkspaceEntryPage({ searchParams }: WorkspaceEntryPageProps) {
   const resolvedSearchParams = (await searchParams) ?? {};
   const nextPath = normalizeRedirectTarget(resolvedSearchParams.next);
+  const cookieStore = await cookies();
+  const hasSessionCookie = cookieStore
+    .getAll()
+    .some((cookie) => cookie.name.startsWith("sb-") && cookie.name.includes("-auth-token"));
+  const sessionResolution = await getCurrentSessionUserResolution();
+  const entryDecision = decideWorkspaceEntry({
+    hasSessionCookie,
+    sessionResolution,
+    targetPath: nextPath
+  });
+
+  if (entryDecision.kind === "allow") {
+    redirect(nextPath);
+  }
+
+  if (entryDecision.to.startsWith("/login")) {
+    redirect(entryDecision.to);
+  }
 
   return (
     <div className="min-h-screen pt-24 pb-16 flex items-center justify-center px-6">
