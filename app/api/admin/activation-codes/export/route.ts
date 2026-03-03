@@ -62,6 +62,8 @@ export async function handleExportActivationCodesRequest(
       "tier",
       "status",
       "used_by_user_id",
+      "used_by_user_email",
+      "used_by_display_name",
       "created_at",
       "used_at"
     ];
@@ -70,6 +72,8 @@ export async function handleExportActivationCodesRequest(
       String(code.tier),
       code.usedByUserId ? "used" : "unused",
       code.usedByUserId ?? "",
+      code.usedByEmail ?? "",
+      code.usedByDisplayName ?? "",
       code.createdAt,
       code.usedAt ?? ""
     ]);

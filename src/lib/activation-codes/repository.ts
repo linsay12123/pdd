@@ -52,7 +52,9 @@ export function createActivationCodes(input: {
       quotaAmount: input.tier,
       createdAt: new Date().toISOString(),
       usedAt: null,
-      usedByUserId: null
+      usedByUserId: null,
+      usedByEmail: null,
+      usedByDisplayName: null
     };
 
     activationCodeStore.set(code, record);
@@ -100,7 +102,9 @@ export function redeemStoredActivationCode(input: {
   const redeemedRecord: ActivationCodeRecord = {
     ...record,
     usedAt: new Date().toISOString(),
-    usedByUserId: input.userId
+    usedByUserId: input.userId,
+    usedByEmail: null,
+    usedByDisplayName: null
   };
 
   activationCodeStore.set(normalizedCode, redeemedRecord);

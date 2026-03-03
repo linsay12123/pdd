@@ -10,6 +10,7 @@ describe("BillingPage", () => {
 
     expect(html).toContain("激活码兑换");
     expect(html).toContain("立即兑换");
+    expect(html).toContain("兑换状态");
     expect(html).toContain("最近记录");
     expect(html).toContain("1000、5000、10000、20000");
     expect(html).toContain("500</span> 积分/次");

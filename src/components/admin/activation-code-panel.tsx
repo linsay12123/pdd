@@ -11,6 +11,8 @@ type ActivationCodeItem = {
   createdAt: string;
   usedAt: string | null;
   usedByUserId: string | null;
+  usedByEmail: string | null;
+  usedByDisplayName: string | null;
 };
 
 const panelStyle = {
@@ -250,7 +252,7 @@ export function ActivationCodePanel() {
               key={code.code}
               style={{
                 display: "grid",
-                gridTemplateColumns: "1.5fr 0.5fr 0.6fr 1fr",
+                gridTemplateColumns: "1.3fr 0.45fr 0.55fr 1.3fr",
                 gap: "8px",
                 padding: "10px",
                 borderRadius: "10px",
@@ -260,7 +262,16 @@ export function ActivationCodePanel() {
               <span>{code.code}</span>
               <span>{code.tier}</span>
               <span>{code.usedByUserId ? "已使用" : "未使用"}</span>
-              <span>{code.usedByUserId ?? "待兑换"}</span>
+              <span style={{ display: "grid", gap: "2px" }}>
+                <span>
+                  {code.usedByUserId
+                    ? code.usedByDisplayName || code.usedByEmail || code.usedByUserId
+                    : "待兑换"}
+                </span>
+                <span style={{ fontSize: "12px", color: "#7b6a4a" }}>
+                  {code.usedAt ? `使用时间：${code.usedAt}` : "尚未兑换"}
+                </span>
+              </span>
             </article>
           ))}
           {codes.length === 0 ? <div>当前没有符合筛选条件的激活码</div> : null}

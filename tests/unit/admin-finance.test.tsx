@@ -36,6 +36,14 @@ describe("admin finance", () => {
                   error: null
                 })
               })
+            }),
+            eq: () => ({
+              gte: () => ({
+                lte: async () => ({
+                  data: [{ amount: 5000 }, { amount: 1000 }],
+                  error: null
+                })
+              })
             })
           })
         };
@@ -53,6 +61,7 @@ describe("admin finance", () => {
     expect(rows).toEqual([
       { label: "今日发出的激活码", value: "7 个" },
       { label: "今日已兑换激活码", value: "7 个" },
+      { label: "今日到账积分", value: "6000 点" },
       { label: "今日消耗额度", value: "1500 点" }
     ]);
   });
@@ -64,6 +73,7 @@ describe("admin finance", () => {
         rows={[
           { label: "今日发出的激活码", value: "18 个" },
           { label: "今日已兑换激活码", value: "11 个" },
+          { label: "今日到账积分", value: "30000 点" },
           { label: "今日消耗额度", value: "6500 点" }
         ]}
       />
@@ -71,6 +81,7 @@ describe("admin finance", () => {
 
     expect(html).toContain("财务总览");
     expect(html).toContain("18 个");
+    expect(html).toContain("30000 点");
     expect(html).toContain("6500 点");
   });
 });

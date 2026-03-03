@@ -325,11 +325,11 @@ export function WorkspacePageClient({ initialQuota }: WorkspacePageClientProps) 
             </div>
             <div className="w-px h-8 bg-white/10 mx-2" />
             <div className="flex gap-2">
-              <Link href="/recharge">
-                <Button variant="outline" size="sm" className="border-gold-500/30 text-gold-400">
-                  充值额度
-                </Button>
-              </Link>
+                  <Link href="/billing">
+                    <Button variant="outline" size="sm" className="border-gold-500/30 text-gold-400">
+                      积分兑换
+                    </Button>
+                  </Link>
               <Link href="/tasks">
                 <Button variant="secondary" size="sm">
                   我的任务

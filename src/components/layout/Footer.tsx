@@ -1,10 +1,11 @@
 import Link from "next/link";
 import { Mail, MessageCircle } from "lucide-react";
 import { HOME_SECTION_LINKS } from "@/src/lib/brand/support-links";
-import { buildLoginRedirectPath } from "@/src/lib/auth/auth-form";
+import { buildBillingEntryPath, buildLoginRedirectPath } from "@/src/lib/auth/auth-form";
 
 export default function Footer() {
   const loginWorkspacePath = buildLoginRedirectPath("/workspace");
+  const billingEntryPath = buildBillingEntryPath();
 
   return (
     <footer className="bg-brand-950 border-t border-white/10 pt-16 pb-8">
@@ -60,8 +61,8 @@ export default function Footer() {
             <h4 className="text-cream-50 font-semibold mb-6">使用说明</h4>
             <ul className="space-y-4 text-sm text-brand-700">
               <li>
-                <Link href="/recharge" className="hover:text-gold-400 transition-colors">
-                  激活码充值
+                <Link href={billingEntryPath} className="hover:text-gold-400 transition-colors">
+                  积分兑换
                 </Link>
               </li>
               <li>

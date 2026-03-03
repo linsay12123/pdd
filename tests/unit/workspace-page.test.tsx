@@ -13,5 +13,7 @@ describe("WorkspacePage", () => {
     expect(html).toContain("任务进度");
     expect(html).toContain("大纲生成与确认");
     expect(html).toContain("交付与降AI");
+    expect(html).toContain("积分兑换");
+    expect(html).toContain('href="/billing"');
   });
 });

@@ -71,7 +71,7 @@ describe("activation code export route", () => {
 
     expect(response.status).toBe(200);
     expect(response.headers.get("content-type")).toContain("text/csv");
-    expect(csv).toContain('"code","tier","status","used_by_user_id","created_at","used_at"');
+    expect(csv).toContain('"code","tier","status","used_by_user_id","used_by_user_email","used_by_display_name","created_at","used_at"');
     expect(csv).toContain(targetCode);
   });
 });

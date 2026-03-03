@@ -24,6 +24,8 @@ function mapActivationCodeRow(row: {
   created_at: string;
   used_at: string | null;
   used_by_user_id: string | null;
+  used_by_email?: string | null;
+  used_by_display_name?: string | null;
 }): ActivationCodeRecord {
   return {
     code: row.code,
@@ -31,7 +33,9 @@ function mapActivationCodeRow(row: {
     quotaAmount: row.quota_amount,
     createdAt: row.created_at,
     usedAt: row.used_at,
-    usedByUserId: row.used_by_user_id
+    usedByUserId: row.used_by_user_id,
+    usedByEmail: row.used_by_email ?? null,
+    usedByDisplayName: row.used_by_display_name ?? null
   };
 }
 
@@ -124,17 +128,46 @@ export async function listActivationCodesInSupabase(query: ActivationCodeListQue
     throw new Error(`读取激活码列表失败：${error.message}`);
   }
 
-  return (data ?? []).map((item) =>
-    mapActivationCodeRow(
-      item as {
-        code: string;
-        tier: number;
-        quota_amount: number;
-        created_at: string;
-        used_at: string | null;
-        used_by_user_id: string | null;
-      }
-    )
+  const rows = (data ?? []) as Array<{
+    code: string;
+    tier: number;
+    quota_amount: number;
+    created_at: string;
+    used_at: string | null;
+    used_by_user_id: string | null;
+  }>;
+  const usedUserIds = Array.from(
+    new Set(rows.map((item) => item.used_by_user_id).filter((value): value is string => Boolean(value)))
+  );
+
+  let profilesById = new Map<string, { email: string | null; display_name: string | null }>();
+
+  if (usedUserIds.length > 0) {
+    const { data: profiles, error: profilesError } = await client
+      .from("profiles")
+      .select("id,email,display_name")
+      .in("id", usedUserIds);
+
+    if (profilesError) {
+      throw new Error(`读取激活码使用人信息失败：${profilesError.message}`);
+    }
+
+    profilesById = new Map(
+      ((profiles ?? []) as Array<{ id: string; email: string | null; display_name: string | null }>)
+        .map((profile) => [profile.id, { email: profile.email, display_name: profile.display_name }])
+    );
+  }
+
+  return rows.map((item) =>
+    mapActivationCodeRow({
+      ...item,
+      used_by_email: item.used_by_user_id
+        ? profilesById.get(item.used_by_user_id)?.email ?? null
+        : null,
+      used_by_display_name: item.used_by_user_id
+        ? profilesById.get(item.used_by_user_id)?.display_name ?? null
+        : null
+    })
   );
 }
 
@@ -176,31 +209,6 @@ export async function redeemActivationCodeInSupabase(input: {
 
   if (!row) {
     throw new Error("激活码兑换失败：数据库没有返回结果");
-  }
-
-  const { error: ledgerError } = await client
-    .from("quota_ledger_entries")
-    .upsert(
-      {
-        user_id: input.userId,
-        entry_kind: "activation_credit",
-        amount: row.quota_amount as number,
-        balance_recharge_after: row.recharge_quota as number,
-        balance_subscription_after: 0,
-        balance_frozen_after: row.frozen_quota as number,
-        unique_event_key: `activation:${row.code as string}`,
-        metadata: {
-          note: `Redeemed activation code ${row.code as string}`
-        }
-      },
-      {
-        onConflict: "unique_event_key",
-        ignoreDuplicates: true
-      }
-    );
-
-  if (ledgerError) {
-    throw new Error(`激活码兑换成功，但写入积分流水失败：${ledgerError.message}`);
   }
 
   return {

@@ -37,6 +37,7 @@ export async function getAdminFinanceSummary(
     return [
       { label: "今日发出的激活码", value: "0 个" },
       { label: "今日已兑换激活码", value: "0 个" },
+      { label: "今日到账积分", value: "0 点" },
       { label: "今日消耗额度", value: "0 点" }
     ];
   }
@@ -47,6 +48,7 @@ export async function getAdminFinanceSummary(
   const [
     createdResult,
     redeemedResult,
+    creditedResult,
     consumedResult
   ] = await Promise.all([
     client
@@ -59,6 +61,12 @@ export async function getAdminFinanceSummary(
       .select("id", { count: "exact", head: true })
       .gte("used_at", start)
       .lte("used_at", end),
+    client
+      .from("quota_ledger_entries")
+      .select("amount")
+      .eq("entry_kind", "activation_credit")
+      .gte("created_at", start)
+      .lte("created_at", end),
     client
       .from("quota_ledger_entries")
       .select("amount")
@@ -79,6 +87,13 @@ export async function getAdminFinanceSummary(
     throw new Error(`读取今日消耗统计失败：${consumedResult.error.message}`);
   }
 
+  if (creditedResult.error) {
+    throw new Error(`读取今日到账统计失败：${creditedResult.error.message}`);
+  }
+
+  const creditedTotal = ((creditedResult.data ?? []) as Array<{ amount: number }>)
+    .reduce((sum, item) => sum + Number(item.amount ?? 0), 0);
+
   const consumedTotal = ((consumedResult.data ?? []) as Array<{ amount: number }>)
     .reduce((sum, item) => sum + Number(item.amount ?? 0), 0);
 
@@ -90,6 +105,10 @@ export async function getAdminFinanceSummary(
     {
       label: "今日已兑换激活码",
       value: `${redeemedResult.count ?? 0} 个`
+    },
+    {
+      label: "今日到账积分",
+      value: `${creditedTotal} 点`
     },
     {
       label: "今日消耗额度",

@@ -13,4 +13,6 @@ export type ActivationCodeRecord = {
   createdAt: string;
   usedAt: string | null;
   usedByUserId: string | null;
+  usedByEmail: string | null;
+  usedByDisplayName: string | null;
 };

@@ -3,11 +3,11 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Button } from "@/src/components/ui/Button";
-import { LogIn, Menu, X } from "lucide-react";
+import { Menu, WalletCards, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import { cn } from "@/src/lib/utils";
 import { HOME_SECTION_LINKS } from "@/src/lib/brand/support-links";
-import { buildLoginRedirectPath } from "@/src/lib/auth/auth-form";
+import { buildBillingEntryPath, buildLoginRedirectPath } from "@/src/lib/auth/auth-form";
 
 export default function Navbar() {
   const [isScrolled, setIsScrolled] = useState(false);
@@ -33,6 +33,7 @@ export default function Navbar() {
     { name: "常见问题", path: HOME_SECTION_LINKS.faq }
   ];
   const loginWorkspacePath = buildLoginRedirectPath("/workspace");
+  const billingEntryPath = buildBillingEntryPath();
 
   return (
     <header
@@ -66,10 +67,10 @@ export default function Navbar() {
         </div>
 
         <div className="hidden md:flex items-center gap-4">
-          <Link href="/login">
+          <Link href={billingEntryPath}>
             <Button variant="ghost" size="sm" className="gap-2">
-              <LogIn className="w-4 h-4" />
-              登录
+              <WalletCards className="w-4 h-4" />
+              积分兑换
             </Button>
           </Link>
           <Link href={loginWorkspacePath}>
@@ -100,9 +101,9 @@ export default function Navbar() {
             </a>
           ))}
           <div className="flex flex-col gap-3 mt-4">
-            <Link href="/login" onClick={() => setMobileMenuOpen(false)}>
+            <Link href={billingEntryPath} onClick={() => setMobileMenuOpen(false)}>
               <Button variant="secondary" fullWidth>
-                登录
+                积分兑换
               </Button>
             </Link>
             <Link href={loginWorkspacePath} onClick={() => setMobileMenuOpen(false)}>

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   buildAuthCompletePath,
+  buildBillingEntryPath,
   buildLoginRedirectPath,
   buildWorkspaceEntryPath,
   getAuthErrorMessage,
@@ -30,6 +31,10 @@ describe("auth form helpers", () => {
     expect(buildWorkspaceEntryPath("https://evil.example.com")).toBe(
       "/workspace-entry?next=%2Fworkspace"
     );
+  });
+
+  it("builds a smart billing entry path", () => {
+    expect(buildBillingEntryPath()).toBe("/workspace-entry?next=%2Fbilling");
   });
 
   it("builds a safe login redirect path", () => {

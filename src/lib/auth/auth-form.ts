@@ -26,6 +26,10 @@ export function buildWorkspaceEntryPath(input?: string | null) {
   return `/workspace-entry?${query.toString()}`;
 }
 
+export function buildBillingEntryPath() {
+  return buildWorkspaceEntryPath("/billing");
+}
+
 export function buildLoginRedirectPath(input?: string | null) {
   const safeTarget = normalizeRedirectTarget(input);
   const query = new URLSearchParams({

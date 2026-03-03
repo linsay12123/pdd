@@ -24,6 +24,7 @@ describe("activation codes", () => {
 
     expect(firstCode.code).not.toBe(secondCode.code);
     expect(firstCode.usedByUserId).toBeNull();
+    expect(firstCode.usedByEmail).toBeNull();
 
     const firstRedeem = redeemActivationCode({
       code: firstCode.code,
@@ -139,6 +140,7 @@ describe("activation codes", () => {
     expect(unusedCodes[0]?.code).toBe(codeB.code);
     expect(usedCodes).toHaveLength(1);
     expect(usedCodes[0]?.code).toBe(codeA.code);
+    expect(usedCodes[0]?.usedByEmail).toBeNull();
     expect(keywordCodes).toHaveLength(1);
     expect(keywordCodes[0]?.code).toBe(codeB.code);
   });

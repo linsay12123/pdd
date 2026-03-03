@@ -37,6 +37,8 @@ export function BillingPageClient({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [quota, setQuota] = useState(initialQuota);
   const [ledger, setLedger] = useState(initialLedger);
+  const [statusMessage, setStatusMessage] = useState<string>("请输入额度激活码后完成兑换，成功后积分和流水会立刻刷新。");
+  const [statusTone, setStatusTone] = useState<"info" | "success" | "error">("info");
 
   useEffect(() => {
     let cancelled = false;
@@ -73,11 +75,14 @@ export function BillingPageClient({
     e.preventDefault();
 
     if (!code.trim()) {
-      window.alert("请先输入激活码");
+      setStatusTone("error");
+      setStatusMessage("请先输入激活码。");
       return;
     }
 
     setIsSubmitting(true);
+    setStatusTone("info");
+    setStatusMessage("正在核对激活码，请稍候...");
 
     try {
       const response = await fetch("/api/quota/redeem-code", {
@@ -92,7 +97,8 @@ export function BillingPageClient({
       const payload = await response.json();
 
       if (!response.ok) {
-        window.alert(payload?.message ?? "激活码兑换失败，请稍后再试");
+        setStatusTone("error");
+        setStatusMessage(payload?.message ?? "激活码兑换失败，请稍后再试。");
         return;
       }
 
@@ -108,9 +114,11 @@ export function BillingPageClient({
       } catch {
         // Keep the current list if the refresh fails.
       }
-      window.alert(`激活码兑换成功，已到账 ${payload.creditedQuota} 积分`);
+      setStatusTone("success");
+      setStatusMessage(`激活码兑换成功，已到账 ${payload.creditedQuota} 积分。`);
     } catch {
-      window.alert("系统繁忙，请稍后再试");
+      setStatusTone("error");
+      setStatusMessage("系统繁忙，请稍后再试。");
     } finally {
       setIsSubmitting(false);
     }
@@ -166,6 +174,21 @@ export function BillingPageClient({
                 </Button>
               </div>
             </form>
+
+            <div
+              className={`mb-6 rounded-2xl border px-4 py-4 text-sm leading-6 ${
+                statusTone === "success"
+                  ? "border-green-500/20 bg-green-500/10 text-green-200"
+                  : statusTone === "error"
+                    ? "border-brand-500/20 bg-brand-500/10 text-brand-200"
+                    : "border-white/5 bg-brand-950/40 text-brand-700"
+              }`}
+            >
+              <p className="mb-1 text-xs font-semibold uppercase tracking-[0.18em] text-brand-700">
+                兑换状态
+              </p>
+              <p>{statusMessage}</p>
+            </div>
 
             <div className="space-y-4">
               <h3 className="text-sm font-medium text-cream-100">激活码规则：</h3>
