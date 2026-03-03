@@ -20,7 +20,28 @@ export default async function WorkspacePage() {
     redirect(entryDecision.to);
   }
 
-  const { wallet } = await getCurrentSessionWallet();
+  let wallet;
+
+  try {
+    const walletResult = await getCurrentSessionWallet();
+    wallet = walletResult.wallet;
+  } catch (error) {
+    if (error instanceof Error && error.message === "AUTH_REQUIRED") {
+      redirect(
+        hasSessionCookie
+          ? "/auth/complete?next=%2Fworkspace"
+          : "/login?redirect=%2Fworkspace"
+      );
+    }
+
+    if (error instanceof Error && error.message === "ACCOUNT_FROZEN") {
+      redirect(
+        `/login?message=${encodeURIComponent("当前账号已被冻结，请联系客服支持团队处理。")}`
+      );
+    }
+
+    throw error;
+  }
 
   return <WorkspacePageClient initialQuota={wallet.rechargeQuota} />;
 }

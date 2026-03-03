@@ -1,4 +1,4 @@
-import { createSupabaseServerClient } from "@/src/lib/supabase/server";
+import { createSupabaseReadonlyServerClient } from "@/src/lib/supabase/server-readonly";
 import type { SessionUser } from "@/src/types/auth";
 
 type SupabaseLike = {
@@ -90,7 +90,7 @@ export async function getCurrentSessionUserResolution(
   const profile = await getCurrentSessionUserProfile(options);
 
   if (!profile) {
-    const supabase = options.supabase ?? (await createSupabaseServerClient());
+    const supabase = options.supabase ?? (await createSupabaseReadonlyServerClient());
     const authResult = await supabase.auth.getUser();
     const authUser = authResult.data.user;
 
@@ -129,7 +129,7 @@ export async function getCurrentSessionUserResolution(
 async function getCurrentSessionUserProfile(
   options: GetCurrentSessionUserOptions
 ): Promise<SessionUserProfile | null> {
-  const supabase = options.supabase ?? (await createSupabaseServerClient());
+  const supabase = options.supabase ?? (await createSupabaseReadonlyServerClient());
   const authResult = await supabase.auth.getUser();
   const authUser = authResult.data.user;
 

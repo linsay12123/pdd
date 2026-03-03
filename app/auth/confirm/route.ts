@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { createSupabaseServerClient } from "@/src/lib/supabase/server";
+import { createSupabaseRouteServerClient } from "@/src/lib/supabase/server-route";
 import { normalizeRedirectTarget } from "@/src/lib/auth/auth-form";
 import { getAuthConfirmErrorMessage } from "@/src/lib/auth/register-flow";
 import { getPasswordResetLinkErrorMessage } from "@/src/lib/auth/password-reset-flow";
@@ -43,7 +43,7 @@ export async function handleAuthConfirmRequest(
   const nextPath = normalizeRedirectTarget(
     url.searchParams.get("next") ?? (type === "recovery" ? "/reset-password" : "/workspace")
   );
-  const client = await (dependencies.createClient ?? createSupabaseServerClient)();
+  const client = await (dependencies.createClient ?? createSupabaseRouteServerClient)();
   const exchangeCodeForSession =
     dependencies.exchangeCodeForSession ?? client.auth.exchangeCodeForSession.bind(client.auth);
   const verifyOtp = dependencies.verifyOtp ?? client.auth.verifyOtp.bind(client.auth);
