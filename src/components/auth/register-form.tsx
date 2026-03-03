@@ -10,9 +10,7 @@ import {
   validateRegisterInput
 } from "@/src/lib/auth/auth-form";
 import {
-  buildSignupEmailRedirectTo,
-  getRegisterCompletionMessage,
-  resendSignupConfirmation
+  getRegisterCompletionMessage
 } from "@/src/lib/auth/register-flow";
 
 export function RegisterForm() {
@@ -22,7 +20,6 @@ export function RegisterForm() {
   const [confirmPassword, setConfirmPassword] = useState("");
   const [statusText, setStatusText] = useState("");
   const [submitting, setSubmitting] = useState(false);
-  const [resending, setResending] = useState(false);
 
   async function handleRegister(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -43,33 +40,32 @@ export function RegisterForm() {
     setStatusText("注册中...");
 
     try {
-      const supabase = createSupabaseBrowserClient();
-      const { data, error } = await supabase.auth.signUp({
-        email: email.trim(),
-        password,
-        options: {
-          emailRedirectTo:
-            typeof window === "undefined"
-              ? undefined
-              : buildSignupEmailRedirectTo(window.location.origin),
-          data: {
-            display_name: displayName.trim()
-          }
-        }
+      const response = await fetch("/api/auth/register", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json"
+        },
+        body: JSON.stringify({
+          displayName: displayName.trim(),
+          email: email.trim(),
+          password
+        })
       });
+      const payload = (await response.json()) as { message?: string };
 
-      if (error) {
-        setStatusText(getAuthErrorMessage(error, "register"));
+      if (!response.ok) {
+        setStatusText(payload.message ?? "注册失败，请稍后再试");
         return;
       }
 
-      if (!data.session) {
-        setStatusText(
-          getRegisterCompletionMessage({
-            email,
-            hasSession: false
-          })
-        );
+      const supabase = createSupabaseBrowserClient();
+      const loginResult = await supabase.auth.signInWithPassword({
+        email: email.trim(),
+        password
+      });
+
+      if (loginResult.error) {
+        setStatusText(getAuthErrorMessage(loginResult.error, "login"));
         return;
       }
 
@@ -86,28 +82,6 @@ export function RegisterForm() {
       setStatusText("注册失败，请稍后再试");
     } finally {
       setSubmitting(false);
-    }
-  }
-
-  async function handleResendConfirmation() {
-    if (typeof window === "undefined") {
-      return;
-    }
-
-    setResending(true);
-
-    try {
-      const supabase = createSupabaseBrowserClient();
-      const message = await resendSignupConfirmation({
-        email,
-        origin: window.location.origin,
-        supabase
-      });
-      setStatusText(message);
-    } catch (error) {
-      setStatusText(error instanceof Error ? error.message : "重新发送确认邮件失败，请稍后再试。");
-    } finally {
-      setResending(false);
     }
   }
 
@@ -185,17 +159,6 @@ export function RegisterForm() {
         <Button type="submit" fullWidth size="lg" className="mt-8" disabled={submitting}>
           {submitting ? "注册中..." : "注册账号"}
         </Button>
-
-        <Button
-          type="button"
-          fullWidth
-          variant="secondary"
-          className="mt-3"
-          disabled={submitting || resending}
-          onClick={() => void handleResendConfirmation()}
-        >
-          {resending ? "确认邮件发送中..." : "重新发送确认邮件"}
-        </Button>
       </form>
 
       <div className="mt-4 min-h-6 text-sm text-brand-700" aria-live="polite">
@@ -203,7 +166,7 @@ export function RegisterForm() {
       </div>
 
       <div className="mt-6 text-center text-xs text-brand-700 bg-brand-900/50 p-3 rounded-lg border border-white/5">
-        注册成功后，请先去邮箱点击确认邮件。确认完成后，您可以输入“额度激活码”为账户充值积分。
+        注册成功后，您可以输入“额度激活码”为账户充值积分。
       </div>
 
       <div className="mt-8 text-center text-sm text-brand-700">

@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { createSupabaseServerClient } from "@/src/lib/supabase/server";
 import { normalizeRedirectTarget } from "@/src/lib/auth/auth-form";
 import { getAuthConfirmErrorMessage } from "@/src/lib/auth/register-flow";
+import { getPasswordResetLinkErrorMessage } from "@/src/lib/auth/password-reset-flow";
 
 type VerifyOtpInput = {
   token_hash: string;
@@ -38,14 +39,16 @@ export async function handleAuthConfirmRequest(
   dependencies: AuthConfirmRouteDependencies = {}
 ) {
   const url = new URL(request.url);
-  const nextPath = normalizeRedirectTarget(url.searchParams.get("next"));
+  const type = url.searchParams.get("type");
+  const nextPath = normalizeRedirectTarget(
+    url.searchParams.get("next") ?? (type === "recovery" ? "/reset-password" : "/workspace")
+  );
   const client = await (dependencies.createClient ?? createSupabaseServerClient)();
   const exchangeCodeForSession =
     dependencies.exchangeCodeForSession ?? client.auth.exchangeCodeForSession.bind(client.auth);
   const verifyOtp = dependencies.verifyOtp ?? client.auth.verifyOtp.bind(client.auth);
   const code = url.searchParams.get("code");
   const tokenHash = url.searchParams.get("token_hash");
-  const type = url.searchParams.get("type");
 
   if (code) {
     const { error } = await exchangeCodeForSession(code);
@@ -63,6 +66,12 @@ export async function handleAuthConfirmRequest(
     if (!error) {
       return NextResponse.redirect(buildRedirectUrl(request.url, nextPath));
     }
+  }
+
+  if (type === "recovery") {
+    const forgotPasswordUrl = buildRedirectUrl(request.url, "/forgot-password");
+    forgotPasswordUrl.searchParams.set("message", getPasswordResetLinkErrorMessage());
+    return NextResponse.redirect(forgotPasswordUrl);
   }
 
   const loginUrl = buildRedirectUrl(request.url, "/login");

@@ -44,11 +44,11 @@ export function getAuthErrorMessage(
   }
 
   if (message.includes("email not confirmed")) {
-    return "这个邮箱还没有完成验证";
+    return "这个邮箱还没有完成注册，请回到注册页重新注册。";
   }
 
   if (message.includes("user already registered")) {
-    return "这个邮箱已经注册过了，请直接登录";
+    return "这个邮箱已经注册过了，请直接登录，或点击“忘记密码”重设密码。";
   }
 
   if (message.includes("password should be at least")) {

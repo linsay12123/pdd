@@ -66,7 +66,7 @@ describe("auth form helpers", () => {
         { message: "User already registered" },
         "register"
       )
-    ).toBe("这个邮箱已经注册过了，请直接登录");
+    ).toBe("这个邮箱已经注册过了，请直接登录，或点击“忘记密码”重设密码。");
 
     expect(getAuthErrorMessage(null, "login")).toBe("登录失败，请稍后再试");
   });

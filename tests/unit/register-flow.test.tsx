@@ -2,8 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 import {
   getRegisterCompletionMessage,
-  buildSignupEmailRedirectTo,
-  resendSignupConfirmation
+  buildSignupEmailRedirectTo
 } from "../../src/lib/auth/register-flow";
 import { handleAuthConfirmRequest } from "../../app/auth/confirm/route";
 import Navbar from "../../src/components/layout/Navbar";
@@ -15,41 +14,17 @@ vi.mock("next/navigation", () => ({
 }));
 
 describe("register flow", () => {
-  it("tells the user to confirm email when signup returns no session", () => {
+  it("moves the user into the workspace when signup finishes", () => {
     expect(getRegisterCompletionMessage({
       email: "user@example.com",
-      hasSession: false
-    })).toContain("去邮箱");
+      hasSession: true
+    })).toContain("进入工作台");
   });
 
   it("builds a production-safe confirmation redirect", () => {
     expect(buildSignupEmailRedirectTo("https://pindaidai.vercel.app")).toBe(
       "https://pindaidai.vercel.app/auth/confirm?next=%2Fworkspace"
     );
-  });
-
-  it("resends the signup confirmation for the same email address", async () => {
-    const resend = vi.fn().mockResolvedValue({ error: null });
-
-    const message = await resendSignupConfirmation({
-      email: "1318823634@qq.com",
-      origin: "https://pindaidai.vercel.app",
-      supabase: {
-        auth: {
-          resend
-        }
-      } as never
-    });
-
-    expect(resend).toHaveBeenCalledWith({
-      type: "signup",
-      email: "1318823634@qq.com",
-      options: {
-        emailRedirectTo: "https://pindaidai.vercel.app/auth/confirm?next=%2Fworkspace"
-      }
-    });
-    expect(message).toContain("重新发送");
-    expect(message).toContain("1318823634@qq.com");
   });
 });
 
