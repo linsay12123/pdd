@@ -178,6 +178,31 @@ export async function redeemActivationCodeInSupabase(input: {
     throw new Error("激活码兑换失败：数据库没有返回结果");
   }
 
+  const { error: ledgerError } = await client
+    .from("quota_ledger_entries")
+    .upsert(
+      {
+        user_id: input.userId,
+        entry_kind: "activation_credit",
+        amount: row.quota_amount as number,
+        balance_recharge_after: row.recharge_quota as number,
+        balance_subscription_after: 0,
+        balance_frozen_after: row.frozen_quota as number,
+        unique_event_key: `activation:${row.code as string}`,
+        metadata: {
+          note: `Redeemed activation code ${row.code as string}`
+        }
+      },
+      {
+        onConflict: "unique_event_key",
+        ignoreDuplicates: true
+      }
+    );
+
+  if (ledgerError) {
+    throw new Error(`激活码兑换成功，但写入积分流水失败：${ledgerError.message}`);
+  }
+
   return {
     code: row.code as string,
     tier: row.tier as ActivationCodeTier,

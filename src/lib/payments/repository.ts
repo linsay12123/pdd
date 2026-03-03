@@ -2,6 +2,7 @@ import { createLedgerEntry } from "@/src/lib/billing/ledger";
 import { incrementMetric } from "@/src/lib/observability/metrics";
 import { logPaymentEvent } from "@/src/lib/observability/logger";
 import type {
+  StoredQuotaLedgerEntry,
   PaymentOrderKind,
   PaymentOrderRecord,
   PaymentProvider,
@@ -10,7 +11,7 @@ import type {
 
 const orderStore = new Map<string, PaymentOrderRecord>();
 const walletStore = new Map<string, WalletSnapshot>();
-const paymentLedgerStore = new Map<string, ReturnType<typeof createLedgerEntry>[]>();
+const paymentLedgerStore = new Map<string, StoredQuotaLedgerEntry[]>();
 
 export function resetPaymentState() {
   orderStore.clear();
@@ -105,10 +106,7 @@ export function completePaidOrder(input: {
 
   walletStore.set(order.userId, nextWallet);
   orderStore.set(order.id, nextOrder);
-  paymentLedgerStore.set(order.userId, [
-    ...(paymentLedgerStore.get(order.userId) ?? []),
-    ledgerEntry
-  ]);
+  appendPaymentLedgerEntry(order.userId, ledgerEntry);
   logPaymentEvent({
     orderId: order.id,
     userId: order.userId,
@@ -125,17 +123,25 @@ export function completePaidOrder(input: {
 }
 
 export function getPaymentLedgerEntries(userId: string) {
-  return paymentLedgerStore.get(userId) ?? [];
+  return [...(paymentLedgerStore.get(userId) ?? [])].sort((left, right) =>
+    right.createdAt.localeCompare(left.createdAt)
+  );
 }
 
 export function appendPaymentLedgerEntry(
   userId: string,
-  entry: ReturnType<typeof createLedgerEntry>
+  entry: ReturnType<typeof createLedgerEntry>,
+  createdAt = new Date().toISOString()
 ) {
+  const storedEntry: StoredQuotaLedgerEntry = {
+    ...entry,
+    createdAt
+  };
+
   paymentLedgerStore.set(userId, [
     ...(paymentLedgerStore.get(userId) ?? []),
-    entry
+    storedEntry
   ]);
 
-  return entry;
+  return storedEntry;
 }

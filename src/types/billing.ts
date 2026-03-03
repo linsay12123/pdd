@@ -33,6 +33,19 @@ export type QuotaLedgerEntry = {
   note: string;
 };
 
+export type StoredQuotaLedgerEntry = QuotaLedgerEntry & {
+  createdAt: string;
+};
+
+export type BillingHistoryEntry = {
+  id: string;
+  kind: QuotaLedgerKind;
+  title: string;
+  detail: string;
+  amount: number;
+  createdAt: string;
+};
+
 export type PaymentProvider =
   | "stripe"
   | "crypto"

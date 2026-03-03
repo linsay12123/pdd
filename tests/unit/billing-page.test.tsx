@@ -4,7 +4,9 @@ import { BillingPageClient } from "../../src/components/pages/billing-page-clien
 
 describe("BillingPage", () => {
   it("shows the activation-code quota center", () => {
-    const html = renderToStaticMarkup(<BillingPageClient initialQuota={1500} />);
+    const html = renderToStaticMarkup(
+      <BillingPageClient initialQuota={1500} initialLedger={[]} />
+    );
 
     expect(html).toContain("激活码兑换");
     expect(html).toContain("立即兑换");

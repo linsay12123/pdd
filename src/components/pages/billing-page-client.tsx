@@ -4,33 +4,65 @@ import { Button } from "@/src/components/ui/Button";
 import { SupportServicesNote } from "@/src/components/brand/support-services-note";
 import { Key, History, ArrowDownCircle, ArrowUpCircle } from "lucide-react";
 import React, { useEffect, useState } from "react";
+import type { BillingHistoryEntry } from "@/src/types/billing";
 
 type BillingPageClientProps = {
   initialQuota: number;
+  initialLedger: BillingHistoryEntry[];
 };
 
-export function BillingPageClient({ initialQuota }: BillingPageClientProps) {
+function formatHistoryTime(value: string) {
+  const date = new Date(value);
+
+  if (Number.isNaN(date.getTime())) {
+    return "刚刚";
+  }
+
+  return new Intl.DateTimeFormat("zh-CN", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+    timeZone: "Asia/Shanghai"
+  }).format(date).replace(/\//g, "-");
+}
+
+export function BillingPageClient({
+  initialQuota,
+  initialLedger
+}: BillingPageClientProps) {
   const [code, setCode] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [quota, setQuota] = useState(initialQuota);
+  const [ledger, setLedger] = useState(initialLedger);
 
   useEffect(() => {
     let cancelled = false;
 
-    async function syncWallet() {
+    async function syncAccountState() {
       try {
-        const response = await fetch("/api/quota/wallet");
-        const payload = await response.json();
+        const [walletResponse, ledgerResponse] = await Promise.all([
+          fetch("/api/quota/wallet"),
+          fetch("/api/quota/ledger")
+        ]);
+        const walletPayload = await walletResponse.json();
+        const ledgerPayload = await ledgerResponse.json();
 
-        if (!cancelled && response.ok) {
-          setQuota(payload.wallet.rechargeQuota);
+        if (!cancelled && walletResponse.ok) {
+          setQuota(walletPayload.wallet.rechargeQuota);
+        }
+
+        if (!cancelled && ledgerResponse.ok) {
+          setLedger(ledgerPayload.entries);
         }
       } catch {
         // Keep the server-rendered quota when the sync request fails.
       }
     }
 
-    void syncWallet();
+    void syncAccountState();
 
     return () => {
       cancelled = true;
@@ -66,6 +98,16 @@ export function BillingPageClient({ initialQuota }: BillingPageClientProps) {
 
       setQuota(payload.currentQuota);
       setCode("");
+      try {
+        const ledgerResponse = await fetch("/api/quota/ledger");
+        const ledgerPayload = await ledgerResponse.json();
+
+        if (ledgerResponse.ok) {
+          setLedger(ledgerPayload.entries);
+        }
+      } catch {
+        // Keep the current list if the refresh fails.
+      }
       window.alert(`激活码兑换成功，已到账 ${payload.creditedQuota} 积分`);
     } catch {
       window.alert("系统繁忙，请稍后再试");
@@ -161,30 +203,32 @@ export function BillingPageClient({ initialQuota }: BillingPageClientProps) {
               最近记录
             </h3>
 
-            <div className="space-y-4">
-              {[
-                { type: "consume", title: "生成文章", amount: -500, date: "2023-10-25 14:30" },
-                { type: "recharge", title: "激活码兑换", amount: 5000, date: "2023-10-24 09:15" },
-                { type: "consume", title: "自动降AI", amount: -500, date: "2023-10-20 16:45" },
-                { type: "consume", title: "生成文章", amount: -500, date: "2023-10-20 16:40" }
-              ].map((record, i) => (
-                <div key={i} className="flex items-center justify-between pb-3 border-b border-white/5 last:border-0 last:pb-0">
+            {ledger.length > 0 ? (
+              <div className="space-y-4">
+                {ledger.map((record) => (
+                  <div key={record.id} className="flex items-center justify-between pb-3 border-b border-white/5 last:border-0 last:pb-0">
                   <div className="flex items-center gap-3">
-                    <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${record.type === "recharge" ? "bg-green-500/10 text-green-400" : "bg-brand-800 text-brand-700"}`}>
-                      {record.type === "recharge" ? <ArrowUpCircle className="w-4 h-4" /> : <ArrowDownCircle className="w-4 h-4" />}
+                    <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${record.amount > 0 ? "bg-green-500/10 text-green-400" : "bg-brand-800 text-brand-700"}`}>
+                      {record.amount > 0 ? <ArrowUpCircle className="w-4 h-4" /> : <ArrowDownCircle className="w-4 h-4" />}
                     </div>
                     <div>
                       <p className="text-sm font-medium text-cream-100">{record.title}</p>
-                      <p className="text-xs text-brand-700">{record.date}</p>
+                      <p className="text-xs text-brand-700">{formatHistoryTime(record.createdAt)}</p>
+                      <p className="text-xs text-brand-700 mt-1">{record.detail}</p>
                     </div>
                   </div>
-                  <span className={`font-mono text-sm font-medium ${record.type === "recharge" ? "text-green-400" : "text-cream-50"}`}>
+                  <span className={`font-mono text-sm font-medium ${record.amount > 0 ? "text-green-400" : "text-cream-50"}`}>
                     {record.amount > 0 ? "+" : ""}
                     {record.amount}
                   </span>
                 </div>
-              ))}
-            </div>
+                ))}
+              </div>
+            ) : (
+              <div className="rounded-2xl border border-white/5 bg-brand-950/40 px-4 py-5 text-sm text-brand-700 leading-6">
+                您当前还没有积分记录。购买额度激活码后，兑换记录和后续扣费记录都会显示在这里。
+              </div>
+            )}
           </div>
         </div>
       </div>
