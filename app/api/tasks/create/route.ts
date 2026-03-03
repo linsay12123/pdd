@@ -4,6 +4,8 @@ import { createTaskWithQuotaFreeze } from "@/src/lib/tasks/create-task";
 import { toSessionTaskPayload } from "@/src/lib/tasks/session-task";
 import type { SessionUser } from "@/src/types/auth";
 
+export const maxDuration = 30;
+
 type CreateTaskBody = {
   specialRequirements?: string;
   targetWordCount?: number;

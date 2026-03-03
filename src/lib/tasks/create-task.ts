@@ -98,18 +98,38 @@ async function createTaskWithSupabase(
     throw new Error("INSUFFICIENT_QUOTA");
   }
 
-  const { data: taskRow, error: taskError } = await client
+  // Try with quota_reservation first; fall back without it if column doesn't exist yet
+  let taskRow: { id: string } | null = null;
+  let taskError: { message: string } | null = null;
+
+  const baseInsert = {
+    user_id: input.user.id,
+    status: "quota_frozen" as const,
+    target_word_count: input.targetWordCount,
+    citation_style: input.citationStyle,
+    special_requirements: input.specialRequirements
+  };
+
+  const result = await client
     .from("writing_tasks")
-    .insert({
-      user_id: input.user.id,
-      status: "quota_frozen",
-      target_word_count: input.targetWordCount,
-      citation_style: input.citationStyle,
-      special_requirements: input.specialRequirements,
-      quota_reservation: frozen.reservation
-    })
-    .select("id,status,target_word_count,citation_style,special_requirements,quota_reservation")
+    .insert({ ...baseInsert, quota_reservation: frozen.reservation })
+    .select("id")
     .single();
+
+  taskRow = result.data;
+  taskError = result.error;
+
+  // If the insert failed because quota_reservation column doesn't exist, retry without it
+  if (taskError?.message?.includes("quota_reservation")) {
+    const fallback = await client
+      .from("writing_tasks")
+      .insert(baseInsert)
+      .select("id")
+      .single();
+
+    taskRow = fallback.data;
+    taskError = fallback.error;
+  }
 
   if (taskError || !taskRow) {
     throw new Error(`创建任务失败：${taskError?.message ?? "数据库没有返回任务"}`);

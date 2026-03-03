@@ -10,6 +10,8 @@ import {
 import { toSessionTaskPayload } from "@/src/lib/tasks/session-task";
 import type { SessionUser } from "@/src/types/auth";
 
+export const maxDuration = 60;
+
 type RouteContext = {
   params: Promise<{
     taskId: string;
