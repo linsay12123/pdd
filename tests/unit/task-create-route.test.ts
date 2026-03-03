@@ -72,7 +72,7 @@ describe("task create route", () => {
     expect(payload.message).toContain("积分不足");
   });
 
-  it("freezes 500 quota and stores special requirements", async () => {
+  it("freezes per-word quota and stores special requirements", async () => {
     seedUserWallet("user-ok", {
       rechargeQuota: 1000,
       subscriptionQuota: 0,
@@ -106,7 +106,7 @@ describe("task create route", () => {
     expect(payload.task.targetWordCount).toBe(2200);
     expect(payload.task.citationStyle).toBe("MLA");
     expect(payload.task.specialRequirements).toContain("ASEAN banking");
-    expect(payload.frozenQuota).toBe(500);
+    expect(payload.frozenQuota).toBe(690);
 
     const storedTask = getTaskSummary(payload.task.id);
     expect(storedTask).toMatchObject({
@@ -119,9 +119,9 @@ describe("task create route", () => {
     });
 
     expect(getUserWallet("user-ok")).toEqual({
-      rechargeQuota: 500,
+      rechargeQuota: 310,
       subscriptionQuota: 0,
-      frozenQuota: 500
+      frozenQuota: 690
     });
   });
 });

@@ -6,6 +6,7 @@ import {
   requestTaskFileUpload,
   type TaskWorkflowPayload
 } from "@/src/lib/tasks/request-task-file-upload";
+import { requestTaskCancel } from "@/src/lib/tasks/request-task-cancel";
 
 export type TaskBootstrapPayload = TaskWorkflowPayload & {
   frozenQuota: TaskCreatePayload["frozenQuota"];
@@ -32,11 +33,22 @@ export async function requestTaskBootstrap({
     citationStyle,
     fetchImpl
   });
-  const uploadedTask = await requestTaskFileUpload({
-    taskId: createdTask.task.id,
-    files,
-    fetchImpl
-  });
+
+  let uploadedTask: TaskWorkflowPayload;
+  try {
+    uploadedTask = await requestTaskFileUpload({
+      taskId: createdTask.task.id,
+      files,
+      fetchImpl
+    });
+  } catch (uploadError) {
+    // Best-effort: cancel the task and release frozen quota
+    await requestTaskCancel({
+      taskId: createdTask.task.id,
+      fetchImpl
+    }).catch(() => {});
+    throw uploadError;
+  }
 
   return {
     ...uploadedTask,

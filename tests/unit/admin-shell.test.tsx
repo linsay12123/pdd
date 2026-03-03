@@ -74,16 +74,16 @@ describe("Admin dashboard shell", () => {
             {
               id: "generation",
               title: "生成文章",
-              quotaCost: 500,
-              description: "每次创建写作任务都会扣这一笔积分。",
-              note: "当前固定规则：每次生成文章都扣同样的积分。"
+              costPer1000Words: 230,
+              description: "按目标字数计算积分，每千字 230 积分。",
+              note: "按字数计费：每 1000 字收取固定积分。"
             },
             {
               id: "humanize",
               title: "自动降AI",
-              quotaCost: 500,
-              description: "每次降AI任务都会扣这一笔积分。",
-              note: "现在先保留固定扣点说明。"
+              costPer1000Words: 250,
+              description: "按正文字数计算积分，每千字 250 积分。",
+              note: "按字数计费：每 1000 字收取固定积分。"
             }
           ]}
         />
@@ -106,7 +106,7 @@ describe("Admin dashboard shell", () => {
     expect(html).toContain("积分规则");
     expect(html).toContain("财务总览");
     expect(html).toContain("生成新激活码");
-    expect(html).toContain("当前固定扣点");
+    expect(html).toContain("每千字扣点");
     expect(html).not.toContain("client-a@example.com");
   });
 });

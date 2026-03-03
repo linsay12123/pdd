@@ -30,6 +30,7 @@ export type TaskSummary = {
   latestOutlineVersionId?: string | null;
   latestDraftVersionId?: string | null;
   currentCandidateDraftId?: string | null;
+  quotaReservation?: import("@/src/types/billing").FrozenQuotaReservation;
 };
 
 export type TaskFileRole = "requirement" | "background" | "irrelevant" | "unknown";

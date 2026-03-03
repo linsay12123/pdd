@@ -79,11 +79,20 @@ describe("billing rules", () => {
     expect(settled.entry.kind).toBe("humanize_settle");
   });
 
-  it("uses fixed 500-point pricing for both article generation and auto de-ai", () => {
-    expect(quoteGenerationTaskCost(2000)).toBe(500);
-    expect(quoteGenerationTaskCost(5000)).toBe(500);
-    expect(quoteHumanizeTaskCost(2000)).toBe(500);
-    expect(quoteHumanizeTaskCost(5000)).toBe(500);
+  it("calculates generation cost as ceil(targetWordCount / 1000) * 230", () => {
+    expect(quoteGenerationTaskCost(500)).toBe(230);
+    expect(quoteGenerationTaskCost(1000)).toBe(230);
+    expect(quoteGenerationTaskCost(1001)).toBe(460);
+    expect(quoteGenerationTaskCost(2000)).toBe(460);
+    expect(quoteGenerationTaskCost(5000)).toBe(1150);
+  });
+
+  it("calculates humanize cost as ceil(bodyWordCount / 1000) * 250", () => {
+    expect(quoteHumanizeTaskCost(500)).toBe(250);
+    expect(quoteHumanizeTaskCost(1000)).toBe(250);
+    expect(quoteHumanizeTaskCost(1001)).toBe(500);
+    expect(quoteHumanizeTaskCost(3000)).toBe(750);
+    expect(quoteHumanizeTaskCost(5000)).toBe(1250);
   });
 
   it("spends monthly subscription quota before recharge quota", () => {

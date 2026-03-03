@@ -10,8 +10,8 @@ type RechargeCardProps = {
 
 const recordRows = [
   "兑换记录：10000 积分激活码，今天 14:20 到账",
-  "消耗记录：生成文章，扣除 500 积分",
-  "消耗记录：自动降AI，扣除 500 积分"
+  "消耗记录：生成文章，按字数扣除积分",
+  "消耗记录：自动降AI，按字数扣除积分"
 ];
 
 export function RechargeCard({ currentQuota }: RechargeCardProps) {
@@ -50,10 +50,9 @@ export function RechargeCard({ currentQuota }: RechargeCardProps) {
           <p className="pdd-sub" style={{ marginTop: "8px" }}>
             现在只保留激活码充值，不展示在线支付。
           </p>
-          <div className="pdd-list" style={{ gap: "6px", marginTop: "8px", color: "#475569" }}>
-            <span>生成文章固定扣 500 积分</span>
-            <span>自动降AI固定扣 500 积分</span>
-          </div>
+          <p className="pdd-sub" style={{ marginTop: "8px" }}>
+            积分按字数计费，任务提交后自动计算。
+          </p>
         </section>
 
         <section className="pdd-card" style={{ padding: "18px" }}>
@@ -79,10 +78,9 @@ export function RechargeCard({ currentQuota }: RechargeCardProps) {
               </div>
             ))}
           </div>
-          <div className="pdd-list" style={{ gap: "6px", marginTop: "10px", color: "#475569" }}>
-            <span>生成文章固定扣 500 积分</span>
-            <span>自动降AI固定扣 500 积分</span>
-          </div>
+          <p className="pdd-sub" style={{ marginTop: "10px" }}>
+            积分按字数计费，用多少扣多少。
+          </p>
         </section>
 
         <section className="pdd-card" style={{ padding: "18px" }}>

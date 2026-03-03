@@ -3,19 +3,21 @@ export type PricingTier = {
   quotaCost: number;
 };
 
-export const GENERATION_TASK_QUOTA_COST = 500;
-export const HUMANIZE_TASK_QUOTA_COST = 500;
+export const GENERATION_COST_PER_1000_WORDS = 230;
+export const HUMANIZE_COST_PER_1000_WORDS = 250;
 
 export function quoteGenerationTaskCost(
-  _targetWordCount: number,
+  targetWordCount: number,
   _pricing?: PricingTier[]
 ) {
-  return GENERATION_TASK_QUOTA_COST;
+  const units = Math.max(1, Math.ceil(targetWordCount / 1000));
+  return units * GENERATION_COST_PER_1000_WORDS;
 }
 
 export function quoteHumanizeTaskCost(
-  _targetWordCount: number,
+  bodyWordCount: number,
   _pricing?: PricingTier[]
 ) {
-  return HUMANIZE_TASK_QUOTA_COST;
+  const units = Math.max(1, Math.ceil(bodyWordCount / 1000));
+  return units * HUMANIZE_COST_PER_1000_WORDS;
 }

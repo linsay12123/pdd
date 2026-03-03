@@ -9,8 +9,9 @@ describe("admin pricing", () => {
     expect(html).toContain("积分规则");
     expect(html).toContain("生成文章");
     expect(html).toContain("自动降AI");
-    expect(html).toContain("当前固定扣点");
-    expect(html).toContain("500 点");
+    expect(html).toContain("每千字扣点");
+    expect(html).toContain("230 点");
+    expect(html).toContain("250 点");
     expect(html).not.toContain("修改扣点");
     expect(html).not.toContain("生成新激活码");
   });

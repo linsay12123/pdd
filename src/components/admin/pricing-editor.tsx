@@ -41,9 +41,9 @@ export function PricingEditorView({
                 <p className="text-sm text-brand-700 mt-2 leading-6">{rule.description}</p>
               </div>
               <div className="rounded-2xl border border-gold-400/20 bg-gold-400/10 px-4 py-3 text-right min-w-32">
-                <div className="text-xs text-brand-700">当前固定扣点</div>
+                <div className="text-xs text-brand-700">每千字扣点</div>
                 <div className="text-2xl font-bold text-gold-400 font-mono">
-                  {rule.quotaCost} 点
+                  {rule.costPer1000Words} 点
                 </div>
               </div>
             </div>

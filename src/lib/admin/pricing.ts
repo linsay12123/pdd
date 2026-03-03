@@ -1,12 +1,12 @@
 import {
-  GENERATION_TASK_QUOTA_COST,
-  HUMANIZE_TASK_QUOTA_COST
+  GENERATION_COST_PER_1000_WORDS,
+  HUMANIZE_COST_PER_1000_WORDS
 } from "@/src/lib/billing/quote-task-cost";
 
 export type AdminPricingRule = {
   id: "generation" | "humanize";
   title: string;
-  quotaCost: number;
+  costPer1000Words: number;
   description: string;
   note: string;
 };
@@ -16,16 +16,16 @@ export function getAdminPricingRules(): AdminPricingRule[] {
     {
       id: "generation",
       title: "生成文章",
-      quotaCost: GENERATION_TASK_QUOTA_COST,
-      description: "用户每次点击开始写作，系统会先冻结这一笔积分，任务真正创建成功后再正式扣掉。",
-      note: "当前固定规则：每次生成文章都扣同样的积分，不会因为字数临时乱跳。"
+      costPer1000Words: GENERATION_COST_PER_1000_WORDS,
+      description: "用户每次点击开始写作，系统按目标字数计算积分并冻结，任务完成后正式结算。",
+      note: "按字数计费：每 1000 字收取固定积分，不足 1000 字按 1000 字计算。"
     },
     {
       id: "humanize",
       title: "自动降AI",
-      quotaCost: HUMANIZE_TASK_QUOTA_COST,
-      description: "用户以后点击自动降AI时，会单独扣这一笔积分，不会和文章生成混在一起。",
-      note: "这一步现在先保留固定扣点说明，等 StealthGPT 真接上后再开放后台修改。"
+      costPer1000Words: HUMANIZE_COST_PER_1000_WORDS,
+      description: "用户点击自动降AI时，系统按正文字数计算积分并冻结，处理完成后正式结算。",
+      note: "按字数计费：每 1000 字收取固定积分，不足 1000 字按 1000 字计算。"
     }
   ];
 }

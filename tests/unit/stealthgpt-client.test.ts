@@ -1,13 +1,12 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import {
-  buildStealthGptPayload,
-  humanizeDraftWithStealthGpt,
-  maxStealthGptChunkLength,
-  splitDraftForHumanize,
-  stealthGptApiUrl
+  humanizeDraft,
+  maxHumanizeChunkLength,
+  splitDraftForHumanize
 } from "../../src/lib/humanize/stealthgpt-client";
+import type { HumanizeProvider } from "../../src/lib/humanize/humanize-provider";
 
-describe("stealthgpt client", () => {
+describe("humanize draft utilities", () => {
   it("splits only article body into chunk-sized sections and preserves references", () => {
     const parsed = splitDraftForHumanize(`# Sample Title
 
@@ -17,7 +16,7 @@ Short opening paragraph.
 
 ## Analysis
 
-${"A".repeat(maxStealthGptChunkLength + 120)}
+${"A".repeat(maxHumanizeChunkLength + 120)}
 
 ## References
 
@@ -30,25 +29,18 @@ Smith, A. (2024). Source.`);
     expect(parsed.sections[1]?.chunks.length).toBeGreaterThan(1);
     expect(
       parsed.sections[1]?.chunks.every(
-        (chunk) => chunk.length <= maxStealthGptChunkLength
+        (chunk) => chunk.length <= maxHumanizeChunkLength
       )
     ).toBe(true);
   });
 
-  it("calls the StealthGPT endpoint and keeps the title, headings, and references", async () => {
-    const fetchSpy = vi.fn(async (_url: URL | RequestInfo, init?: RequestInit) => {
-      const body = JSON.parse(String(init?.body)) as {
-        prompt: string;
-      };
-
-      return {
-        ok: true,
-        status: 200,
-        json: async () => ({
-          result: `HUMANIZED:${body.prompt}`
-        })
-      } as Response;
-    });
+  it("rewrites chunks via the abstract provider and keeps structure intact", async () => {
+    const mockProvider: HumanizeProvider = {
+      name: "test",
+      async rewriteChunk({ chunk }) {
+        return { rewrittenText: `REWRITTEN:${chunk}` };
+      }
+    };
 
     const draft = `# Sample Title
 
@@ -60,28 +52,11 @@ Original paragraph.
 
 Smith, A. (2024). Source.`;
 
-    const result = await humanizeDraftWithStealthGpt({
-      draftMarkdown: draft,
-      apiKey: "test-key",
-      fetchImpl: fetchSpy as typeof fetch
-    });
+    const result = await humanizeDraft(draft, mockProvider);
 
-    expect(fetchSpy).toHaveBeenCalledTimes(1);
-    expect(fetchSpy.mock.calls[0]?.[0]).toBe(stealthGptApiUrl);
-    expect(fetchSpy.mock.calls[0]?.[1]).toMatchObject({
-      method: "POST",
-      headers: expect.objectContaining({
-        "Content-Type": "application/json",
-        "api-token": "test-key"
-      })
-    });
-    expect(buildStealthGptPayload("Original paragraph.")).toMatchObject({
-      prompt: "Original paragraph.",
-      rephrase: true
-    });
     expect(result).toContain("# Sample Title");
     expect(result).toContain("## Introduction");
-    expect(result).toContain("HUMANIZED:Original paragraph.");
+    expect(result).toContain("REWRITTEN:Original paragraph.");
     expect(result).toContain("## References");
     expect(result).toContain("Smith, A. (2024). Source.");
   });

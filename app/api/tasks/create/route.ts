@@ -39,7 +39,7 @@ export async function handleTaskCreateRequest(
         ok: true,
         task: toSessionTaskPayload(result.task),
         frozenQuota: result.frozenQuota,
-        message: "任务已创建，500 积分已冻结。"
+        message: `任务已创建，${result.frozenQuota} 积分已冻结。`
       },
       { status: 201 }
     );
@@ -68,7 +68,7 @@ export async function handleTaskCreateRequest(
       return NextResponse.json(
         {
           ok: false,
-          message: "当前积分不足 500，请先充值后再创建任务。"
+          message: "当前积分不足，请先充值后再创建任务。"
         },
         { status: 400 }
       );

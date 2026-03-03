@@ -54,7 +54,8 @@ async function createTaskLocally(input: CreateTaskInput): Promise<CreateTaskResu
     status: "quota_frozen",
     targetWordCount: input.targetWordCount,
     citationStyle: input.citationStyle,
-    specialRequirements: input.specialRequirements
+    specialRequirements: input.specialRequirements,
+    quotaReservation: frozen.reservation
   });
 
   return {
@@ -104,9 +105,10 @@ async function createTaskWithSupabase(
       status: "quota_frozen",
       target_word_count: input.targetWordCount,
       citation_style: input.citationStyle,
-      special_requirements: input.specialRequirements
+      special_requirements: input.specialRequirements,
+      quota_reservation: frozen.reservation
     })
-    .select("id,status,target_word_count,citation_style,special_requirements")
+    .select("id,status,target_word_count,citation_style,special_requirements,quota_reservation")
     .single();
 
   if (taskError || !taskRow) {
@@ -176,7 +178,8 @@ async function createTaskWithSupabase(
     status: "quota_frozen",
     targetWordCount: input.targetWordCount,
     citationStyle: input.citationStyle,
-    specialRequirements: input.specialRequirements
+    specialRequirements: input.specialRequirements,
+    quotaReservation: finalFrozen.reservation
   });
 
   return {

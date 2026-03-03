@@ -12,7 +12,7 @@ describe("HomePage", () => {
     expect(html).toContain("批量处理，稳定交付。");
     expect(html).toContain("联系客服支持团队购买额度");
     expect(html).toContain("激活码按需充值");
-    expect(html).toContain("生成文章需500积分");
+    expect(html).toContain("按字数计费");
     expect(html).toContain("AI 检测报告");
   });
 

@@ -1,7 +1,6 @@
-import { env } from "@/src/config/env";
+import type { HumanizeProvider } from "./humanize-provider";
 
-export const stealthGptApiUrl = "https://stealthgpt.ai/api/stealthify";
-export const maxStealthGptChunkLength = 1800;
+export const maxHumanizeChunkLength = 1800;
 
 export type HumanizeSection = {
   heading: string;
@@ -15,32 +14,9 @@ export type ParsedHumanizeDraft = {
   references: string;
 };
 
-export type HumanizeDraftRequest = {
-  draftMarkdown: string;
-  apiKey?: string;
-  fetchImpl?: typeof fetch;
-};
-
-type StealthGptResponse = {
-  result?: string;
-};
-
-export function buildStealthGptPayload(prompt: string) {
-  return {
-    prompt,
-    rephrase: true,
-    tone: "PhD",
-    mode: "Medium",
-    qualityMode: "quality",
-    business: false,
-    isMultilingual: true,
-    detector: "turnitin"
-  };
-}
-
 export function splitDraftForHumanize(
   draftMarkdown: string,
-  maxChunkLength = maxStealthGptChunkLength
+  maxChunkLength = maxHumanizeChunkLength
 ): ParsedHumanizeDraft {
   const normalized = normalizeDraft(draftMarkdown);
   const sections: Array<{ heading: string; bodyLines: string[] }> = [];
@@ -117,7 +93,7 @@ export function splitDraftForHumanize(
 
 export function splitTextIntoChunks(
   text: string,
-  maxChunkLength = maxStealthGptChunkLength
+  maxChunkLength = maxHumanizeChunkLength
 ) {
   const paragraphs = text
     .split(/\n{2,}/)
@@ -181,15 +157,10 @@ export function draftToDocxContent(draftMarkdown: string) {
   };
 }
 
-export async function humanizeDraftWithStealthGpt({
-  draftMarkdown,
-  apiKey = env.STEALTHGPT_API_KEY,
-  fetchImpl = fetch
-}: HumanizeDraftRequest) {
-  if (!apiKey) {
-    throw new Error("STEALTHGPT_API_KEY is not configured");
-  }
-
+export async function humanizeDraft(
+  draftMarkdown: string,
+  provider: HumanizeProvider
+): Promise<string> {
   const parsed = splitDraftForHumanize(draftMarkdown);
   const nextSections: HumanizeSection[] = [];
 
@@ -197,13 +168,8 @@ export async function humanizeDraftWithStealthGpt({
     const rewrittenChunks: string[] = [];
 
     for (const chunk of section.chunks) {
-      rewrittenChunks.push(
-        await rewriteChunkWithStealthGpt({
-          chunk,
-          apiKey,
-          fetchImpl
-        })
-      );
+      const result = await provider.rewriteChunk({ chunk });
+      rewrittenChunks.push(result.rewrittenText);
     }
 
     nextSections.push({
@@ -218,36 +184,6 @@ export async function humanizeDraftWithStealthGpt({
     sections: nextSections,
     references: parsed.references
   });
-}
-
-async function rewriteChunkWithStealthGpt({
-  chunk,
-  apiKey,
-  fetchImpl
-}: {
-  chunk: string;
-  apiKey: string;
-  fetchImpl: typeof fetch;
-}) {
-  if (!chunk.trim()) {
-    return "";
-  }
-
-  const response = await fetchImpl(stealthGptApiUrl, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "api-token": apiKey
-    },
-    body: JSON.stringify(buildStealthGptPayload(chunk))
-  });
-
-  if (!response.ok) {
-    throw new Error(`StealthGPT request failed with status ${response.status}`);
-  }
-
-  const data = (await response.json()) as StealthGptResponse;
-  return (data.result ?? "").trim();
 }
 
 function buildDraftMarkdown(parsed: ParsedHumanizeDraft) {

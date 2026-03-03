@@ -45,7 +45,7 @@ export default function Home() {
             <p className="text-lg text-brand-700 leading-relaxed mb-10">
               上传任务材料 ➔ 系统智能分析 ➔ 生成英文大纲 ➔ 确认后输出正文 ➔ 附带引用核验报告 ➔ 支持一键自动降AI。
               <br className="hidden md:block" />
-              <span className="text-cream-100 font-medium mt-2 block">生成文章需500积分 | 一键降AI需500积分</span>
+              <span className="text-cream-100 font-medium mt-2 block">按字数计费 · 激活码充值 · 即充即用</span>
             </p>
 
             <div className="flex flex-col sm:flex-row items-center gap-4">
@@ -418,7 +418,7 @@ export default function Home() {
               { title: "规则清晰透明", desc: "没有隐藏收费，流程每一步都清晰可见。" },
               { title: "先大纲后正文", desc: "结构确认后再生成，确保方向绝对正确。" },
               { title: "文档交付明确", desc: "标准 Word 正文与 PDF 格式核验报告。" },
-              { title: "积分消耗固定", desc: "生成文章 500 积分，降AI 500 积分，童叟无欺。" },
+              { title: "积分按字数计费", desc: "按目标字数透明计费，用多少扣多少，童叟无欺。" },
               { title: "专属客服支持", desc: "工作时间内提供快速响应的人工协助服务。" },
               { title: "适合长期使用", desc: "账号长期有效，激活码按需充值，不过期。" }
             ].map((standard, i) => (
@@ -460,11 +460,11 @@ export default function Home() {
                   <div className="flex flex-col gap-2 text-sm text-brand-700">
                     <div className="flex items-center justify-between bg-brand-950 p-3 rounded-lg border border-white/5">
                       <span>生成完整文章（含大纲与核验报告）</span>
-                      <span className="text-cream-50 font-mono">-500 积分/次</span>
+                      <span className="text-cream-50 font-mono">按字数计费</span>
                     </div>
                     <div className="flex items-center justify-between bg-brand-950 p-3 rounded-lg border border-white/5">
                       <span>执行自动降AI处理</span>
-                      <span className="text-cream-50 font-mono">-500 积分/次</span>
+                      <span className="text-cream-50 font-mono">按字数计费</span>
                     </div>
                   </div>
                 </div>
@@ -511,7 +511,7 @@ export default function Home() {
             { q: "生成正文前一定会先生成大纲吗？", a: "是的。为了保证交付质量和方向正确，系统强制执行“先大纲、后正文”的流程。您必须确认大纲后，系统才会开始生成正文。" },
             { q: "如果对生成的大纲不满意，可以修改吗？", a: "可以。在大纲确认环节，您可以直接在输入框中提出修改意见，系统会根据您的意见重新调整大纲结构。" },
             { q: "最终生成后会提供哪些文件？", a: "生成完成后，您可以在工作台直接下载最终版的 Word 正文文档，以及一份 PDF 格式的引用核验报告。" },
-            { q: "什么是自动降AI功能？", a: "自动降AI是我们提供的一项增值服务。如果您觉得生成的文章AI痕迹较重，可以点击该功能，系统会使用专门的引擎对文本特征进行优化，使其更贴近人类写作风格。每次使用扣除 500 积分。" },
+            { q: "什么是自动降AI功能？", a: "自动降AI是我们提供的一项增值服务。如果您觉得生成的文章AI痕迹较重，可以点击该功能，系统会使用专门的引擎对文本特征进行优化，使其更贴近人类写作风格。费用按正文字数自动计算。" },
             { q: "如何获取和使用激活码？", a: "请通过页面上的联系方式添加客服支持团队微信购买激活码。获取激活码后，登录您的账号，在“积分兑换”页面输入即可增加对应积分。" },
             { q: "激活码可以重复使用吗？", a: "每个激活码仅限使用一次。但同一个账号可以多次兑换不同的激活码，积分会累计叠加，长期有效。" },
             { q: "如果遇到特殊要求或系统无法处理的情况怎么办？", a: "您可以随时联系我们的专属客服寻求人工协助。我们的团队拥有丰富的处理经验，可以帮您解决复杂或特殊的写作需求。" }

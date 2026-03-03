@@ -65,11 +65,11 @@ export const adminFiles = [
 export const pricingRows = [
   {
     label: "生成文章",
-    quota: 500
+    costPer1000Words: 230
   },
   {
     label: "自动降AI",
-    quota: 500
+    costPer1000Words: 250
   }
 ];
 

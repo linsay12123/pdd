@@ -144,10 +144,7 @@ export function BillingPageClient({
 
               <div className="flex flex-wrap gap-4 text-sm text-brand-700">
                 <div className="bg-brand-950/50 px-3 py-1.5 rounded-lg border border-white/5">
-                  生成文章：<span className="text-cream-50 font-mono">500</span> 积分/次
-                </div>
-                <div className="bg-brand-950/50 px-3 py-1.5 rounded-lg border border-white/5">
-                  自动降AI：<span className="text-cream-50 font-mono">500</span> 积分/次
+                  积分按字数计费，任务提交后自动计算
                 </div>
               </div>
             </div>

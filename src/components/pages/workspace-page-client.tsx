@@ -6,6 +6,7 @@ import { requestConfirmPrimaryFile } from "@/src/lib/tasks/request-confirm-prima
 import { requestTaskDownload } from "@/src/lib/tasks/request-task-download";
 import { requestOutlineApproval } from "@/src/lib/tasks/request-outline-approval";
 import { requestOutlineFeedback } from "@/src/lib/tasks/request-outline-feedback";
+import { requestHumanize } from "@/src/lib/tasks/request-humanize";
 import {
   requestTaskBootstrap,
 } from "@/src/lib/tasks/request-task-bootstrap";
@@ -60,6 +61,7 @@ export function WorkspacePageClient({ initialQuota }: WorkspacePageClientProps) 
   const [isRegeneratingOutline, setIsRegeneratingOutline] = useState(false);
   const [isApprovingOutline, setIsApprovingOutline] = useState(false);
   const [downloadingOutputId, setDownloadingOutputId] = useState<string | null>(null);
+  const [isHumanizing, setIsHumanizing] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -380,15 +382,8 @@ export function WorkspacePageClient({ initialQuota }: WorkspacePageClientProps) 
 
               <div className="mt-8 pt-6 border-t border-white/10">
                 <div className="bg-brand-950 p-4 rounded-xl border border-white/5">
-                  <h4 className="text-sm font-medium text-cream-100 mb-3">预估消耗</h4>
-                  <div className="flex justify-between items-center mb-2 text-sm">
-                    <span className="text-brand-700">生成文章</span>
-                    <span className="text-cream-50 font-mono">500 积分</span>
-                  </div>
-                  <div className="flex justify-between items-center text-sm">
-                    <span className="text-brand-700">自动降AI (可选)</span>
-                    <span className="text-cream-50 font-mono">500 积分</span>
-                  </div>
+                  <h4 className="text-sm font-medium text-cream-100 mb-3">费用说明</h4>
+                  <p className="text-xs text-brand-700">积分按字数计费，任务提交后系统自动计算并冻结所需积分。</p>
                 </div>
               </div>
             </div>
@@ -456,7 +451,7 @@ export function WorkspacePageClient({ initialQuota }: WorkspacePageClientProps) 
                     <div className="flex flex-col gap-1">
                       <div className="flex items-center gap-2 text-sm text-brand-700">
                         <AlertCircle className="w-4 h-4 text-gold-500" />
-                        点击开始后，将扣除 <span className="text-gold-400 font-mono font-bold">500</span> 积分
+                        点击开始后，积分将按目标字数自动扣除
                       </div>
                       <div className="text-xs text-brand-700 ml-6">生成失败全额返还积分</div>
                     </div>
@@ -720,10 +715,29 @@ export function WorkspacePageClient({ initialQuota }: WorkspacePageClientProps) 
                         </p>
                       </div>
                       <div className="flex flex-col items-end shrink-0">
-                        <span className="text-xs text-gold-400 mb-2 font-mono">扣除 500 积分</span>
-                        <Button className="gap-2">
+                        <Button
+                          className="gap-2"
+                          disabled={isHumanizing}
+                          onClick={async () => {
+                            if (!activeTask) return;
+                            setIsHumanizing(true);
+                            setNotice({ tone: "info", text: "降AI处理已提交，请稍候..." });
+                            try {
+                              const result = await requestHumanize({ taskId: activeTask.task.id });
+                              setNotice({ tone: "success", text: result.message });
+                              setQuota((prev) => prev - result.frozenQuota);
+                            } catch (err) {
+                              setNotice({
+                                tone: "error",
+                                text: err instanceof Error ? err.message : "降AI处理失败，请稍后再试。"
+                              });
+                            } finally {
+                              setIsHumanizing(false);
+                            }
+                          }}
+                        >
                           <Zap className="w-4 h-4" />
-                          一键降AI
+                          {isHumanizing ? "处理中..." : "一键降AI"}
                         </Button>
                       </div>
                     </div>

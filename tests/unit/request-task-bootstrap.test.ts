@@ -88,7 +88,7 @@ describe("task bootstrap requests", () => {
     expect(result.outline?.citationStyle).toBe("Harvard");
   });
 
-  it("shows the upload error when the second request fails", async () => {
+  it("calls cancel to release quota when the upload fails, then rethrows", async () => {
     const fetchSpy = vi
       .fn()
       .mockResolvedValueOnce({
@@ -110,6 +110,14 @@ describe("task bootstrap requests", () => {
         json: async () => ({
           message: "上传文件失败"
         })
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          ok: true,
+          releasedQuota: 500,
+          message: "任务已取消，积分已返还。"
+        })
       });
 
     await expect(
@@ -119,6 +127,10 @@ describe("task bootstrap requests", () => {
         fetchImpl: fetchSpy as typeof fetch
       })
     ).rejects.toThrow("上传文件失败");
+
+    expect(fetchSpy).toHaveBeenCalledTimes(3);
+    expect(fetchSpy.mock.calls[2][0]).toBe("/api/tasks/task-2/cancel");
+    expect(fetchSpy.mock.calls[2][1]?.method).toBe("POST");
   });
 
   it("submits the selected primary file back to the confirmation route", async () => {

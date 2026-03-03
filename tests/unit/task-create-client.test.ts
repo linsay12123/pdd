@@ -14,8 +14,8 @@ describe("task create client", () => {
           citationStyle: "APA 7",
           specialRequirements: "Focus on finance."
         },
-        frozenQuota: 500,
-        message: "任务已创建，500 积分已冻结。"
+        frozenQuota: 460,
+        message: "任务已创建，460 积分已冻结。"
       })
     });
 
@@ -37,7 +37,7 @@ describe("task create client", () => {
     const fetchSpy = vi.fn().mockResolvedValue({
       ok: false,
       json: async () => ({
-        message: "当前积分不足 500，请先充值后再创建任务。"
+        message: "当前积分不足，请先充值后再创建任务。"
       })
     });
 
@@ -46,6 +46,6 @@ describe("task create client", () => {
         specialRequirements: "",
         fetchImpl: fetchSpy as typeof fetch
       })
-    ).rejects.toThrow("当前积分不足 500");
+    ).rejects.toThrow("当前积分不足");
   });
 });

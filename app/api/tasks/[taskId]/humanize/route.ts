@@ -1,7 +1,19 @@
 import { NextResponse } from "next/server";
+import { requireCurrentSessionUser } from "@/src/lib/auth/current-user";
 import { countBodyWords } from "@/src/lib/drafts/word-count";
-import { getTaskSummary } from "@/src/lib/tasks/repository";
+import { quoteHumanizeTaskCost } from "@/src/lib/billing/quote-task-cost";
+import { freezeQuota } from "@/src/lib/billing/freeze-quota";
+import {
+  appendPaymentLedgerEntry,
+  getUserWallet,
+  setUserWallet
+} from "@/src/lib/payments/repository";
+import {
+  getTaskSummary,
+  listTaskDraftVersions
+} from "@/src/lib/tasks/repository";
 import { queueHumanizeDraft } from "@/trigger/jobs/humanize-draft";
+import type { SessionUser } from "@/src/types/auth";
 
 type RouteContext = {
   params: Promise<{
@@ -9,55 +21,99 @@ type RouteContext = {
   }>;
 };
 
-type HumanizeRequestBody = {
-  draftMarkdown?: string;
+type HumanizeRouteDependencies = {
+  requireUser?: () => Promise<SessionUser>;
 };
 
-export async function POST(request: Request, context: RouteContext) {
+export async function handleHumanizeRequest(
+  request: Request,
+  context: RouteContext,
+  dependencies: HumanizeRouteDependencies = {}
+) {
   const { taskId } = await context.params;
+
+  let user: SessionUser;
+  try {
+    user = await (dependencies.requireUser ?? requireCurrentSessionUser)();
+  } catch {
+    return NextResponse.json(
+      { ok: false, taskId, message: "请先登录后再使用降AI功能。" },
+      { status: 401 }
+    );
+  }
+
   const task = getTaskSummary(taskId);
 
-  if (!task) {
+  if (!task || task.userId !== user.id) {
     return NextResponse.json(
-      {
-        ok: false,
-        taskId,
-        message: "未找到这个任务，暂时不能开始降 AI。"
-      },
+      { ok: false, taskId, message: "未找到这个任务。" },
       { status: 404 }
     );
   }
 
-  const body = (await request.json().catch(() => null)) as HumanizeRequestBody | null;
-  const draftMarkdown = body?.draftMarkdown?.trim();
+  const draftVersions = listTaskDraftVersions(taskId);
+  const activeDraft =
+    draftVersions.find((v) => v.isActive) ?? draftVersions[draftVersions.length - 1];
 
-  if (!draftMarkdown) {
+  if (!activeDraft) {
     return NextResponse.json(
-      {
-        ok: false,
-        taskId,
-        message: "要先提供当前英文正文，系统才能开始自动降 AI。"
-      },
+      { ok: false, taskId, message: "找不到已生成的正文，请先完成文章生成。" },
       { status: 400 }
     );
   }
 
-  const estimatedQuotaCost = Math.max(1, Math.ceil(countBodyWords(draftMarkdown) / 500));
+  const draftMarkdown = [
+    activeDraft.title ? `# ${activeDraft.title}` : "",
+    activeDraft.bodyMarkdown,
+    activeDraft.referencesMarkdown
+      ? `## References\n${activeDraft.referencesMarkdown}`
+      : ""
+  ]
+    .filter(Boolean)
+    .join("\n\n");
+
+  const bodyWordCount = countBodyWords(draftMarkdown);
+  const quotaCost = quoteHumanizeTaskCost(bodyWordCount);
+
+  const wallet = getUserWallet(user.id);
+  let frozen;
+
+  try {
+    frozen = freezeQuota({
+      wallet,
+      amount: quotaCost,
+      taskId,
+      chargePath: "humanize"
+    });
+  } catch {
+    return NextResponse.json(
+      { ok: false, taskId, message: "积分不足，请充值后再试。" },
+      { status: 400 }
+    );
+  }
+
+  setUserWallet(user.id, frozen.wallet);
+  appendPaymentLedgerEntry(user.id, frozen.entry);
+
   const queuedJob = await queueHumanizeDraft({
     taskId,
-    draftMarkdown
+    draftMarkdown,
+    userId: user.id,
+    reservationSnapshot: frozen.reservation
   });
 
   return NextResponse.json(
     {
       ok: true,
       taskId,
-      estimatedQuotaCost,
-      frozenQuota: estimatedQuotaCost,
+      frozenQuota: quotaCost,
       queuedJob,
-      message:
-        "自动降 AI 已进入排队。当前先按预估额度冻结，后面的真实扣费会在计费引擎接入后替换。"
+      message: "降AI处理已排队，完成后可下载新文档。"
     },
     { status: 202 }
   );
+}
+
+export async function POST(request: Request, context: RouteContext) {
+  return handleHumanizeRequest(request, context);
 }
