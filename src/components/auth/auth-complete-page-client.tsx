@@ -4,12 +4,14 @@ import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { ArrowRight, LoaderCircle } from "lucide-react";
 import { Button } from "@/src/components/ui/Button";
+import { buildWorkspaceEntryPath } from "@/src/lib/auth/auth-form";
+import { syncCurrentBrowserSessionToServer } from "@/src/lib/auth/client-session-sync";
 
 type AuthCompletePageClientProps = {
   nextPath: string;
 };
 
-const maxAttempts = 5;
+const maxAttempts = 8;
 const retryDelayMs = 500;
 
 export function AuthCompletePageClient({ nextPath }: AuthCompletePageClientProps) {
@@ -23,6 +25,8 @@ export function AuthCompletePageClient({ nextPath }: AuthCompletePageClientProps
 
     async function checkReady(currentAttempt: number) {
       try {
+        await syncCurrentBrowserSessionToServer();
+
         const response = await fetch("/api/auth/session-ready", {
           cache: "no-store"
         });
@@ -87,15 +91,15 @@ export function AuthCompletePageClient({ nextPath }: AuthCompletePageClientProps
   if (timedOut) {
     return (
       <div className="space-y-6">
-        <div className="rounded-2xl border border-white/10 bg-brand-900/40 p-5 text-left">
-          <p className="text-sm text-brand-700 leading-7">{statusText}</p>
-          <p className="mt-3 text-xs text-brand-700">
-            这通常是网络抖动，或者登录状态还没完全同步。您可以先重新尝试进入工作台。
-          </p>
-        </div>
+      <div className="rounded-2xl border border-white/10 bg-brand-900/40 p-5 text-left">
+        <p className="text-sm text-brand-700 leading-7">{statusText}</p>
+        <p className="mt-3 text-xs text-brand-700">
+          这通常是网络抖动，或者浏览器里的登录状态还没完全交给网站后台。您可以先重新尝试进入工作台。
+        </p>
+      </div>
 
-        <div className="grid gap-3">
-          <Button fullWidth size="lg" onClick={() => window.location.assign(nextPath)}>
+      <div className="grid gap-3">
+          <Button fullWidth size="lg" onClick={() => window.location.assign(buildWorkspaceEntryPath(nextPath))}>
             重新进入工作台
           </Button>
           <Button fullWidth size="lg" variant="secondary" onClick={() => window.location.assign("/login")}>

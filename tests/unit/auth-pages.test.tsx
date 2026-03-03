@@ -5,6 +5,7 @@ import AuthCompletePage from "../../app/auth/complete/page";
 import ForgotPasswordPage from "../../app/forgot-password/page";
 import LoginPage from "../../app/login/page";
 import RegisterPage from "../../app/register/page";
+import WorkspaceEntryPage from "../../app/workspace-entry/page";
 
 describe("auth pages", () => {
   it("renders the branded login page", async () => {
@@ -41,6 +42,14 @@ describe("auth pages", () => {
     const html = renderToStaticMarkup(page);
 
     expect(html).toContain("登录成功，正在进入工作台");
+    expect(html).toContain("联系客服支持团队");
+  });
+
+  it("renders the branded workspace-entry page", async () => {
+    const page = await WorkspaceEntryPage({});
+    const html = renderToStaticMarkup(page);
+
+    expect(html).toContain("正在进入工作台");
     expect(html).toContain("联系客服支持团队");
   });
 });

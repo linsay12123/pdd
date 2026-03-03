@@ -6,10 +6,11 @@ import { Mail, Lock, ArrowRight } from "lucide-react";
 import { Button } from "@/src/components/ui/Button";
 import { createSupabaseBrowserClient } from "@/src/lib/supabase/client";
 import {
-  buildAuthCompletePath,
+  buildWorkspaceEntryPath,
   getAuthErrorMessage,
   normalizeRedirectTarget
 } from "@/src/lib/auth/auth-form";
+import { getSessionTokens, syncSessionToServer } from "@/src/lib/auth/client-session-sync";
 
 type LoginFormProps = {
   redirectTo?: string;
@@ -29,7 +30,7 @@ export function LoginForm({ redirectTo, initialStatusText = "" }: LoginFormProps
 
     try {
       const supabase = createSupabaseBrowserClient();
-      const { error } = await supabase.auth.signInWithPassword({
+      const { data, error } = await supabase.auth.signInWithPassword({
         email: email.trim(),
         password
       });
@@ -40,8 +41,9 @@ export function LoginForm({ redirectTo, initialStatusText = "" }: LoginFormProps
       }
 
       setStatusText("登录成功，正在进入工作台...");
+      await syncSessionToServer(getSessionTokens(data.session));
       if (typeof window !== "undefined") {
-        window.location.assign(buildAuthCompletePath(normalizeRedirectTarget(redirectTo)));
+        window.location.assign(buildWorkspaceEntryPath(normalizeRedirectTarget(redirectTo)));
       }
     } catch {
       setStatusText("登录失败，请稍后再试");

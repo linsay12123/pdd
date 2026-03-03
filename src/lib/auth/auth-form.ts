@@ -17,6 +17,15 @@ export function buildAuthCompletePath(input?: string | null) {
   return `/auth/complete?${query.toString()}`;
 }
 
+export function buildWorkspaceEntryPath(input?: string | null) {
+  const safeTarget = normalizeRedirectTarget(input);
+  const query = new URLSearchParams({
+    next: safeTarget
+  });
+
+  return `/workspace-entry?${query.toString()}`;
+}
+
 export function validateRegisterInput(input: {
   displayName: string;
   email: string;

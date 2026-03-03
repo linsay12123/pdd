@@ -6,10 +6,11 @@ import { Mail, Lock, ArrowRight, User } from "lucide-react";
 import { Button } from "@/src/components/ui/Button";
 import { createSupabaseBrowserClient } from "@/src/lib/supabase/client";
 import {
-  buildAuthCompletePath,
+  buildWorkspaceEntryPath,
   getAuthErrorMessage,
   validateRegisterInput
 } from "@/src/lib/auth/auth-form";
+import { getSessionTokens, syncSessionToServer } from "@/src/lib/auth/client-session-sync";
 import {
   getRegisterCompletionMessage
 } from "@/src/lib/auth/register-flow";
@@ -76,8 +77,9 @@ export function RegisterForm() {
           hasSession: true
         })
       );
+      await syncSessionToServer(getSessionTokens(loginResult.data.session));
       if (typeof window !== "undefined") {
-        window.location.assign(buildAuthCompletePath("/workspace"));
+        window.location.assign(buildWorkspaceEntryPath("/workspace"));
       }
     } catch {
       setStatusText("注册失败，请稍后再试");

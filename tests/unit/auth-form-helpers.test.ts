@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   buildAuthCompletePath,
+  buildWorkspaceEntryPath,
   getAuthErrorMessage,
   normalizeRedirectTarget,
   validateRegisterInput
@@ -20,6 +21,13 @@ describe("auth form helpers", () => {
     expect(buildAuthCompletePath("/tasks")).toBe("/auth/complete?next=%2Ftasks");
     expect(buildAuthCompletePath("https://evil.example.com")).toBe(
       "/auth/complete?next=%2Fworkspace"
+    );
+  });
+
+  it("builds a safe workspace-entry path", () => {
+    expect(buildWorkspaceEntryPath("/tasks")).toBe("/workspace-entry?next=%2Ftasks");
+    expect(buildWorkspaceEntryPath("https://evil.example.com")).toBe(
+      "/workspace-entry?next=%2Fworkspace"
     );
   });
 

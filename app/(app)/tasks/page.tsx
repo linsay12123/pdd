@@ -1,8 +1,10 @@
 import { Button } from "@/src/components/ui/Button";
 import { FileText, Download, Clock, CheckCircle2, AlertCircle, RefreshCw, MoreVertical } from "lucide-react";
 import Link from "next/link";
+import { buildWorkspaceEntryPath } from "@/src/lib/auth/auth-form";
 
 export default function Tasks() {
+  const workspaceEntryPath = buildWorkspaceEntryPath("/workspace");
   const tasks = [
     {
       id: "TSK-20231025-001",
@@ -72,7 +74,7 @@ export default function Tasks() {
           <p className="text-brand-700">查看历史生成记录与下载交付文件</p>
         </div>
 
-        <Link href="/workspace">
+        <Link href={workspaceEntryPath}>
           <Button className="gap-2">新建任务</Button>
         </Link>
       </div>
