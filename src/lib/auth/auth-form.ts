@@ -8,6 +8,15 @@ export function normalizeRedirectTarget(input?: string | null) {
   return value;
 }
 
+export function buildAuthCompletePath(input?: string | null) {
+  const safeTarget = normalizeRedirectTarget(input);
+  const query = new URLSearchParams({
+    next: safeTarget
+  });
+
+  return `/auth/complete?${query.toString()}`;
+}
+
 export function validateRegisterInput(input: {
   displayName: string;
   email: string;

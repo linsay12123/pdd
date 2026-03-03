@@ -6,6 +6,7 @@ import { Mail, Lock, ArrowRight, User } from "lucide-react";
 import { Button } from "@/src/components/ui/Button";
 import { createSupabaseBrowserClient } from "@/src/lib/supabase/client";
 import {
+  buildAuthCompletePath,
   getAuthErrorMessage,
   validateRegisterInput
 } from "@/src/lib/auth/auth-form";
@@ -76,7 +77,7 @@ export function RegisterForm() {
         })
       );
       if (typeof window !== "undefined") {
-        window.location.assign("/workspace");
+        window.location.assign(buildAuthCompletePath("/workspace"));
       }
     } catch {
       setStatusText("注册失败，请稍后再试");

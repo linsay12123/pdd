@@ -38,39 +38,91 @@ type SessionUserProfile = SessionUser & {
   isFrozen: boolean;
 };
 
+export type SessionUserResolution =
+  | {
+      status: "anonymous";
+    }
+  | {
+      status: "profile_missing";
+      authUserId: string;
+      email: string;
+    }
+  | {
+      status: "frozen";
+      user: SessionUser;
+    }
+  | {
+      status: "ready";
+      user: SessionUser;
+    };
+
 export async function getCurrentSessionUser(
   options: GetCurrentSessionUserOptions = {}
 ): Promise<SessionUser | null> {
-  const profile = await getCurrentSessionUserProfile(options);
+  const resolution = await getCurrentSessionUserResolution(options);
 
-  if (!profile || profile.isFrozen) {
+  if (resolution.status !== "ready") {
     return null;
   }
 
-  return {
-    id: profile.id,
-    email: profile.email,
-    role: profile.role
-  };
+  return resolution.user;
 }
 
 export async function requireCurrentSessionUser(
   options: GetCurrentSessionUserOptions = {}
 ): Promise<SessionUser> {
-  const profile = await getCurrentSessionUserProfile(options);
+  const resolution = await getCurrentSessionUserResolution(options);
 
-  if (!profile) {
+  if (resolution.status === "anonymous" || resolution.status === "profile_missing") {
     throw new Error("AUTH_REQUIRED");
   }
 
-  if (profile.isFrozen) {
+  if (resolution.status === "frozen") {
     throw new Error("ACCOUNT_FROZEN");
   }
 
-  return {
+  return resolution.user;
+}
+
+export async function getCurrentSessionUserResolution(
+  options: GetCurrentSessionUserOptions = {}
+): Promise<SessionUserResolution> {
+  const profile = await getCurrentSessionUserProfile(options);
+
+  if (!profile) {
+    const supabase = options.supabase ?? (await createSupabaseServerClient());
+    const authResult = await supabase.auth.getUser();
+    const authUser = authResult.data.user;
+
+    if (!authUser) {
+      return {
+        status: "anonymous"
+      };
+    }
+
+    return {
+      status: "profile_missing",
+      authUserId: authUser.id,
+      email: authUser.email ?? ""
+    };
+  }
+
+  const normalizedUser = {
     id: profile.id,
     email: profile.email,
     role: profile.role
+  } satisfies SessionUser;
+
+  if (profile.isFrozen) {
+    return {
+      status: "frozen",
+      user: normalizedUser
+    };
+  }
+
+  return {
+    status: "ready",
+    user: normalizedUser
   };
 }
 

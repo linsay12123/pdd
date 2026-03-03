@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  buildAuthCompletePath,
   getAuthErrorMessage,
   normalizeRedirectTarget,
   validateRegisterInput
@@ -13,6 +14,13 @@ describe("auth form helpers", () => {
     );
     expect(normalizeRedirectTarget("javascript:alert(1)")).toBe("/workspace");
     expect(normalizeRedirectTarget("")).toBe("/workspace");
+  });
+
+  it("builds a safe auth-complete redirect path", () => {
+    expect(buildAuthCompletePath("/tasks")).toBe("/auth/complete?next=%2Ftasks");
+    expect(buildAuthCompletePath("https://evil.example.com")).toBe(
+      "/auth/complete?next=%2Fworkspace"
+    );
   });
 
   it("validates the register form before submit", () => {

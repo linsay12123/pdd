@@ -1,6 +1,7 @@
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
+import AuthCompletePage from "../../app/auth/complete/page";
 import ForgotPasswordPage from "../../app/forgot-password/page";
 import LoginPage from "../../app/login/page";
 import RegisterPage from "../../app/register/page";
@@ -33,5 +34,13 @@ describe("auth pages", () => {
 
     expect(html).toContain("找回密码");
     expect(html).toContain("发送重置密码邮件");
+  });
+
+  it("renders the branded auth-complete page", async () => {
+    const page = await AuthCompletePage({});
+    const html = renderToStaticMarkup(page);
+
+    expect(html).toContain("登录成功，正在进入工作台");
+    expect(html).toContain("联系客服支持团队");
   });
 });
