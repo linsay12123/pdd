@@ -28,6 +28,8 @@ export type TaskSummary = {
   outlineRevisionCount?: number;
   primaryRequirementFileId?: string | null;
   latestOutlineVersionId?: string | null;
+  latestDraftVersionId?: string | null;
+  currentCandidateDraftId?: string | null;
 };
 
 export type TaskFileRole = "requirement" | "background" | "irrelevant" | "unknown";
@@ -84,6 +86,47 @@ export type TaskOutputKind =
   | "final_docx"
   | "reference_report_pdf"
   | "humanized_docx";
+
+export type TaskDraftVersion = {
+  id: string;
+  taskId: string;
+  userId: string;
+  versionNumber: number;
+  title: string;
+  bodyMarkdown: string;
+  bodyWordCount: number;
+  referencesMarkdown: string;
+  isActive: boolean;
+  isCandidate: boolean;
+  createdAt: string;
+};
+
+export type TaskDraftVersionInput = Omit<
+  TaskDraftVersion,
+  "id" | "createdAt"
+> &
+  Partial<Pick<TaskDraftVersion, "id" | "createdAt">>;
+
+export type TaskReferenceCheck = {
+  id: string;
+  taskId: string;
+  draftVersionId: string;
+  userId: string;
+  rawReference: string;
+  detectedTitle?: string;
+  detectedYear?: string;
+  detectedDoi?: string;
+  detectedUrl?: string;
+  verdict: "matching" | "risky";
+  reasoning: string;
+  createdAt: string;
+};
+
+export type TaskReferenceCheckInput = Omit<
+  TaskReferenceCheck,
+  "id" | "createdAt"
+> &
+  Partial<Pick<TaskReferenceCheck, "id" | "createdAt">>;
 
 export type TaskOutputRecord = {
   id: string;

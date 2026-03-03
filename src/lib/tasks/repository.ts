@@ -1,12 +1,16 @@
 import { incrementMetric } from "@/src/lib/observability/metrics";
 import { logTaskTransition } from "@/src/lib/observability/logger";
 import type {
+  TaskDraftVersion,
+  TaskDraftVersionInput,
   TaskFileRecord,
   TaskFileRecordInput,
   TaskOutlineVersion,
   TaskOutlineVersionInput,
   TaskOutputRecord,
   TaskOutputRecordInput,
+  TaskReferenceCheck,
+  TaskReferenceCheckInput,
   TaskStatus,
   TaskSummary
 } from "@/src/types/tasks";
@@ -14,6 +18,8 @@ import type {
 const taskStore = new Map<string, TaskSummary>();
 const taskFileStore = new Map<string, TaskFileRecord[]>();
 const taskOutlineStore = new Map<string, TaskOutlineVersion[]>();
+const taskDraftStore = new Map<string, TaskDraftVersion[]>();
+const taskReferenceCheckStore = new Map<string, TaskReferenceCheck[]>();
 const taskOutputStore = new Map<string, TaskOutputRecord[]>();
 
 export function saveTaskSummary(task: TaskSummary) {
@@ -131,6 +137,61 @@ export function replaceTaskOutlineVersions(taskId: string, versions: TaskOutline
 
 export function resetTaskOutlineStore() {
   taskOutlineStore.clear();
+}
+
+export function saveTaskDraftVersion(record: TaskDraftVersionInput) {
+  const existing = taskDraftStore.get(record.taskId) ?? [];
+  const normalizedRecord: TaskDraftVersion = {
+    id: record.id || `draft_${record.taskId}_${existing.length + 1}`,
+    createdAt: record.createdAt || new Date().toISOString(),
+    ...record
+  };
+  const nextVersions = [...existing, normalizedRecord];
+
+  taskDraftStore.set(record.taskId, nextVersions);
+  return normalizedRecord;
+}
+
+export function listTaskDraftVersions(taskId: string) {
+  return taskDraftStore.get(taskId) ?? [];
+}
+
+export function getTaskDraftVersion(taskId: string, draftVersionId: string) {
+  return listTaskDraftVersions(taskId).find((item) => item.id === draftVersionId) ?? null;
+}
+
+export function replaceTaskDraftVersions(taskId: string, versions: TaskDraftVersion[]) {
+  taskDraftStore.set(taskId, versions);
+  return versions;
+}
+
+export function resetTaskDraftStore() {
+  taskDraftStore.clear();
+}
+
+export function saveTaskReferenceCheck(record: TaskReferenceCheckInput) {
+  const existing = taskReferenceCheckStore.get(record.taskId) ?? [];
+  const normalizedRecord: TaskReferenceCheck = {
+    id: record.id || `ref_${record.taskId}_${existing.length + 1}`,
+    createdAt: record.createdAt || new Date().toISOString(),
+    ...record
+  };
+  const nextChecks = [...existing, normalizedRecord];
+
+  taskReferenceCheckStore.set(record.taskId, nextChecks);
+  return normalizedRecord;
+}
+
+export function saveTaskReferenceChecks(records: TaskReferenceCheckInput[]) {
+  return records.map((record) => saveTaskReferenceCheck(record));
+}
+
+export function listTaskReferenceChecks(taskId: string) {
+  return taskReferenceCheckStore.get(taskId) ?? [];
+}
+
+export function resetTaskReferenceCheckStore() {
+  taskReferenceCheckStore.clear();
 }
 
 export function saveTaskOutputRecord(record: TaskOutputRecordInput) {
