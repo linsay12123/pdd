@@ -40,12 +40,12 @@ begin
     raise exception 'ACTIVATION_CODE_NOT_FOUND';
   end if;
 
-  update public.activation_codes
+  update public.activation_codes as ac
   set status = 'used',
       used_by_user_id = p_user_id,
       used_at = timezone('utc', now())
-  where code = v_code
-    and status = 'unused';
+  where ac.code = v_code
+    and ac.status = 'unused';
 
   if not found then
     raise exception 'ACTIVATION_CODE_ALREADY_USED';
