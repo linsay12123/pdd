@@ -85,7 +85,7 @@ export async function GET() {
 
       const missing: string[] = [];
       for (const table of tables) {
-        const { error } = await client.from(table).select("id").limit(0);
+        const { error } = await client.from(table).select("*").limit(0);
         if (error) missing.push(`${table}: ${error.message}`);
       }
 
@@ -100,7 +100,11 @@ export async function GET() {
     }
   }
 
-  const allOk = Object.values(checks).every((c) => c.ok);
+  const requiredKeys = [
+    "SUPABASE_URL", "SUPABASE_ANON_KEY", "SUPABASE_SERVICE_ROLE_KEY",
+    "OPENAI_API_KEY", "SUPABASE_DB_CONNECTION", "DB_TABLES"
+  ];
+  const allOk = requiredKeys.every((k) => checks[k]?.ok);
 
   return NextResponse.json(
     {
