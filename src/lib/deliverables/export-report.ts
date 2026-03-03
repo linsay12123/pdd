@@ -1,7 +1,11 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { spawn } from "node:child_process";
-import { saveTaskOutputRecord } from "@/src/lib/tasks/repository";
+import {
+  createTaskOutputStoragePath,
+  resolveStoredFileDiskPath
+} from "@/src/lib/storage/task-output-files";
+import { saveTaskOutput } from "@/src/lib/tasks/task-output-store";
 
 export type ReferenceReportEntry = {
   rawReference: string;
@@ -11,6 +15,7 @@ export type ReferenceReportEntry = {
 
 export type ReferenceReportInput = {
   taskId: string;
+  userId: string;
   reportId: string;
   createdAt: string;
   taskSummary: {
@@ -21,12 +26,13 @@ export type ReferenceReportInput = {
   closingSummary: string;
 };
 
-export function resolveReferenceReportOutputPath(taskId: string) {
-  return path.join(
-    process.cwd(),
-    "output",
-    "pdf",
-    `${taskId}-reference-report.pdf`
+export function resolveReferenceReportOutputPath(userId: string, taskId: string) {
+  return resolveStoredFileDiskPath(
+    createTaskOutputStoragePath(
+      userId,
+      taskId,
+      "reference-report.pdf"
+    )
   );
 }
 
@@ -40,7 +46,12 @@ export function prepareReferenceReportPayload(input: ReferenceReportInput) {
 
 export async function exportReferenceReport(input: ReferenceReportInput) {
   const payload = prepareReferenceReportPayload(input);
-  const outputPath = resolveReferenceReportOutputPath(input.taskId);
+  const storagePath = createTaskOutputStoragePath(
+    input.userId,
+    input.taskId,
+    "reference-report.pdf"
+  );
+  const outputPath = resolveStoredFileDiskPath(storagePath);
   const tempDir = path.join(process.cwd(), "tmp", "pdfs");
   const payloadPath = path.join(tempDir, `${input.taskId}-reference-report.json`);
 
@@ -53,15 +64,17 @@ export async function exportReferenceReport(input: ReferenceReportInput) {
     [payloadPath, outputPath]
   );
 
-  saveTaskOutputRecord({
+  await saveTaskOutput({
     taskId: input.taskId,
+    userId: input.userId,
     outputKind: "reference_report_pdf",
-    storagePath: outputPath
+    storagePath
   });
 
   return {
     outputPath,
-    payloadPath
+    payloadPath,
+    storagePath
   };
 }
 

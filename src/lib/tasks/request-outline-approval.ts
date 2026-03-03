@@ -10,6 +10,11 @@ export type OutlineApprovalPayload = {
     id: string;
     isApproved: boolean;
   };
+  downloads: {
+    finalDocxOutputId: string | null;
+    referenceReportOutputId: string | null;
+  };
+  finalWordCount: number;
   message: string;
 };
 

@@ -12,6 +12,7 @@ describe("expiry rules", () => {
     resetTaskOutputStore();
     const output = saveTaskOutputRecord({
       taskId: "task-expire-1",
+      userId: "u1",
       outputKind: "final_docx",
       storagePath: "users/u1/tasks/task-expire-1/final.docx",
       createdAt: "2026-03-01T10:00:00.000Z",
@@ -38,6 +39,7 @@ describe("expiry rules", () => {
     resetTaskOutputStore();
     const output = saveTaskOutputRecord({
       taskId: "task-expire-2",
+      userId: "u2",
       outputKind: "reference_report_pdf",
       storagePath: "users/u2/tasks/task-expire-2/report.pdf",
       createdAt: "2026-03-02T09:00:00.000Z",
@@ -59,6 +61,7 @@ describe("expiry rules", () => {
     resetTaskOutputStore();
     saveTaskOutputRecord({
       taskId: "task-expire-3",
+      userId: "u3",
       outputKind: "humanized_docx",
       storagePath: "users/u3/tasks/task-expire-3/humanized.docx",
       createdAt: "2026-03-01T08:00:00.000Z",

@@ -1,5 +1,8 @@
 import { NextResponse } from "next/server";
 import { requireCurrentSessionUser } from "@/src/lib/auth/current-user";
+import { buildSafetyIdentifier } from "@/src/lib/ai/safety-identifier";
+import { countBodyWords } from "@/src/lib/drafts/word-count";
+import { processApprovedTask } from "@/src/lib/tasks/process-approved-task";
 import { approveOutlineVersion } from "@/src/lib/tasks/save-outline-version";
 import { toSessionTaskPayload } from "@/src/lib/tasks/session-task";
 import type { SessionUser } from "@/src/types/auth";
@@ -16,6 +19,7 @@ type OutlineApproveBody = {
 
 type OutlineApproveDependencies = {
   requireUser?: () => Promise<SessionUser>;
+  processTask?: typeof processApprovedTask;
 };
 
 export async function handleOutlineApprovalRequest(
@@ -29,17 +33,26 @@ export async function handleOutlineApprovalRequest(
 
   try {
     const user = await (dependencies.requireUser ?? requireCurrentSessionUser)();
-    const result = await approveOutlineVersion({
+    await approveOutlineVersion({
       taskId: params.taskId,
       userId: user.id,
       outlineVersionId: body?.outlineVersionId?.trim() || undefined
     });
+    const processed = await (dependencies.processTask ?? processApprovedTask)(
+      {
+        taskId: params.taskId,
+        userId: user.id,
+        safetyIdentifier: buildSafetyIdentifier(user.id)
+      }
+    );
 
     return NextResponse.json({
       ok: true,
-      task: toSessionTaskPayload(result.task),
-      outlineVersion: result.outlineVersion,
-      message: "大纲已确认，系统开始进入正文写作。"
+      task: toSessionTaskPayload(processed.task),
+      outlineVersion: processed.outlineVersion,
+      downloads: processed.downloads,
+      finalWordCount: countBodyWords(processed.finalDraftMarkdown),
+      message: "大纲已确认，正文、核验和交付文件正在本次流程中完成。"
     });
   } catch (error) {
     if (error instanceof Error && error.message === "AUTH_REQUIRED") {

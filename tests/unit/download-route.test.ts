@@ -35,6 +35,7 @@ describe("task download route", () => {
     saveTaskOutputRecord({
       id: "out-1",
       taskId: "task-1",
+      userId: "user-1",
       outputKind: "final_docx",
       storagePath: "users/user-1/tasks/task-1/output/final.docx"
     });

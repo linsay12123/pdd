@@ -1,6 +1,22 @@
 import crypto from "node:crypto";
 import type { TaskOutputRecord } from "@/src/types/tasks";
 
+export function createDownloadSignature({
+  userId,
+  storagePath,
+  expiresAt
+}: {
+  userId: string;
+  storagePath: string;
+  expiresAt: string;
+}) {
+  return crypto
+    .createHash("sha256")
+    .update(`${userId}:${storagePath}:${expiresAt}`, "utf8")
+    .digest("hex")
+    .slice(0, 24);
+}
+
 export function createSignedDownloadUrl({
   output,
   userId
@@ -16,11 +32,11 @@ export function createSignedDownloadUrl({
     throw new Error("You do not have access to this file");
   }
 
-  const signature = crypto
-    .createHash("sha256")
-    .update(`${userId}:${output.storagePath}:${output.expiresAt}`, "utf8")
-    .digest("hex")
-    .slice(0, 24);
+  const signature = createDownloadSignature({
+    userId,
+    storagePath: output.storagePath,
+    expiresAt: output.expiresAt
+  });
 
   const encodedPath = encodeURIComponent(output.storagePath);
 

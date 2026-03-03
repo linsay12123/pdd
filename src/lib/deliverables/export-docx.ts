@@ -1,7 +1,8 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { spawn } from "node:child_process";
-import { saveTaskOutputRecord } from "@/src/lib/tasks/repository";
+import { createTaskOutputStoragePath, resolveStoredFileDiskPath } from "@/src/lib/storage/task-output-files";
+import { saveTaskOutput } from "@/src/lib/tasks/task-output-store";
 import type { TaskOutputKind } from "@/src/types/tasks";
 
 export type DocxSection = {
@@ -11,6 +12,7 @@ export type DocxSection = {
 
 export type DocxExportInput = {
   taskId: string;
+  userId: string;
   title: string;
   sections: DocxSection[];
   references: string[];
@@ -20,10 +22,13 @@ export type DocxExportInput = {
 };
 
 export function resolveDocxOutputPath(
+  userId: string,
   taskId: string,
   variant: "final" | "humanized" = "final"
 ) {
-  return path.join(process.cwd(), "output", "doc", `${taskId}-${variant}.docx`);
+  return resolveStoredFileDiskPath(
+    createTaskOutputStoragePath(userId, taskId, `${variant}.docx`)
+  );
 }
 
 export function prepareDocxExportPayload(input: DocxExportInput) {
@@ -40,7 +45,8 @@ export function prepareDocxExportPayload(input: DocxExportInput) {
 export async function exportDocx(input: DocxExportInput) {
   const payload = prepareDocxExportPayload(input);
   const variant = input.variant ?? "final";
-  const outputPath = resolveDocxOutputPath(input.taskId, variant);
+  const storagePath = createTaskOutputStoragePath(input.userId, input.taskId, `${variant}.docx`);
+  const outputPath = resolveStoredFileDiskPath(storagePath);
   const tempDir = path.join(process.cwd(), "tmp", "docs");
   const payloadPath = path.join(tempDir, `${input.taskId}-docx-payload.json`);
 
@@ -53,16 +59,18 @@ export async function exportDocx(input: DocxExportInput) {
     [payloadPath, outputPath]
   );
 
-  saveTaskOutputRecord({
+  await saveTaskOutput({
     taskId: input.taskId,
+    userId: input.userId,
     outputKind:
       input.outputKind ?? (variant === "humanized" ? "humanized_docx" : "final_docx"),
-    storagePath: outputPath
+    storagePath
   });
 
   return {
     outputPath,
-    payloadPath
+    payloadPath,
+    storagePath
   };
 }
 

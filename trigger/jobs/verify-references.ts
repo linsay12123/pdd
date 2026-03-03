@@ -12,6 +12,10 @@ type VerifyReferencesInput = {
 
 type ReferenceCheckResult = {
   rawReference: string;
+  detectedTitle?: string;
+  detectedYear?: string;
+  detectedDoi?: string;
+  detectedUrl?: string;
   verdict: ReferenceVerdict;
   reasoning: string;
   prompt: string;
@@ -45,6 +49,10 @@ export async function verifyReferencesForDraft({
 
     return {
       rawReference: entry.rawReference,
+      detectedTitle: entry.detectedTitle,
+      detectedYear: entry.detectedYear,
+      detectedDoi: entry.detectedDoi,
+      detectedUrl: entry.detectedUrl,
       verdict: result.verdict,
       reasoning: result.reasoning,
       prompt

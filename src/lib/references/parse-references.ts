@@ -1,3 +1,5 @@
+const referencesHeadingPattern = /^#{0,2}\s*References\s*$/im;
+
 export type ParsedReferenceEntry = {
   rawReference: string;
   detectedTitle?: string;
@@ -57,7 +59,7 @@ export function parseReferenceEntry(rawReference: string): ParsedReferenceEntry 
 }
 
 export function parseReferencesSection(markdown: string): ParsedReferenceEntry[] {
-  const [, referencesBlock = ""] = markdown.split(/^References$/m);
+  const [, referencesBlock = ""] = markdown.split(referencesHeadingPattern);
   const normalizedBlock = referencesBlock.trim();
 
   if (!normalizedBlock) {

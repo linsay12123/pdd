@@ -2,6 +2,7 @@
 
 import { Button } from "@/src/components/ui/Button";
 import { requestConfirmPrimaryFile } from "@/src/lib/tasks/request-confirm-primary-file";
+import { requestTaskDownload } from "@/src/lib/tasks/request-task-download";
 import { requestOutlineApproval } from "@/src/lib/tasks/request-outline-approval";
 import { requestOutlineFeedback } from "@/src/lib/tasks/request-outline-feedback";
 import {
@@ -36,6 +37,12 @@ type NoticeState = {
 
 type WorkspaceTaskState = TaskWorkflowPayload & {
   frozenQuota?: number;
+  downloads?: {
+    finalDocxOutputId: string | null;
+    referenceReportOutputId: string | null;
+    humanizedDocxOutputId?: string | null;
+  };
+  finalWordCount?: number;
 };
 
 export function WorkspacePageClient({ initialQuota }: WorkspacePageClientProps) {
@@ -51,6 +58,7 @@ export function WorkspacePageClient({ initialQuota }: WorkspacePageClientProps) 
   const [isConfirmingPrimaryFile, setIsConfirmingPrimaryFile] = useState(false);
   const [isRegeneratingOutline, setIsRegeneratingOutline] = useState(false);
   const [isApprovingOutline, setIsApprovingOutline] = useState(false);
+  const [downloadingOutputId, setDownloadingOutputId] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -247,7 +255,9 @@ export function WorkspacePageClient({ initialQuota }: WorkspacePageClientProps) 
         currentTask
           ? {
               ...currentTask,
-              task: result.task
+              task: result.task,
+              downloads: result.downloads,
+              finalWordCount: result.finalWordCount
             }
           : currentTask
       );
@@ -255,6 +265,7 @@ export function WorkspacePageClient({ initialQuota }: WorkspacePageClientProps) 
         tone: "success",
         text: result.message
       });
+      setStep(3);
     } catch (error) {
       setNotice({
         tone: "error",
@@ -263,6 +274,35 @@ export function WorkspacePageClient({ initialQuota }: WorkspacePageClientProps) 
       });
     } finally {
       setIsApprovingOutline(false);
+    }
+  };
+
+  const handleDownload = async (outputId?: string | null) => {
+    if (!activeTask || !outputId) {
+      setNotice({
+        tone: "error",
+        text: "当前这个文件还没有准备好。"
+      });
+      return;
+    }
+
+    setDownloadingOutputId(outputId);
+
+    try {
+      const result = await requestTaskDownload({
+        taskId: activeTask.task.id,
+        outputId
+      });
+
+      window.location.assign(result.signedUrl);
+    } catch (error) {
+      setNotice({
+        tone: "error",
+        text:
+          error instanceof Error ? error.message : "下载失败，请稍后再试。"
+      });
+    } finally {
+      setDownloadingOutputId(null);
     }
   };
 
@@ -589,6 +629,20 @@ export function WorkspacePageClient({ initialQuota }: WorkspacePageClientProps) 
 
             {step === 3 && (
               <div className="space-y-6">
+                {notice && (
+                  <div
+                    className={`rounded-xl border px-4 py-3 text-sm ${
+                      notice.tone === "error"
+                        ? "border-red-500/30 bg-red-500/10 text-red-200"
+                        : notice.tone === "success"
+                          ? "border-green-500/30 bg-green-500/10 text-green-200"
+                          : "border-gold-500/30 bg-gold-500/10 text-gold-200"
+                    }`}
+                  >
+                    {notice.text}
+                  </div>
+                )}
+
                 <div className="glass-panel p-8 rounded-2xl border-gold-glow relative overflow-hidden">
                   <div className="absolute top-0 right-0 w-64 h-64 bg-green-500/10 rounded-full blur-3xl" />
 
@@ -604,10 +658,26 @@ export function WorkspacePageClient({ initialQuota }: WorkspacePageClientProps) 
                     <div className="bg-brand-950 p-6 rounded-xl border border-white/5 flex flex-col items-center text-center hover:border-gold-500/30 transition-colors">
                       <FileText className="w-10 h-10 text-blue-400 mb-4" />
                       <h3 className="text-lg font-bold text-cream-50 mb-1">最终版正文</h3>
-                      <p className="text-xs text-brand-700 mb-6">Word 格式 (.docx) | 2,650 字</p>
-                      <Button variant="secondary" fullWidth className="gap-2 mt-auto">
+                      <p className="text-xs text-brand-700 mb-6">
+                        Word 格式 (.docx)
+                        {typeof activeTask?.finalWordCount === "number"
+                          ? ` | ${activeTask.finalWordCount.toLocaleString("en-US")} words`
+                          : ""}
+                      </p>
+                      <Button
+                        variant="secondary"
+                        fullWidth
+                        className="gap-2 mt-auto"
+                        onClick={() => void handleDownload(activeTask?.downloads?.finalDocxOutputId)}
+                        disabled={
+                          !activeTask?.downloads?.finalDocxOutputId ||
+                          downloadingOutputId === activeTask?.downloads?.finalDocxOutputId
+                        }
+                      >
                         <Download className="w-4 h-4" />
-                        下载文档
+                        {downloadingOutputId === activeTask?.downloads?.finalDocxOutputId
+                          ? "准备下载中..."
+                          : "下载文档"}
                       </Button>
                     </div>
 
@@ -615,9 +685,22 @@ export function WorkspacePageClient({ initialQuota }: WorkspacePageClientProps) 
                       <ShieldCheck className="w-10 h-10 text-red-400 mb-4" />
                       <h3 className="text-lg font-bold text-cream-50 mb-1">引用核验报告</h3>
                       <p className="text-xs text-brand-700 mb-6">PDF 格式 (.pdf) | 包含所有来源链接</p>
-                      <Button variant="secondary" fullWidth className="gap-2 mt-auto">
+                      <Button
+                        variant="secondary"
+                        fullWidth
+                        className="gap-2 mt-auto"
+                        onClick={() =>
+                          void handleDownload(activeTask?.downloads?.referenceReportOutputId)
+                        }
+                        disabled={
+                          !activeTask?.downloads?.referenceReportOutputId ||
+                          downloadingOutputId === activeTask?.downloads?.referenceReportOutputId
+                        }
+                      >
                         <Download className="w-4 h-4" />
-                        下载报告
+                        {downloadingOutputId === activeTask?.downloads?.referenceReportOutputId
+                          ? "准备下载中..."
+                          : "下载报告"}
                       </Button>
                     </div>
                   </div>

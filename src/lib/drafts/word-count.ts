@@ -19,6 +19,8 @@ type ApplyCandidateDraftResult = {
   candidateWasPromoted: boolean;
 };
 
+const referencesHeadingPattern = /^#{0,2}\s*References\s*$/im;
+
 function normalizeBodyMarkdown(markdown: string) {
   return markdown
     .replace(/^#{1,6}\s+/gm, "")
@@ -30,7 +32,7 @@ export function countBodyWords(markdown: string) {
     return 0;
   }
 
-  const [body] = markdown.split(/^References$/m);
+  const [body] = markdown.split(referencesHeadingPattern);
   const normalizedBody = normalizeBodyMarkdown(body ?? "");
 
   return normalizedBody
@@ -44,7 +46,7 @@ export function draftHasTitle(markdown: string) {
 }
 
 export function draftHasReferences(markdown: string) {
-  return /^References$/m.test(markdown);
+  return referencesHeadingPattern.test(markdown);
 }
 
 export function shouldPromoteCandidateDraft({

@@ -131,8 +131,10 @@ export type TaskReferenceCheckInput = Omit<
 export type TaskOutputRecord = {
   id: string;
   taskId: string;
+  userId: string;
   outputKind: TaskOutputKind;
   storagePath: string;
+  isActive: boolean;
   createdAt: string;
   expiresAt: string;
   expired: boolean;
@@ -140,6 +142,8 @@ export type TaskOutputRecord = {
 
 export type TaskOutputRecordInput = Omit<
   TaskOutputRecord,
-  "id" | "createdAt" | "expiresAt" | "expired"
+  "id" | "createdAt" | "expiresAt" | "expired" | "isActive"
 > &
-  Partial<Pick<TaskOutputRecord, "id" | "createdAt" | "expiresAt" | "expired">>;
+  Partial<
+    Pick<TaskOutputRecord, "id" | "createdAt" | "expiresAt" | "expired" | "isActive">
+  >;

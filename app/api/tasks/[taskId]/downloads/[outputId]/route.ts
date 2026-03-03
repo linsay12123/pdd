@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { requireCurrentSessionUser } from "@/src/lib/auth/current-user";
 import { createSignedDownloadUrl } from "@/src/lib/storage/signed-url";
-import { getTaskOutput } from "@/src/lib/tasks/repository";
+import { getOwnedTaskOutput } from "@/src/lib/tasks/task-output-store";
 import type { SessionUser } from "@/src/types/auth";
 
 type RouteContext = {
@@ -37,7 +37,11 @@ export async function handleTaskDownloadRequest(
     );
   }
 
-  const output = getTaskOutput(params.taskId, params.outputId);
+  const output = await getOwnedTaskOutput({
+    taskId: params.taskId,
+    outputId: params.outputId,
+    userId: user.id
+  });
 
   if (!output) {
     return NextResponse.json(

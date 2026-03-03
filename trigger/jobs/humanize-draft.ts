@@ -31,6 +31,7 @@ export async function humanizeDraft(input: HumanizeDraftJobInput) {
   const docxContent = draftToDocxContent(humanizedDraft);
   const exportResult = await exportDocx({
     taskId: input.taskId,
+    userId: task?.userId ?? "unknown-user",
     title: docxContent.title,
     sections: docxContent.sections,
     references:

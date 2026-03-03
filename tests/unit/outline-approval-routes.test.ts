@@ -125,7 +125,7 @@ describe("outline approval routes", () => {
     expect(payload.message).toContain("上限");
   });
 
-  it("approves the chosen outline version and moves the task into drafting", async () => {
+  it("approves the chosen outline version and keeps the approved version linked on the task", async () => {
     const initialVersion = await saveOutlineVersion({
       task: {
         id: "task-outline-3",
@@ -165,14 +165,95 @@ describe("outline approval routes", () => {
           id: "user-1",
           email: "user-1@example.com",
           role: "user"
+        }),
+        processTask: async () => ({
+          task: {
+            ...getTaskSummary("task-outline-3")!,
+            status: "deliverable_ready"
+          },
+          outlineVersion: {
+            ...initialVersion,
+            isApproved: true
+          },
+          downloads: {
+            finalDocxOutputId: "out-final-1",
+            referenceReportOutputId: "out-report-1"
+          },
+          finalDraftMarkdown: "# Title"
         })
       }
     );
     const payload = await response.json();
 
     expect(response.status).toBe(200);
-    expect(payload.task.status).toBe("drafting");
+    expect(payload.task.status).toBe("deliverable_ready");
     expect(payload.outlineVersion.isApproved).toBe(true);
     expect(getTaskSummary("task-outline-3")?.latestOutlineVersionId).toBe(initialVersion.id);
+  });
+
+  it("can continue straight into final deliverables after approval when the processing step succeeds", async () => {
+    const initialVersion = await saveOutlineVersion({
+      task: {
+        id: "task-outline-4",
+        userId: "user-1",
+        status: "awaiting_outline_approval",
+        targetWordCount: 2200,
+        citationStyle: "Harvard",
+        specialRequirements: "",
+        topic: "Corporate Governance",
+        outlineRevisionCount: 0
+      },
+      userId: "user-1",
+      outline: {
+        articleTitle: "Corporate Governance: A Structured Analysis",
+        targetWordCount: 2200,
+        citationStyle: "Harvard",
+        chineseMirrorPending: true,
+        sections: []
+      }
+    });
+
+    const response = await handleOutlineApprovalRequest(
+      new Request("http://localhost/api/tasks/task-outline-4/outline/approve", {
+        method: "POST",
+        body: JSON.stringify({
+          outlineVersionId: initialVersion.id
+        }),
+        headers: {
+          "content-type": "application/json"
+        }
+      }),
+      {
+        taskId: "task-outline-4"
+      },
+      {
+        requireUser: async () => ({
+          id: "user-1",
+          email: "user-1@example.com",
+          role: "user"
+        }),
+        processTask: async () => ({
+          task: {
+            ...getTaskSummary("task-outline-4")!,
+            status: "deliverable_ready"
+          },
+          outlineVersion: {
+            ...initialVersion,
+            isApproved: true
+          },
+          downloads: {
+            finalDocxOutputId: "out-final-1",
+            referenceReportOutputId: "out-report-1"
+          },
+          finalDraftMarkdown: "# Title"
+        })
+      }
+    );
+    const payload = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(payload.task.status).toBe("deliverable_ready");
+    expect(payload.downloads.finalDocxOutputId).toBe("out-final-1");
+    expect(payload.downloads.referenceReportOutputId).toBe("out-report-1");
   });
 });

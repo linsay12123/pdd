@@ -199,6 +199,7 @@ export function saveTaskOutputRecord(record: TaskOutputRecordInput) {
   const normalizedRecord: TaskOutputRecord = {
     id: record.id || `out_${record.taskId}_${existing.length + 1}`,
     createdAt: record.createdAt || new Date().toISOString(),
+    isActive: record.isActive ?? true,
     expiresAt:
       record.expiresAt ||
       new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toISOString(),
@@ -217,6 +218,18 @@ export function getTaskOutputs(taskId: string) {
 
 export function getTaskOutput(taskId: string, outputId: string) {
   return getTaskOutputs(taskId).find((output) => output.id === outputId) ?? null;
+}
+
+export function findTaskOutputByStoragePath(storagePath: string) {
+  for (const outputs of taskOutputStore.values()) {
+    const match = outputs.find((output) => output.storagePath === storagePath);
+
+    if (match) {
+      return match;
+    }
+  }
+
+  return null;
 }
 
 export function expireTaskOutputs({

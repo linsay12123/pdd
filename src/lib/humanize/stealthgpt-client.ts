@@ -54,6 +54,19 @@ export function splitDraftForHumanize(
       continue;
     }
 
+    if (line.match(/^#{0,2}\s*References\s*$/i)) {
+      if (currentHeading) {
+        sections.push({
+          heading: currentHeading,
+          bodyLines: [...currentBodyLines]
+        });
+      }
+
+      currentHeading = "References";
+      currentBodyLines = [];
+      continue;
+    }
+
     if (line.startsWith("## ")) {
       if (currentHeading) {
         sections.push({

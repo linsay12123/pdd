@@ -15,6 +15,7 @@ describe("docx export contract", () => {
   it("requires the fields needed to generate the final article docx", () => {
     const payload = prepareDocxExportPayload({
       taskId: "task-1",
+      userId: "user-1",
       title: "Sustainable Finance",
       sections: [
         {
@@ -29,13 +30,16 @@ describe("docx export contract", () => {
     expect(payload.title).toBe("Sustainable Finance");
     expect(payload.sections).toHaveLength(1);
     expect(payload.references).toHaveLength(1);
-    expect(resolveDocxOutputPath("task-1")).toContain("output/doc/task-1-final.docx");
+    expect(resolveDocxOutputPath("user-1", "task-1")).toContain(
+      "storage/users/user-1/tasks/task-1/outputs/final.docx"
+    );
   });
 
   it("rejects an export with no title or no references", () => {
     expect(() =>
       prepareDocxExportPayload({
         taskId: "task-1",
+        userId: "user-1",
         title: "",
         sections: [],
         references: [],
@@ -49,6 +53,7 @@ describe("docx export contract", () => {
 
     const result = await exportDocx({
       taskId: "task-docx-export",
+      userId: "user-1",
       title: "Sustainable Finance",
       sections: [
         {
@@ -60,11 +65,13 @@ describe("docx export contract", () => {
       citationStyle: "APA 7"
     });
 
-    expect(result.outputPath).toContain("task-docx-export-final.docx");
+    expect(result.outputPath).toContain(
+      "storage/users/user-1/tasks/task-docx-export/outputs/final.docx"
+    );
     expect(getTaskOutputs("task-docx-export")).toEqual([
       expect.objectContaining({
         outputKind: "final_docx",
-        storagePath: result.outputPath
+        storagePath: "users/user-1/tasks/task-docx-export/outputs/final.docx"
       })
     ]);
   });
@@ -74,6 +81,7 @@ describe("pdf report export contract", () => {
   it("requires the fields needed to generate the reference report", () => {
     const payload = prepareReferenceReportPayload({
       taskId: "task-1",
+      userId: "user-1",
       reportId: "REF-001",
       createdAt: "2026-03-02T10:00:00.000Z",
       taskSummary: {
@@ -91,8 +99,8 @@ describe("pdf report export contract", () => {
     });
 
     expect(payload.entries).toHaveLength(1);
-    expect(resolveReferenceReportOutputPath("task-1")).toContain(
-      "output/pdf/task-1-reference-report.pdf"
+    expect(resolveReferenceReportOutputPath("user-1", "task-1")).toContain(
+      "storage/users/user-1/tasks/task-1/outputs/reference-report.pdf"
     );
   });
 
@@ -100,6 +108,7 @@ describe("pdf report export contract", () => {
     expect(() =>
       prepareReferenceReportPayload({
         taskId: "task-1",
+        userId: "user-1",
         reportId: "REF-001",
         createdAt: "2026-03-02T10:00:00.000Z",
         taskSummary: {
@@ -117,6 +126,7 @@ describe("pdf report export contract", () => {
 
     const result = await exportReferenceReport({
       taskId: "task-report-export",
+      userId: "user-1",
       reportId: "REF-001",
       createdAt: "2026-03-02T10:00:00.000Z",
       taskSummary: {
@@ -133,11 +143,13 @@ describe("pdf report export contract", () => {
       closingSummary: "Most references look usable."
     });
 
-    expect(result.outputPath).toContain("task-report-export-reference-report.pdf");
+    expect(result.outputPath).toContain(
+      "storage/users/user-1/tasks/task-report-export/outputs/reference-report.pdf"
+    );
     expect(getTaskOutputs("task-report-export")).toEqual([
       expect.objectContaining({
         outputKind: "reference_report_pdf",
-        storagePath: result.outputPath
+        storagePath: "users/user-1/tasks/task-report-export/outputs/reference-report.pdf"
       })
     ]);
   });

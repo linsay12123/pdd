@@ -18,6 +18,8 @@ type SaveDraftVersionInput = {
   isCandidate: boolean;
 };
 
+const referencesHeadingPattern = /^#{0,2}\s*References\s*$/im;
+
 export async function saveDraftVersion(
   input: SaveDraftVersionInput
 ): Promise<TaskDraftVersion> {
@@ -31,7 +33,7 @@ function splitDraftMarkdown(markdown: string) {
   const lines = normalized.split("\n");
   const firstHeading = lines.find((line) => /^#\s+/.test(line.trim()));
   const title = firstHeading?.replace(/^#\s+/, "").trim() || "Untitled Draft";
-  const [bodyBlock, referencesBlock = ""] = normalized.split(/^References$/m);
+  const [bodyBlock, referencesBlock = ""] = normalized.split(referencesHeadingPattern);
 
   return {
     title,
