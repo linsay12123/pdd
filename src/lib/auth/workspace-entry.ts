@@ -32,7 +32,7 @@ export function decideWorkspaceEntry(input: {
     };
   }
 
-  if (input.hasSessionCookie) {
+  if (input.sessionResolution.status === "profile_missing") {
     return {
       kind: "redirect",
       to: buildAuthCompletePath(targetPath)

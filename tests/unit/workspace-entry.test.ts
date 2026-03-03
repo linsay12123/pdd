@@ -23,12 +23,28 @@ describe("workspace entry decisions", () => {
       decideWorkspaceEntry({
         hasSessionCookie: true,
         sessionResolution: {
-          status: "anonymous"
+          status: "profile_missing",
+          authUserId: "user-3",
+          email: "user@example.com"
         }
       })
     ).toEqual({
       kind: "redirect",
       to: "/auth/complete?next=%2Fworkspace"
+    });
+  });
+
+  it("sends anonymous users back to login even if the browser still has old auth cookies", () => {
+    expect(
+      decideWorkspaceEntry({
+        hasSessionCookie: true,
+        sessionResolution: {
+          status: "anonymous"
+        }
+      })
+    ).toEqual({
+      kind: "redirect",
+      to: "/login?redirect=%2Fworkspace"
     });
   });
 

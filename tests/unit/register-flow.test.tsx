@@ -69,7 +69,7 @@ describe("support entrypoints", () => {
     const html = renderToStaticMarkup(<Navbar />);
 
     expect(html).toContain("积分兑换");
-    expect(html).toContain('href="/workspace-entry?next=%2Fbilling"');
+    expect(html).toContain('href="/billing"');
   });
 
   it("uses workspace-entry for the navbar workspace button", () => {
@@ -90,7 +90,7 @@ describe("support entrypoints", () => {
     const html = renderToStaticMarkup(<Footer />);
 
     expect(html).toContain("积分兑换");
-    expect(html).toContain('href="/workspace-entry?next=%2Fbilling"');
+    expect(html).toContain('href="/billing"');
   });
 
   it("uses workspace-entry for the footer workspace button", () => {

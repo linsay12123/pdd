@@ -31,7 +31,7 @@ export function buildPostAuthEntryPath(input?: string | null) {
 }
 
 export function buildBillingEntryPath() {
-  return buildWorkspaceEntryPath("/billing");
+  return "/billing";
 }
 
 export function buildLoginRedirectPath(input?: string | null) {

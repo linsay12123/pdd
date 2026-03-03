@@ -11,6 +11,12 @@ vi.mock("next/headers", () => ({
   cookies: vi.fn()
 }));
 
+vi.mock("next/navigation", () => ({
+  redirect: vi.fn((to: string) => {
+    throw new Error(`NEXT_REDIRECT:${to}`);
+  })
+}));
+
 vi.mock("../../src/lib/auth/current-user", () => ({
   getCurrentSessionUserResolution: vi.fn()
 }));
@@ -65,11 +71,22 @@ describe("auth pages", () => {
     expect(html).toContain("联系客服支持团队");
   });
 
-  it("renders the branded workspace-entry page", async () => {
-    const page = await WorkspaceEntryPage({});
-    const html = renderToStaticMarkup(page);
+  it("redirects anonymous users from workspace-entry back to login", async () => {
+    await expect(WorkspaceEntryPage({})).rejects.toThrow(
+      "NEXT_REDIRECT:/login?redirect=%2Fworkspace"
+    );
+  });
 
-    expect(html).toContain("正在进入工作台");
-    expect(html).toContain("联系客服支持团队");
+  it("redirects profile-missing users from workspace-entry into auth-complete", async () => {
+    const { getCurrentSessionUserResolution } = await import("../../src/lib/auth/current-user");
+    vi.mocked(getCurrentSessionUserResolution).mockResolvedValue({
+      status: "profile_missing",
+      authUserId: "user-3",
+      email: "user@example.com"
+    });
+
+    await expect(WorkspaceEntryPage({})).rejects.toThrow(
+      "NEXT_REDIRECT:/auth/complete?next=%2Fworkspace"
+    );
   });
 });

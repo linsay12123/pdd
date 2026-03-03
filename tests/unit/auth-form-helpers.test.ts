@@ -35,7 +35,7 @@ describe("auth form helpers", () => {
   });
 
   it("builds a smart billing entry path", () => {
-    expect(buildBillingEntryPath()).toBe("/workspace-entry?next=%2Fbilling");
+    expect(buildBillingEntryPath()).toBe("/billing");
   });
 
   it("funnels post-login redirects through workspace-entry", () => {
