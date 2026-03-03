@@ -10,13 +10,16 @@ import { createSignedDownloadUrl } from "../../src/lib/storage/signed-url";
 import { resolveStoredFileDiskPath } from "../../src/lib/storage/task-output-files";
 
 describe("storage download route", () => {
+  const ownerId = "user-storage-1";
+  const outsiderId = "user-storage-2";
+
   beforeEach(async () => {
     resetTaskOutputStore();
-    await rm(path.join(process.cwd(), "storage", "users", "user-1"), {
+    await rm(path.join(process.cwd(), "storage", "users", ownerId), {
       recursive: true,
       force: true
     });
-    await rm(path.join(process.cwd(), "storage", "users", "user-2"), {
+    await rm(path.join(process.cwd(), "storage", "users", outsiderId), {
       recursive: true,
       force: true
     });
@@ -26,9 +29,9 @@ describe("storage download route", () => {
     const output = saveTaskOutputRecord({
       id: "out-storage-1",
       taskId: "task-storage-1",
-      userId: "user-1",
+      userId: ownerId,
       outputKind: "final_docx",
-      storagePath: "users/user-1/tasks/task-storage-1/outputs/final.docx",
+      storagePath: `users/${ownerId}/tasks/task-storage-1/outputs/final.docx`,
       expiresAt: "2099-03-05T09:00:00.000Z"
     });
     const outputPath = resolveStoredFileDiskPath(output.storagePath);
@@ -38,14 +41,14 @@ describe("storage download route", () => {
 
     const signedUrl = createSignedDownloadUrl({
       output,
-      userId: "user-1"
+      userId: ownerId
     });
 
     const response = await handleStorageDownloadRequest(
       new Request(`http://localhost${signedUrl}`),
       {
         requireUser: async () => ({
-          id: "user-1",
+          id: ownerId,
           email: "user-1@example.com",
           role: "user"
         })
@@ -60,22 +63,22 @@ describe("storage download route", () => {
     const output = saveTaskOutputRecord({
       id: "out-storage-2",
       taskId: "task-storage-2",
-      userId: "user-1",
+      userId: ownerId,
       outputKind: "final_docx",
-      storagePath: "users/user-1/tasks/task-storage-2/outputs/final.docx",
+      storagePath: `users/${ownerId}/tasks/task-storage-2/outputs/final.docx`,
       expiresAt: "2099-03-05T09:00:00.000Z"
     });
 
     const signedUrl = createSignedDownloadUrl({
       output,
-      userId: "user-1"
+      userId: ownerId
     });
 
     const response = await handleStorageDownloadRequest(
       new Request(`http://localhost${signedUrl}`),
       {
         requireUser: async () => ({
-          id: "user-2",
+          id: outsiderId,
           email: "user-2@example.com",
           role: "user"
         })

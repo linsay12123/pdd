@@ -14,7 +14,7 @@ describe("brand components", () => {
   it("renders the sales qr code card", () => {
     const html = renderToStaticMarkup(<ContactSalesCard />);
 
-    expect(html).toContain("联系客服购买额度");
+    expect(html).toContain("联系客服支持团队购买额度");
     expect(html).toContain('src="/qrcode.jpg"');
     expect(html).toContain("激活码");
     expect(html).toContain("AI 检测报告");

@@ -12,12 +12,13 @@ import {
 
 type LoginFormProps = {
   redirectTo?: string;
+  initialStatusText?: string;
 };
 
-export function LoginForm({ redirectTo }: LoginFormProps) {
+export function LoginForm({ redirectTo, initialStatusText = "" }: LoginFormProps) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [statusText, setStatusText] = useState("");
+  const [statusText, setStatusText] = useState(initialStatusText);
   const [submitting, setSubmitting] = useState(false);
 
   async function handleLogin(event: React.FormEvent<HTMLFormElement>) {

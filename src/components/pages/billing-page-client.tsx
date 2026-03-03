@@ -139,7 +139,7 @@ export function BillingPageClient({ initialQuota }: BillingPageClientProps) {
         <div className="space-y-8">
           <div className="bg-brand-950 p-6 rounded-2xl border border-white/10 text-center">
             <h3 className="text-lg font-bold text-cream-50 mb-2">获取额度激活码</h3>
-            <p className="text-sm text-brand-700 mb-6">请联系销售团队购买，支持批量采购。</p>
+            <p className="text-sm text-brand-700 mb-6">请联系客服支持团队购买，支持批量采购。</p>
 
             <div className="w-40 h-40 bg-white rounded-xl p-2 mx-auto mb-4 flex items-center justify-center overflow-hidden">
               <img src="/qrcode.png" alt="客服微信二维码" className="w-full h-full object-cover rounded-lg" />

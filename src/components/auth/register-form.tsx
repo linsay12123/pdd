@@ -9,6 +9,10 @@ import {
   getAuthErrorMessage,
   validateRegisterInput
 } from "@/src/lib/auth/auth-form";
+import {
+  buildSignupEmailRedirectTo,
+  getRegisterCompletionMessage
+} from "@/src/lib/auth/register-flow";
 
 export function RegisterForm() {
   const [displayName, setDisplayName] = useState("");
@@ -42,6 +46,10 @@ export function RegisterForm() {
         email: email.trim(),
         password,
         options: {
+          emailRedirectTo:
+            typeof window === "undefined"
+              ? undefined
+              : buildSignupEmailRedirectTo(window.location.origin),
           data: {
             display_name: displayName.trim()
           }
@@ -54,11 +62,21 @@ export function RegisterForm() {
       }
 
       if (!data.session) {
-        setStatusText("注册成功，请回到登录页继续登录");
+        setStatusText(
+          getRegisterCompletionMessage({
+            email,
+            hasSession: false
+          })
+        );
         return;
       }
 
-      setStatusText("注册成功，正在进入工作台...");
+      setStatusText(
+        getRegisterCompletionMessage({
+          email,
+          hasSession: true
+        })
+      );
       if (typeof window !== "undefined") {
         window.location.assign("/workspace");
       }
@@ -141,7 +159,7 @@ export function RegisterForm() {
         </div>
 
         <Button type="submit" fullWidth size="lg" className="mt-8" disabled={submitting}>
-          {submitting ? "注册中..." : "注册并进入工作台"}
+          {submitting ? "注册中..." : "注册账号"}
         </Button>
       </form>
 
@@ -150,7 +168,7 @@ export function RegisterForm() {
       </div>
 
       <div className="mt-6 text-center text-xs text-brand-700 bg-brand-900/50 p-3 rounded-lg border border-white/5">
-        注册成功后，您可以通过输入“额度激活码”为账户充值积分。
+        注册成功后，请先去邮箱点击确认邮件。确认完成后，您可以输入“额度激活码”为账户充值积分。
       </div>
 
       <div className="mt-8 text-center text-sm text-brand-700">

@@ -58,7 +58,7 @@ export async function handleTaskCreateRequest(
       return NextResponse.json(
         {
           ok: false,
-          message: "当前账号已被冻结，请联系销售团队处理。"
+          message: "当前账号已被冻结，请联系客服支持团队处理。"
         },
         { status: 403 }
       );

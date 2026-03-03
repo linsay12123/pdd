@@ -17,6 +17,7 @@ import {
   BookOpen
 } from "lucide-react";
 import { Link } from "@/src/lib/router";
+import { HOME_SECTION_LINKS } from "@/src/lib/brand/support-links";
 import { motion } from "motion/react";
 
 export default function Home() {
@@ -51,9 +52,9 @@ export default function Home() {
                   <ArrowRight className="w-5 h-5" />
                 </Button>
               </Link>
-              <a href="#contact-sales" className="w-full sm:w-auto">
+              <a href={HOME_SECTION_LINKS.contactSupport} className="w-full sm:w-auto">
                 <Button variant="outline" size="lg" fullWidth className="border-gold-500/50 text-gold-400 hover:bg-gold-500/10">
-                  联系销售购买额度
+                  联系客服支持团队购买额度
                 </Button>
               </a>
             </div>
@@ -468,7 +469,7 @@ export default function Home() {
             </div>
 
             <div className="bg-brand-950 rounded-2xl p-8 border border-white/10 flex flex-col items-center text-center justify-center">
-              <h3 className="text-2xl font-bold text-cream-50 mb-2">购买额度请联系销售团队</h3>
+              <h3 className="text-2xl font-bold text-cream-50 mb-2">购买额度请联系客服支持团队</h3>
               <p className="text-sm text-brand-700 mb-8">支持批量合作 / 长期采购 / 专属人工协助</p>
 
               <div className="w-48 h-48 bg-white rounded-xl p-2 mb-6 flex items-center justify-center overflow-hidden shadow-lg">
@@ -508,7 +509,7 @@ export default function Home() {
             { q: "如果对生成的大纲不满意，可以修改吗？", a: "可以。在大纲确认环节，您可以直接在输入框中提出修改意见，系统会根据您的意见重新调整大纲结构。" },
             { q: "最终生成后会提供哪些文件？", a: "生成完成后，您可以在工作台直接下载最终版的 Word 正文文档，以及一份 PDF 格式的引用核验报告。" },
             { q: "什么是自动降AI功能？", a: "自动降AI是我们提供的一项增值服务。如果您觉得生成的文章AI痕迹较重，可以点击该功能，系统会使用专门的引擎对文本特征进行优化，使其更贴近人类写作风格。每次使用扣除 500 积分。" },
-            { q: "如何获取和使用激活码？", a: "请通过页面上的联系方式添加销售客服微信购买激活码。获取激活码后，登录您的账号，在“充值”页面输入即可增加对应积分。" },
+            { q: "如何获取和使用激活码？", a: "请通过页面上的联系方式添加客服支持团队微信购买激活码。获取激活码后，登录您的账号，在“充值”页面输入即可增加对应积分。" },
             { q: "激活码可以重复使用吗？", a: "每个激活码仅限使用一次。但同一个账号可以多次兑换不同的激活码，积分会累计叠加，长期有效。" },
             { q: "如果遇到特殊要求或系统无法处理的情况怎么办？", a: "您可以随时联系我们的专属客服寻求人工协助。我们的团队拥有丰富的处理经验，可以帮您解决复杂或特殊的写作需求。" }
           ].map((faq, i) => (

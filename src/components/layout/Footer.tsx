@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { Mail, MessageCircle } from "lucide-react";
+import { HOME_SECTION_LINKS } from "@/src/lib/brand/support-links";
 
 export default function Footer() {
   return (
@@ -17,7 +18,7 @@ export default function Footer() {
               专为接单工作室与个人用户打造的自动化写作 SaaS 平台。 先大纲后正文，稳定交付，提升效率。
             </p>
             <div className="flex items-center gap-4 text-brand-700">
-              <a href="#contact-sales" className="hover:text-gold-400 transition-colors" title="联系客服微信">
+              <a href={HOME_SECTION_LINKS.contactSupport} className="hover:text-gold-400 transition-colors" title="联系客服微信">
                 <MessageCircle className="w-5 h-5" />
               </a>
               <a href="mailto:1318823634@qq.com" className="hover:text-gold-400 transition-colors" title="发送邮件">
@@ -30,22 +31,22 @@ export default function Footer() {
             <h4 className="text-cream-50 font-semibold mb-6">产品功能</h4>
             <ul className="space-y-4 text-sm text-brand-700">
               <li>
-                <a href="#features" className="hover:text-gold-400 transition-colors">
+                <a href={HOME_SECTION_LINKS.features} className="hover:text-gold-400 transition-colors">
                   多文件分析
                 </a>
               </li>
               <li>
-                <a href="#features" className="hover:text-gold-400 transition-colors">
+                <a href={HOME_SECTION_LINKS.features} className="hover:text-gold-400 transition-colors">
                   英文大纲生成
                 </a>
               </li>
               <li>
-                <a href="#features" className="hover:text-gold-400 transition-colors">
+                <a href={HOME_SECTION_LINKS.features} className="hover:text-gold-400 transition-colors">
                   正文与引用核验
                 </a>
               </li>
               <li>
-                <a href="#features" className="hover:text-gold-400 transition-colors">
+                <a href={HOME_SECTION_LINKS.features} className="hover:text-gold-400 transition-colors">
                   自动降AI处理
                 </a>
               </li>
@@ -61,7 +62,7 @@ export default function Footer() {
                 </Link>
               </li>
               <li>
-                <a href="#faq" className="hover:text-gold-400 transition-colors">
+                <a href={HOME_SECTION_LINKS.faq} className="hover:text-gold-400 transition-colors">
                   常见问题
                 </a>
               </li>
@@ -79,17 +80,17 @@ export default function Footer() {
           </div>
 
           <div>
-            <h4 className="text-cream-50 font-semibold mb-6">联系销售</h4>
+            <h4 className="text-cream-50 font-semibold mb-6">联系客服支持团队</h4>
             <div className="bg-brand-900/50 rounded-xl p-4 border border-white/5">
               <p className="text-sm text-brand-700 mb-3">
-                购买额度激活码、批量采购或寻求人工协助，请联系专属客服。
+                购买额度激活码、批量采购或寻求人工协助，请联系专属客服支持团队。
               </p>
               <a
-                href="#contact-sales"
+                href={HOME_SECTION_LINKS.contactSupport}
                 className="inline-flex items-center gap-2 text-gold-400 text-sm font-medium hover:text-gold-300 transition-colors"
               >
                 <MessageCircle className="w-4 h-4" />
-                联系客服微信
+                联系客服支持团队
               </a>
             </div>
           </div>
@@ -98,15 +99,15 @@ export default function Footer() {
         <div className="pt-8 border-t border-white/5 flex flex-col md:flex-row items-center justify-between gap-4">
           <p className="text-brand-700 text-xs">© {new Date().getFullYear()} 拼代代 (Pin Dai Dai). All rights reserved.</p>
           <div className="flex items-center gap-6 text-xs text-brand-700">
-            <a href="#" className="hover:text-cream-50 transition-colors">
+            <Link href="/legal/disclaimer" className="hover:text-cream-50 transition-colors">
               免责声明
-            </a>
-            <a href="#" className="hover:text-cream-50 transition-colors">
+            </Link>
+            <Link href="/legal/privacy" className="hover:text-cream-50 transition-colors">
               隐私政策
-            </a>
-            <a href="#" className="hover:text-cream-50 transition-colors">
+            </Link>
+            <Link href="/legal/terms" className="hover:text-cream-50 transition-colors">
               服务条款
-            </a>
+            </Link>
           </div>
         </div>
       </div>

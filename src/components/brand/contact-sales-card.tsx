@@ -7,11 +7,11 @@ type ContactSalesCardProps = {
 };
 
 export function ContactSalesCard({
-  title = "联系客服购买额度",
-  description = "需要补充积分时，直接扫码联系销售团队获取一次性激活码。激活码只能使用一次，但同一个账号可以多次兑换不同激活码。"
+  title = "联系客服支持团队购买额度",
+  description = "需要补充积分时，直接扫码联系客服支持团队获取一次性激活码。激活码只能使用一次，但同一个账号可以多次兑换不同激活码。"
 }: ContactSalesCardProps) {
   return (
-    <section aria-label="sales-contact-card" className="pdd-card" style={{ display: "grid", gap: "1rem", padding: "1.25rem" }}>
+    <section aria-label="support-contact-card" className="pdd-card" style={{ display: "grid", gap: "1rem", padding: "1.25rem" }}>
       <BrandLogo />
       <div style={{ display: "grid", gap: "0.5rem" }}>
         <strong style={{ fontSize: "1.05rem" }}>{title}</strong>
@@ -36,7 +36,7 @@ export function ContactSalesCard({
             objectFit: "cover"
           }}
         />
-        <span style={{ fontSize: "0.9rem", color: "#64748b" }}>扫码直连销售团队</span>
+        <span style={{ fontSize: "0.9rem", color: "#64748b" }}>扫码直连客服支持团队</span>
       </div>
     </section>
   );

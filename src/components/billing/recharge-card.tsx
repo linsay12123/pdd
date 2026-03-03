@@ -99,8 +99,8 @@ export function RechargeCard({ currentQuota }: RechargeCardProps) {
 
       <div className="pdd-list" style={{ gap: "12px" }}>
         <ContactSalesCard
-          title="需要购买额度？联系销售团队"
-          description="积分不够时，扫码联系销售团队购买新的激活码。一个账号可以反复输入不同激活码。"
+          title="需要购买额度？联系客服支持团队"
+          description="积分不够时，扫码联系客服支持团队购买新的激活码。一个账号可以反复输入不同激活码。"
         />
       </div>
     </section>

@@ -6,6 +6,7 @@ import { Button } from "@/src/components/ui/Button";
 import { LogIn, Menu, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import { cn } from "@/src/lib/utils";
+import { HOME_SECTION_LINKS } from "@/src/lib/brand/support-links";
 
 export default function Navbar() {
   const [isScrolled, setIsScrolled] = useState(false);
@@ -26,9 +27,9 @@ export default function Navbar() {
 
   const navLinks = [
     { name: "首页", path: "/" },
-    { name: "功能介绍", path: "/#features" },
-    { name: "成功案例", path: "/#cases" },
-    { name: "常见问题", path: "/#faq" }
+    { name: "功能介绍", path: HOME_SECTION_LINKS.features },
+    { name: "成功案例", path: HOME_SECTION_LINKS.cases },
+    { name: "常见问题", path: HOME_SECTION_LINKS.faq }
   ];
 
   return (
@@ -72,9 +73,9 @@ export default function Navbar() {
           <Link href="/workspace">
             <Button size="sm">进入工作台</Button>
           </Link>
-          <a href="#contact-sales">
+          <a href={HOME_SECTION_LINKS.contactSupport}>
             <Button variant="outline" size="sm" className="border-gold-500/50">
-              联系销售团队
+              联系客服支持团队
             </Button>
           </a>
         </div>
@@ -105,9 +106,9 @@ export default function Navbar() {
             <Link href="/workspace" onClick={() => setMobileMenuOpen(false)}>
               <Button fullWidth>进入工作台</Button>
             </Link>
-            <a href="#contact-sales" onClick={() => setMobileMenuOpen(false)}>
+            <a href={HOME_SECTION_LINKS.contactSupport} onClick={() => setMobileMenuOpen(false)}>
               <Button variant="outline" fullWidth>
-                联系销售团队
+                联系客服支持团队
               </Button>
             </a>
           </div>

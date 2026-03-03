@@ -71,7 +71,7 @@ export async function handleOutlineFeedbackRequest(
       return NextResponse.json(
         {
           ok: false,
-          message: "大纲修改次数已经到上限，请联系销售团队协助。"
+          message: "大纲修改次数已经到上限，请联系客服支持团队协助。"
         },
         { status: 400 }
       );

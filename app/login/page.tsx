@@ -4,12 +4,14 @@ import Link from "next/link";
 type LoginPageProps = {
   searchParams?: Promise<{
     redirect?: string;
+    message?: string;
   }>;
 };
 
 export default async function Login({ searchParams }: LoginPageProps) {
   const resolvedSearchParams = (await searchParams) ?? {};
   const redirectTo = resolvedSearchParams.redirect ?? "/workspace";
+  const initialStatusText = resolvedSearchParams.message ?? "";
 
   return (
     <div className="min-h-screen pt-24 pb-16 flex items-center justify-center px-6">
@@ -25,12 +27,12 @@ export default async function Login({ searchParams }: LoginPageProps) {
         </div>
 
         <div className="glass-panel p-8 rounded-2xl border-gold-glow">
-          <LoginForm redirectTo={redirectTo} />
+          <LoginForm redirectTo={redirectTo} initialStatusText={initialStatusText} />
         </div>
 
         <div className="mt-8 text-center">
           <a href="/#contact-sales" className="text-xs text-brand-700 hover:text-cream-50 transition-colors">
-            需要人工客服协助？联系销售团队
+            需要人工客服协助？联系客服支持团队
           </a>
         </div>
       </div>
