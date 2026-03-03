@@ -71,7 +71,18 @@ describe("auth pages", () => {
     expect(html).toContain("联系客服支持团队");
   });
 
-  it("redirects anonymous users from workspace-entry back to login", async () => {
+  it("redirects users with browser login traces from workspace-entry into auth-complete", async () => {
+    await expect(WorkspaceEntryPage({})).rejects.toThrow(
+      "NEXT_REDIRECT:/auth/complete?next=%2Fworkspace"
+    );
+  });
+
+  it("redirects fully anonymous users from workspace-entry back to login", async () => {
+    const { cookies } = await import("next/headers");
+    vi.mocked(cookies).mockResolvedValue({
+      getAll: () => []
+    } as never);
+
     await expect(WorkspaceEntryPage({})).rejects.toThrow(
       "NEXT_REDIRECT:/login?redirect=%2Fworkspace"
     );

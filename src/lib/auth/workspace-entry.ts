@@ -39,6 +39,16 @@ export function decideWorkspaceEntry(input: {
     };
   }
 
+  if (
+    input.sessionResolution.status === "anonymous" &&
+    input.hasSessionCookie
+  ) {
+    return {
+      kind: "redirect",
+      to: buildAuthCompletePath(targetPath)
+    };
+  }
+
   return {
     kind: "redirect",
     to: `/login?redirect=${encodeURIComponent(targetPath)}`

@@ -34,7 +34,7 @@ describe("workspace entry decisions", () => {
     });
   });
 
-  it("sends anonymous users back to login even if the browser still has old auth cookies", () => {
+  it("sends users with browser login traces into auth-complete when the server has not caught up yet", () => {
     expect(
       decideWorkspaceEntry({
         hasSessionCookie: true,
@@ -44,7 +44,7 @@ describe("workspace entry decisions", () => {
       })
     ).toEqual({
       kind: "redirect",
-      to: "/login?redirect=%2Fworkspace"
+      to: "/auth/complete?next=%2Fworkspace"
     });
   });
 
