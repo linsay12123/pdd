@@ -74,10 +74,12 @@ export async function handleTaskCreateRequest(
       );
     }
 
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    console.error("[task-create] 创建任务失败:", errorMessage, error);
     return NextResponse.json(
       {
         ok: false,
-        message: error instanceof Error ? error.message : "创建任务失败"
+        message: `创建任务失败：${errorMessage}`
       },
       { status: 500 }
     );

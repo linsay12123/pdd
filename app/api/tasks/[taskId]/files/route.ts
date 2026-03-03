@@ -96,7 +96,10 @@ export async function handleTaskFileUploadRequest(
       { status: 201 }
     );
   } catch (error) {
-    if (error instanceof Error && error.message === "AUTH_REQUIRED") {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    console.error("[file-upload] 上传文件失败:", errorMessage, error);
+
+    if (errorMessage === "AUTH_REQUIRED") {
       return NextResponse.json(
         {
           ok: false,
@@ -106,10 +109,20 @@ export async function handleTaskFileUploadRequest(
       );
     }
 
+    if (errorMessage === "ACCOUNT_FROZEN") {
+      return NextResponse.json(
+        {
+          ok: false,
+          message: "账号已被冻结，请联系管理员。"
+        },
+        { status: 403 }
+      );
+    }
+
     return NextResponse.json(
       {
         ok: false,
-        message: error instanceof Error ? error.message : "上传文件失败"
+        message: `上传文件失败：${errorMessage}`
       },
       { status: 500 }
     );

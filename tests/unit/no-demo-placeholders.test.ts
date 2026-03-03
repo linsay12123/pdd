@@ -1,12 +1,15 @@
 import { existsSync, readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
+const projectRoot = resolve(__dirname, "../..");
+
 const workspaceDemoPagePath =
-  "/Users/jeffo/Desktop/自动写作/.worktrees/bootstrap-shell/app/(app)/workspace/demo/page.tsx";
+  resolve(projectRoot, "app/(app)/workspace/demo/page.tsx");
 const outlinePlaceholderPath =
-  "/Users/jeffo/Desktop/自动写作/.worktrees/bootstrap-shell/src/components/workspace/outline-review-panel.tsx";
+  resolve(projectRoot, "src/components/workspace/outline-review-panel.tsx");
 const deliverablesPlaceholderPath =
-  "/Users/jeffo/Desktop/自动写作/.worktrees/bootstrap-shell/src/components/workspace/deliverables-panel.tsx";
+  resolve(projectRoot, "src/components/workspace/deliverables-panel.tsx");
 
 describe("workspace cleanup", () => {
   it("removes the old demo route and placeholder workspace panels", () => {
@@ -19,7 +22,7 @@ describe("workspace cleanup", () => {
 describe("workspace page source", () => {
   it("does not describe active workspace UI as placeholders", () => {
     const workspaceSource = readFileSync(
-      "/Users/jeffo/Desktop/自动写作/.worktrees/bootstrap-shell/src/components/pages/workspace-page-client.tsx",
+      resolve(projectRoot, "src/components/pages/workspace-page-client.tsx"),
       "utf8"
     );
 

@@ -1,13 +1,16 @@
 import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
+const migrationsDir = resolve(__dirname, "../../supabase/migrations");
+
 const initialSchema = readFileSync(
-  "/Users/jeffo/Desktop/自动写作/.worktrees/bootstrap-shell/supabase/migrations/202603020001_initial_schema.sql",
+  resolve(migrationsDir, "202603020001_initial_schema.sql"),
   "utf8"
 );
 
 const recursiveFixMigration = readFileSync(
-  "/Users/jeffo/Desktop/自动写作/.worktrees/bootstrap-shell/supabase/migrations/202603030007_fix_recursive_admin_policies.sql",
+  resolve(migrationsDir, "202603030007_fix_recursive_admin_policies.sql"),
   "utf8"
 );
 
