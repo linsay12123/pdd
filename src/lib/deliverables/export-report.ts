@@ -1,10 +1,11 @@
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { spawn } from "node:child_process";
 import {
   createTaskOutputStoragePath,
   resolveStoredFileDiskPath
 } from "@/src/lib/storage/task-output-files";
+import { saveTaskArtifact } from "@/src/lib/storage/task-artifacts";
 import { saveTaskOutput } from "@/src/lib/tasks/task-output-store";
 
 export type ReferenceReportEntry = {
@@ -51,18 +52,24 @@ export async function exportReferenceReport(input: ReferenceReportInput) {
     input.taskId,
     "reference-report.pdf"
   );
-  const outputPath = resolveStoredFileDiskPath(storagePath);
+  const tempOutputPath = resolveStoredFileDiskPath(storagePath);
   const tempDir = path.join(process.cwd(), "tmp", "pdfs");
   const payloadPath = path.join(tempDir, `${input.taskId}-reference-report.json`);
 
   await mkdir(tempDir, { recursive: true });
-  await mkdir(path.dirname(outputPath), { recursive: true });
+  await mkdir(path.dirname(tempOutputPath), { recursive: true });
   await writeFile(payloadPath, JSON.stringify(payload, null, 2), "utf8");
 
   await runPythonWorker(
     path.join(process.cwd(), "workers", "pdfs", "export_reference_report.py"),
-    [payloadPath, outputPath]
+    [payloadPath, tempOutputPath]
   );
+
+  const artifact = await saveTaskArtifact({
+    storagePath,
+    body: await readFile(tempOutputPath),
+    contentType: "application/pdf"
+  });
 
   await saveTaskOutput({
     taskId: input.taskId,
@@ -72,7 +79,7 @@ export async function exportReferenceReport(input: ReferenceReportInput) {
   });
 
   return {
-    outputPath,
+    outputPath: artifact.outputPath,
     payloadPath,
     storagePath
   };

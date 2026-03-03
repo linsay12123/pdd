@@ -13,6 +13,7 @@ describe("HomePage", () => {
     expect(html).toContain("联系销售购买额度");
     expect(html).toContain("激活码按需充值");
     expect(html).toContain("生成文章需500积分");
+    expect(html).toContain("AI 检测报告");
   });
 
   it("documents the current pdd scope without claiming online payments are active", () => {

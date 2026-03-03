@@ -17,5 +17,7 @@ describe("brand components", () => {
     expect(html).toContain("联系客服购买额度");
     expect(html).toContain('src="/qrcode.jpg"');
     expect(html).toContain("激活码");
+    expect(html).toContain("AI 检测报告");
+    expect(html).toContain("学术诚信风险检测报告");
   });
 });

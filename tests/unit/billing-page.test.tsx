@@ -11,6 +11,8 @@ describe("BillingPage", () => {
     expect(html).toContain("最近记录");
     expect(html).toContain("1000、5000、10000、20000");
     expect(html).toContain("500</span> 积分/次");
+    expect(html).toContain("AI 检测报告");
+    expect(html).toContain("学术诚信风险检测报告");
     expect(html).not.toContain("支付宝");
     expect(html).not.toContain("微信支付");
     expect(html).not.toContain("USDC");

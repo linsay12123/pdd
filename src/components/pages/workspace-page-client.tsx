@@ -1,6 +1,7 @@
 "use client";
 
 import { Button } from "@/src/components/ui/Button";
+import { SupportServicesNote } from "@/src/components/brand/support-services-note";
 import { requestConfirmPrimaryFile } from "@/src/lib/tasks/request-confirm-primary-file";
 import { requestTaskDownload } from "@/src/lib/tasks/request-task-download";
 import { requestOutlineApproval } from "@/src/lib/tasks/request-outline-approval";
@@ -727,10 +728,13 @@ export function WorkspacePageClient({ initialQuota }: WorkspacePageClientProps) 
                       </div>
                     </div>
 
-                    <div className="mt-6 bg-brand-950 p-4 rounded-xl border border-white/5 flex items-center justify-between">
-                      <div className="flex items-center gap-3">
-                        <MessageSquare className="w-5 h-5 text-brand-700" />
-                        <span className="text-sm text-cream-100">需要更深度的修改或人工润色？</span>
+                    <div className="mt-6 bg-brand-950 p-4 rounded-xl border border-white/5 flex flex-col md:flex-row md:items-center justify-between gap-4">
+                      <div className="grid gap-3">
+                        <div className="flex items-center gap-3">
+                          <MessageSquare className="w-5 h-5 text-brand-700" />
+                          <span className="text-sm text-cream-100">需要更深度的修改或人工润色？</span>
+                        </div>
+                        <SupportServicesNote />
                       </div>
                       <a href="/#contact-sales" className="text-sm text-gold-400 hover:text-gold-300 font-medium">
                         联系客服人工协助

@@ -1,4 +1,5 @@
 import { BrandLogo } from "./brand-logo";
+import { SupportServicesNote } from "./support-services-note";
 
 type ContactSalesCardProps = {
   title?: string;
@@ -18,6 +19,7 @@ export function ContactSalesCard({
           {description}
         </p>
       </div>
+      <SupportServicesNote />
       <div
         className="pdd-card-plain"
         style={{ display: "grid", justifyItems: "center", gap: "0.75rem", padding: "1rem" }}

@@ -1,6 +1,7 @@
 "use client";
 
 import { Button } from "@/src/components/ui/Button";
+import { SupportServicesNote } from "@/src/components/brand/support-services-note";
 import { Key, History, ArrowDownCircle, ArrowUpCircle } from "lucide-react";
 import React, { useEffect, useState } from "react";
 
@@ -147,6 +148,10 @@ export function BillingPageClient({ initialQuota }: BillingPageClientProps) {
             <div className="bg-brand-900 px-4 py-2 rounded-lg border border-white/5 inline-block">
               <span className="text-xs text-brand-700 mr-2">微信号：</span>
               <span className="font-mono text-gold-400 text-sm font-medium">pindaidai_vip</span>
+            </div>
+
+            <div className="mt-4">
+              <SupportServicesNote centered />
             </div>
           </div>
 

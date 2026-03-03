@@ -1,6 +1,7 @@
 "use client";
 
 import { Button } from "@/src/components/ui/Button";
+import { SupportServicesNote } from "@/src/components/brand/support-services-note";
 import {
   ArrowRight,
   CheckCircle2,
@@ -483,6 +484,10 @@ export default function Home() {
                   <span className="text-sm text-brand-700">邮箱</span>
                   <span className="font-mono text-gold-400 font-medium tracking-wider text-sm">1318823634@qq.com</span>
                 </div>
+              </div>
+
+              <div className="mb-6 w-full max-w-md">
+                <SupportServicesNote centered />
               </div>
 
               <p className="text-xs text-brand-700">工作时间：周一至周日 09:00 - 22:00</p>

@@ -29,5 +29,6 @@ describe("DeliverablesPanel humanize state", () => {
     expect(html).toContain("降AI后版本（Word）");
     expect(html).toContain("人工降AI 请联系客服");
     expect(html).toContain("/qrcode.jpg");
+    expect(html).toContain("AI 检测报告");
   });
 });

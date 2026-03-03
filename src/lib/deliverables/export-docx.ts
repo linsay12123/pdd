@@ -1,7 +1,8 @@
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { spawn } from "node:child_process";
 import { createTaskOutputStoragePath, resolveStoredFileDiskPath } from "@/src/lib/storage/task-output-files";
+import { saveTaskArtifact } from "@/src/lib/storage/task-artifacts";
 import { saveTaskOutput } from "@/src/lib/tasks/task-output-store";
 import type { TaskOutputKind } from "@/src/types/tasks";
 
@@ -46,18 +47,24 @@ export async function exportDocx(input: DocxExportInput) {
   const payload = prepareDocxExportPayload(input);
   const variant = input.variant ?? "final";
   const storagePath = createTaskOutputStoragePath(input.userId, input.taskId, `${variant}.docx`);
-  const outputPath = resolveStoredFileDiskPath(storagePath);
+  const tempOutputPath = resolveStoredFileDiskPath(storagePath);
   const tempDir = path.join(process.cwd(), "tmp", "docs");
   const payloadPath = path.join(tempDir, `${input.taskId}-docx-payload.json`);
 
   await mkdir(tempDir, { recursive: true });
-  await mkdir(path.dirname(outputPath), { recursive: true });
+  await mkdir(path.dirname(tempOutputPath), { recursive: true });
   await writeFile(payloadPath, JSON.stringify(payload, null, 2), "utf8");
 
   await runPythonWorker(
     path.join(process.cwd(), "workers", "docs", "export_docx.py"),
-    [payloadPath, outputPath]
+    [payloadPath, tempOutputPath]
   );
+
+  const artifact = await saveTaskArtifact({
+    storagePath,
+    body: await readFile(tempOutputPath),
+    contentType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+  });
 
   await saveTaskOutput({
     taskId: input.taskId,
@@ -68,7 +75,7 @@ export async function exportDocx(input: DocxExportInput) {
   });
 
   return {
-    outputPath,
+    outputPath: artifact.outputPath,
     payloadPath,
     storagePath
   };

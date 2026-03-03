@@ -1,3 +1,5 @@
+import { SupportServicesNote } from "@/src/components/brand/support-services-note";
+
 type ManualHumanizeCardProps = {
   imageSrc?: string;
   contactText?: string;
@@ -20,6 +22,7 @@ export function ManualHumanizeCard({
       <p style={{ margin: 0, textAlign: "center", color: "#475569" }}>
         如果你想做更强的人工作业润色，可以扫码联系人工服务。
       </p>
+      <SupportServicesNote centered />
     </aside>
   );
 }

@@ -1,8 +1,7 @@
 import { basename } from "node:path";
-import { readFile } from "node:fs/promises";
 import { NextResponse } from "next/server";
 import { requireCurrentSessionUser } from "@/src/lib/auth/current-user";
-import { resolveStoredFileDiskPath } from "@/src/lib/storage/task-output-files";
+import { readTaskArtifact } from "@/src/lib/storage/task-artifacts";
 import { createDownloadSignature } from "@/src/lib/storage/signed-url";
 import { findOwnedTaskOutputByStoragePath } from "@/src/lib/tasks/task-output-store";
 import type { SessionUser } from "@/src/types/auth";
@@ -85,7 +84,9 @@ export async function handleStorageDownloadRequest(
   }
 
   try {
-    const file = await readFile(resolveStoredFileDiskPath(output.storagePath));
+    const file = await readTaskArtifact({
+      storagePath: output.storagePath
+    });
 
     return new NextResponse(file, {
       status: 200,
