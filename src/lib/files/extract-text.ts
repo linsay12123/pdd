@@ -1,5 +1,4 @@
 import JSZip from "jszip";
-import { PDFParse } from "pdf-parse";
 import { detectSupportedFileKind } from "./file-kind";
 
 const xmlTagPattern = /<[^>]+>/g;
@@ -81,7 +80,11 @@ async function extractPptxText(buffer: Buffer, filename: string) {
 }
 
 async function extractPdfText(buffer: Buffer, filename: string) {
+  // Dynamic import: pdf-parse v2 depends on @napi-rs/canvas (native binary)
+  // which crashes on Vercel serverless. Dynamic import lets us fall back
+  // to the regex-based extractor if the module fails to load.
   try {
+    const { PDFParse } = await import("pdf-parse");
     const parser = new PDFParse({ data: buffer });
     const parsed = await parser.getText();
     await parser.destroy();
@@ -91,6 +94,7 @@ async function extractPdfText(buffer: Buffer, filename: string) {
       return extracted;
     }
   } catch {
+    // pdf-parse failed (module load or parsing error).
     // Fall through to the lightweight stream parser below.
   }
 
