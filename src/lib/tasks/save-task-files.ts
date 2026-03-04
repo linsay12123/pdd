@@ -1,46 +1,55 @@
 import { randomUUID } from "node:crypto";
-import type { FileClassificationResult } from "@/src/lib/ai/services/classify-files";
+import type { OutlineScaffold } from "@/src/lib/ai/prompts/generate-outline";
 import { shouldUseSupabasePersistence } from "@/src/lib/persistence/runtime-mode";
 import { createTaskStoragePath } from "@/src/lib/storage/upload";
+import { readTaskArtifact, saveTaskArtifact } from "@/src/lib/storage/task-artifacts";
 import { createSupabaseAdminClient } from "@/src/lib/supabase/admin";
-import { buildTaskOutlineBundle, type TaskOutlineBundle } from "@/src/lib/tasks/build-task-outline";
 import { saveOutlineVersion } from "@/src/lib/tasks/save-outline-version";
 import {
   getTaskSummary,
   listTaskFiles,
   patchTaskSummary,
   replaceTaskFiles,
-  saveTaskFileRecords,
-  updateTaskStatus
+  saveTaskFileRecords
 } from "@/src/lib/tasks/repository";
-import type { TaskFileRecord, TaskStatus, TaskSummary } from "@/src/types/tasks";
+import type {
+  TaskAnalysisSnapshot,
+  TaskFileRecord,
+  TaskStatus,
+  TaskSummary
+} from "@/src/types/tasks";
 
 type SaveTaskFilesInput = {
   taskId: string;
   userId: string;
   files: Array<{
     originalFilename: string;
+    contentType?: string;
+    body?: Buffer;
     extractedText: string;
+    extractionMethod?: string;
+    extractionWarnings?: string[];
+    openaiFileId?: string | null;
+    openaiUploadStatus?: "pending" | "uploaded" | "failed";
   }>;
 };
 
-type ConfirmPrimaryTaskFileInput = {
-  taskId: string;
-  userId: string;
-  fileId: string;
-};
-
-type ApplyFileClassificationInput = {
-  taskId: string;
-  userId: string;
-  classification: FileClassificationResult;
+type DerivedRuleCard = {
+  topic: string | null;
+  targetWordCount: number;
+  citationStyle: string;
+  chapterCountOverride: number | null;
+  mustAnswer: string[];
+  gradingPriorities: string[];
+  specialRequirements: string;
 };
 
 type PersistedTaskFilesResult = {
   task: TaskSummary;
   files: TaskFileRecord[];
-  ruleCard: TaskOutlineBundle["ruleCard"] | null;
-  outline: TaskOutlineBundle["outline"] | null;
+  analysis: TaskAnalysisSnapshot | null;
+  ruleCard: DerivedRuleCard | null;
+  outline: OutlineScaffold | null;
 };
 
 export async function getOwnedTaskSummary(taskId: string, userId: string) {
@@ -58,7 +67,7 @@ export async function getOwnedTaskSummary(taskId: string, userId: string) {
   const { data, error } = await client
     .from("writing_tasks")
     .select(
-      "id,status,target_word_count,citation_style,special_requirements,primary_requirement_file_id"
+      "id,status,target_word_count,citation_style,special_requirements,primary_requirement_file_id,topic,requested_chapter_count,outline_revision_count,latest_outline_version_id,analysis_snapshot,analysis_status,analysis_model,analysis_completed_at"
     )
     .eq("id", taskId)
     .eq("user_id", userId)
@@ -76,11 +85,35 @@ export async function getOwnedTaskSummary(taskId: string, userId: string) {
     id: String(data.id),
     userId,
     status: data.status,
-    targetWordCount: Number(data.target_word_count),
-    citationStyle: String(data.citation_style),
+    targetWordCount:
+      typeof data.target_word_count === "number"
+        ? Number(data.target_word_count)
+        : null,
+    citationStyle: data.citation_style ? String(data.citation_style) : null,
     specialRequirements: String(data.special_requirements ?? ""),
+    topic: data.topic ? String(data.topic) : undefined,
+    requestedChapterCount:
+      typeof data.requested_chapter_count === "number"
+        ? Number(data.requested_chapter_count)
+        : null,
+    outlineRevisionCount: Number(data.outline_revision_count ?? 0),
     primaryRequirementFileId: data.primary_requirement_file_id
       ? String(data.primary_requirement_file_id)
+      : null,
+    latestOutlineVersionId: data.latest_outline_version_id
+      ? String(data.latest_outline_version_id)
+      : null,
+    analysisSnapshot:
+      data.analysis_snapshot && typeof data.analysis_snapshot === "object"
+        ? (data.analysis_snapshot as TaskAnalysisSnapshot)
+        : null,
+    analysisStatus:
+      data.analysis_status === "succeeded" || data.analysis_status === "failed"
+        ? data.analysis_status
+        : "pending",
+    analysisModel: data.analysis_model ? String(data.analysis_model) : null,
+    analysisCompletedAt: data.analysis_completed_at
+      ? String(data.analysis_completed_at)
       : null
   } satisfies TaskSummary;
 }
@@ -91,20 +124,51 @@ export async function saveTaskFiles(input: SaveTaskFilesInput) {
     : saveTaskFilesLocally(input);
 }
 
-export async function applyFileClassification(
-  input: ApplyFileClassificationInput
-): Promise<PersistedTaskFilesResult> {
+export async function updateTaskFileOpenAIMetadata(input: {
+  taskId: string;
+  userId: string;
+  files: Array<{
+    id: string;
+    openaiFileId?: string | null;
+    openaiUploadStatus: "pending" | "uploaded" | "failed";
+    extractionMethod?: string;
+    extractionWarnings?: string[];
+  }>;
+}) {
   return shouldUseSupabasePersistence()
-    ? applyFileClassificationWithSupabase(input)
-    : applyFileClassificationLocally(input);
+    ? updateTaskFileOpenAIMetadataWithSupabase(input)
+    : updateTaskFileOpenAIMetadataLocally(input);
 }
 
-export async function confirmPrimaryTaskFile(
-  input: ConfirmPrimaryTaskFileInput
-): Promise<PersistedTaskFilesResult> {
+export async function listTaskFilesForModel(
+  taskId: string,
+  userId: string
+): Promise<Array<TaskFileRecord & { rawBody: Buffer | null }>> {
+  const files = shouldUseSupabasePersistence()
+    ? await listTaskFilesWithSupabase(taskId, userId)
+    : listTaskFiles(taskId);
+
+  const withBodies = await Promise.all(
+    files.map(async (file) => ({
+      ...file,
+      rawBody: await readTaskArtifact({
+        storagePath: file.storagePath
+      }).catch(() => null)
+    }))
+  );
+
+  return withBodies;
+}
+
+export async function persistTaskModelAnalysis(input: {
+  taskId: string;
+  userId: string;
+  analysis: TaskAnalysisSnapshot;
+  outline: OutlineScaffold | null;
+}): Promise<PersistedTaskFilesResult> {
   return shouldUseSupabasePersistence()
-    ? confirmPrimaryTaskFileWithSupabase(input)
-    : confirmPrimaryTaskFileLocally(input);
+    ? persistTaskModelAnalysisWithSupabase(input)
+    : persistTaskModelAnalysisLocally(input);
 }
 
 async function saveTaskFilesLocally({
@@ -112,18 +176,37 @@ async function saveTaskFilesLocally({
   userId,
   files
 }: SaveTaskFilesInput) {
-  return saveTaskFileRecords(
-    files.map((file) => ({
+  const records = [];
+
+  for (const file of files) {
+    const storagePath = createTaskStoragePath(userId, taskId, file.originalFilename);
+
+    if (file.body) {
+      await saveTaskArtifact({
+        storagePath,
+        body: file.body,
+        contentType: file.contentType || "application/octet-stream"
+      });
+    }
+
+    records.push({
       id: randomUUID(),
       taskId,
       userId,
       originalFilename: file.originalFilename,
-      storagePath: createTaskStoragePath(userId, taskId, file.originalFilename),
+      storagePath,
+      contentType: file.contentType,
       extractedText: file.extractedText,
-      role: "unknown",
+      extractionMethod: file.extractionMethod,
+      extractionWarnings: file.extractionWarnings ?? [],
+      openaiFileId: file.openaiFileId ?? null,
+      openaiUploadStatus: file.openaiUploadStatus ?? "pending",
+      role: "unknown" as const,
       isPrimary: false
-    }))
-  );
+    });
+  }
+
+  return saveTaskFileRecords(records);
 }
 
 async function saveTaskFilesWithSupabase({
@@ -132,20 +215,40 @@ async function saveTaskFilesWithSupabase({
   files
 }: SaveTaskFilesInput) {
   const client = createSupabaseAdminClient();
-  const rows = files.map((file) => ({
-    task_id: taskId,
-    user_id: userId,
-    original_filename: file.originalFilename,
-    storage_path: createTaskStoragePath(userId, taskId, file.originalFilename),
-    extracted_text: file.extractedText,
-    role: "unknown" as const,
-    is_primary: false
-  }));
+  const rows = [];
+
+  for (const file of files) {
+    const storagePath = createTaskStoragePath(userId, taskId, file.originalFilename);
+
+    if (file.body) {
+      await saveTaskArtifact({
+        storagePath,
+        body: file.body,
+        contentType: file.contentType || "application/octet-stream"
+      });
+    }
+
+    rows.push({
+      task_id: taskId,
+      user_id: userId,
+      original_filename: file.originalFilename,
+      storage_path: storagePath,
+      content_type: file.contentType ?? null,
+      extracted_text: file.extractedText,
+      extraction_method: file.extractionMethod ?? null,
+      extraction_warnings: file.extractionWarnings ?? [],
+      openai_file_id: file.openaiFileId ?? null,
+      openai_upload_status: file.openaiUploadStatus ?? "pending",
+      role: "unknown" as const,
+      is_primary: false
+    });
+  }
+
   const { data, error } = await client
     .from("task_files")
     .insert(rows)
     .select(
-      "id,task_id,user_id,original_filename,storage_path,extracted_text,role,is_primary,created_at,updated_at"
+      "id,task_id,user_id,original_filename,storage_path,content_type,extracted_text,extraction_method,extraction_warnings,openai_file_id,openai_upload_status,role,is_primary,created_at,updated_at"
     );
 
   if (error || !data) {
@@ -155,428 +258,253 @@ async function saveTaskFilesWithSupabase({
   return data.map(mapTaskFileRow);
 }
 
-async function applyFileClassificationLocally({
-  taskId,
-  userId,
-  classification
-}: ApplyFileClassificationInput): Promise<PersistedTaskFilesResult> {
-  const task = getTaskSummary(taskId);
-
-  if (!task) {
-    throw new Error("TASK_NOT_FOUND");
-  }
-
-  const files = listTaskFiles(taskId);
-  const nextStatus: TaskStatus = classification.needsUserConfirmation
-    ? "awaiting_primary_file_confirmation"
-    : "building_rule_card";
-  const nextFiles = files.map((file) => {
-    const role = resolveRoleForFile(file.id, classification);
-    const isPrimary = file.id === classification.primaryRequirementFileId;
+async function updateTaskFileOpenAIMetadataLocally(input: {
+  taskId: string;
+  userId: string;
+  files: Array<{
+    id: string;
+    openaiFileId?: string | null;
+    openaiUploadStatus: "pending" | "uploaded" | "failed";
+    extractionMethod?: string;
+    extractionWarnings?: string[];
+  }>;
+}) {
+  const existingFiles = listTaskFiles(input.taskId);
+  const nextFiles = existingFiles.map((file) => {
+    const update = input.files.find((candidate) => candidate.id === file.id);
+    if (!update) {
+      return file;
+    }
 
     return {
       ...file,
-      role,
-      isPrimary,
+      openaiFileId: update.openaiFileId ?? file.openaiFileId ?? null,
+      openaiUploadStatus: update.openaiUploadStatus,
+      extractionMethod: update.extractionMethod ?? file.extractionMethod,
+      extractionWarnings: update.extractionWarnings ?? file.extractionWarnings ?? [],
       updatedAt: new Date().toISOString()
     };
   });
 
-  replaceTaskFiles(taskId, nextFiles);
-  updateTaskStatus(taskId, nextStatus);
-  const nextTask = patchTaskSummary(taskId, {
-    primaryRequirementFileId: classification.primaryRequirementFileId,
-    status: nextStatus
+  replaceTaskFiles(input.taskId, nextFiles);
+  return nextFiles;
+}
+
+async function updateTaskFileOpenAIMetadataWithSupabase(input: {
+  taskId: string;
+  userId: string;
+  files: Array<{
+    id: string;
+    openaiFileId?: string | null;
+    openaiUploadStatus: "pending" | "uploaded" | "failed";
+    extractionMethod?: string;
+    extractionWarnings?: string[];
+  }>;
+}) {
+  const client = createSupabaseAdminClient();
+
+  for (const file of input.files) {
+    const { error } = await client
+      .from("task_files")
+      .update({
+        openai_file_id: file.openaiFileId ?? null,
+        openai_upload_status: file.openaiUploadStatus,
+        extraction_method: file.extractionMethod ?? null,
+        extraction_warnings: file.extractionWarnings ?? []
+      })
+      .eq("id", file.id)
+      .eq("task_id", input.taskId)
+      .eq("user_id", input.userId);
+
+    if (error) {
+      throw new Error(`更新 OpenAI 文件元数据失败：${error.message}`);
+    }
+  }
+
+  return listTaskFilesWithSupabase(input.taskId, input.userId);
+}
+
+async function persistTaskModelAnalysisLocally(input: {
+  taskId: string;
+  userId: string;
+  analysis: TaskAnalysisSnapshot;
+  outline: OutlineScaffold | null;
+}): Promise<PersistedTaskFilesResult> {
+  const task = getTaskSummary(input.taskId);
+
+  if (!task || task.userId !== input.userId) {
+    throw new Error("TASK_NOT_FOUND");
+  }
+
+  const currentFiles = listTaskFiles(input.taskId);
+  const resolvedTopic = input.analysis.topic ?? input.outline?.articleTitle ?? null;
+  const nextStatus: TaskStatus = input.analysis.needsUserConfirmation
+    ? "awaiting_primary_file_confirmation"
+    : "awaiting_outline_approval";
+  const nextFiles = currentFiles.map((file) => {
+    const role = resolveRoleFromAnalysis(file.id, input.analysis);
+    return {
+      ...file,
+      role,
+      isPrimary: file.id === input.analysis.chosenTaskFileId,
+      updatedAt: new Date().toISOString()
+    };
+  });
+
+  replaceTaskFiles(input.taskId, nextFiles);
+
+  let latestOutlineVersionId = task.latestOutlineVersionId ?? null;
+  if (!input.analysis.needsUserConfirmation && input.outline) {
+    const savedOutlineVersion = await saveOutlineVersion({
+      task: {
+        ...task,
+        topic: resolvedTopic,
+        targetWordCount: input.analysis.targetWordCount,
+        citationStyle: input.analysis.citationStyle,
+        requestedChapterCount: input.analysis.chapterCount
+      },
+      userId: input.userId,
+      outline: input.outline
+    });
+    latestOutlineVersionId = savedOutlineVersion.id;
+  }
+
+  const nextTask = patchTaskSummary(input.taskId, {
+    status: nextStatus,
+    primaryRequirementFileId: input.analysis.chosenTaskFileId,
+    targetWordCount: input.analysis.needsUserConfirmation
+      ? task.targetWordCount
+      : input.analysis.targetWordCount,
+    citationStyle: input.analysis.needsUserConfirmation
+      ? task.citationStyle
+      : input.analysis.citationStyle,
+    topic: input.analysis.needsUserConfirmation ? task.topic : resolvedTopic,
+    requestedChapterCount: input.analysis.chapterCount,
+    latestOutlineVersionId,
+    analysisSnapshot: input.analysis,
+    analysisStatus: "succeeded",
+    analysisModel: "gpt-5.2",
+    analysisCompletedAt: new Date().toISOString()
   });
 
   if (!nextTask) {
     throw new Error("TASK_NOT_FOUND");
   }
 
-  if (!classification.primaryRequirementFileId) {
-    return {
-      task: nextTask,
-      files: nextFiles,
-      ruleCard: null,
-      outline: null
-    };
-  }
-
-  const outlineBundle = await buildTaskOutlineBundle({
+  return {
     task: nextTask,
     files: nextFiles,
-    primaryRequirementFileId: classification.primaryRequirementFileId
-  });
-  const savedOutlineVersion = await saveOutlineVersion({
-    task: {
-      ...nextTask,
-      topic: outlineBundle.ruleCard.topic
-    },
-    userId,
-    outline: outlineBundle.outline
-  });
-  const outlinedTask = patchTaskSummary(taskId, {
-    status: "awaiting_outline_approval",
-    topic: outlineBundle.ruleCard.topic,
-    requestedChapterCount: outlineBundle.ruleCard.chapterCountOverride,
-    targetWordCount: outlineBundle.ruleCard.targetWordCount,
-    citationStyle: outlineBundle.ruleCard.citationStyle,
-    latestOutlineVersionId: savedOutlineVersion.id
-  });
-
-  if (!outlinedTask) {
-    throw new Error("TASK_NOT_FOUND");
-  }
-
-  return {
-    task: outlinedTask,
-    files: nextFiles,
-    ruleCard: outlineBundle.ruleCard,
-    outline: outlineBundle.outline
+    analysis: input.analysis,
+    ruleCard: input.analysis.needsUserConfirmation
+      ? null
+      : buildRuleCardFromAnalysis(input.analysis, input.outline),
+    outline: input.outline
   };
 }
 
-async function applyFileClassificationWithSupabase({
-  taskId,
-  userId,
-  classification
-}: ApplyFileClassificationInput): Promise<PersistedTaskFilesResult> {
+async function persistTaskModelAnalysisWithSupabase(input: {
+  taskId: string;
+  userId: string;
+  analysis: TaskAnalysisSnapshot;
+  outline: OutlineScaffold | null;
+}): Promise<PersistedTaskFilesResult> {
   const client = createSupabaseAdminClient();
-  const ownedTask = await getOwnedTaskSummary(taskId, userId);
+  const ownedTask = await getOwnedTaskSummary(input.taskId, input.userId);
 
   if (!ownedTask) {
     throw new Error("TASK_NOT_FOUND");
   }
 
-  const nextStatus: TaskStatus = classification.needsUserConfirmation
+  const files = await listTaskFilesWithSupabase(input.taskId, input.userId);
+  const resolvedTopic = input.analysis.topic ?? input.outline?.articleTitle ?? null;
+
+  for (const file of files) {
+    const { error } = await client
+      .from("task_files")
+      .update({
+        role: resolveRoleFromAnalysis(file.id, input.analysis),
+        is_primary: file.id === input.analysis.chosenTaskFileId
+      })
+      .eq("id", file.id)
+      .eq("task_id", input.taskId)
+      .eq("user_id", input.userId);
+
+    if (error) {
+      throw new Error(`更新文件分析结果失败：${error.message}`);
+    }
+  }
+
+  const nextStatus: TaskStatus = input.analysis.needsUserConfirmation
     ? "awaiting_primary_file_confirmation"
-    : "building_rule_card";
+    : "awaiting_outline_approval";
 
-  const { error: resetError } = await client
-    .from("task_files")
-    .update({
-      role: "unknown",
-      is_primary: false
-    })
-    .eq("task_id", taskId)
-    .eq("user_id", userId);
-
-  if (resetError) {
-    throw new Error(`更新文件分类失败：${resetError.message}`);
-  }
-
-  if (classification.backgroundFileIds.length > 0) {
-    const { error } = await client
-      .from("task_files")
-      .update({
-        role: "background"
-      })
-      .in("id", classification.backgroundFileIds)
-      .eq("task_id", taskId)
-      .eq("user_id", userId);
-
-    if (error) {
-      throw new Error(`更新背景文件失败：${error.message}`);
-    }
-  }
-
-  if (classification.irrelevantFileIds.length > 0) {
-    const { error } = await client
-      .from("task_files")
-      .update({
-        role: "irrelevant"
-      })
-      .in("id", classification.irrelevantFileIds)
-      .eq("task_id", taskId)
-      .eq("user_id", userId);
-
-    if (error) {
-      throw new Error(`更新无关文件失败：${error.message}`);
-    }
-  }
-
-  if (classification.primaryRequirementFileId) {
-    const { error } = await client
-      .from("task_files")
-      .update({
-        role: "requirement",
-        is_primary: true
-      })
-      .eq("id", classification.primaryRequirementFileId)
-      .eq("task_id", taskId)
-      .eq("user_id", userId);
-
-    if (error) {
-      throw new Error(`更新任务书失败：${error.message}`);
-    }
-  }
-
-  const { error: taskError } = await client
-    .from("writing_tasks")
-    .update({
-      status: nextStatus,
-      primary_requirement_file_id: classification.primaryRequirementFileId
-    })
-    .eq("id", taskId)
-    .eq("user_id", userId);
-
-  if (taskError) {
-    throw new Error(`更新任务状态失败：${taskError.message}`);
-  }
-
-  if (!classification.primaryRequirementFileId) {
-    return {
+  let latestOutlineVersionId = ownedTask.latestOutlineVersionId ?? null;
+  if (!input.analysis.needsUserConfirmation && input.outline) {
+    const savedOutlineVersion = await saveOutlineVersion({
       task: {
         ...ownedTask,
-        status: nextStatus,
-        primaryRequirementFileId: classification.primaryRequirementFileId
+        topic: resolvedTopic,
+        targetWordCount: input.analysis.targetWordCount,
+        citationStyle: input.analysis.citationStyle,
+        requestedChapterCount: input.analysis.chapterCount
       },
-      files: await listTaskFilesWithSupabase(taskId, userId),
-      ruleCard: null,
-      outline: null
-    };
-  }
-
-  const files = await listTaskFilesWithSupabase(taskId, userId);
-  const outlineBundle = await buildTaskOutlineBundle({
-    task: {
-      ...ownedTask,
-      status: nextStatus,
-      primaryRequirementFileId: classification.primaryRequirementFileId
-    },
-    files,
-    primaryRequirementFileId: classification.primaryRequirementFileId
-  });
-  const savedOutlineVersion = await saveOutlineVersion({
-    task: {
-      ...ownedTask,
-      status: nextStatus,
-      topic: outlineBundle.ruleCard.topic,
-      primaryRequirementFileId: classification.primaryRequirementFileId
-    },
-    userId,
-    outline: outlineBundle.outline
-  });
-  const { error: outlinedTaskError } = await client
-    .from("writing_tasks")
-    .update({
-      status: "awaiting_outline_approval",
-      target_word_count: outlineBundle.ruleCard.targetWordCount,
-      citation_style: outlineBundle.ruleCard.citationStyle,
-      topic: outlineBundle.ruleCard.topic,
-      requested_chapter_count: outlineBundle.ruleCard.chapterCountOverride,
-      latest_outline_version_id: savedOutlineVersion.id
-    })
-    .eq("id", taskId)
-    .eq("user_id", userId);
-
-  if (outlinedTaskError) {
-    throw new Error(`更新写作规则失败：${outlinedTaskError.message}`);
-  }
-
-  return {
-    task: {
-      ...ownedTask,
-      status: "awaiting_outline_approval",
-      targetWordCount: outlineBundle.ruleCard.targetWordCount,
-      citationStyle: outlineBundle.ruleCard.citationStyle,
-      topic: outlineBundle.ruleCard.topic,
-      requestedChapterCount: outlineBundle.ruleCard.chapterCountOverride,
-      primaryRequirementFileId: classification.primaryRequirementFileId
-    },
-    files,
-    ruleCard: outlineBundle.ruleCard,
-    outline: outlineBundle.outline
-  };
-}
-
-async function confirmPrimaryTaskFileLocally({
-  taskId,
-  userId,
-  fileId
-}: ConfirmPrimaryTaskFileInput): Promise<PersistedTaskFilesResult> {
-  const task = getTaskSummary(taskId);
-
-  if (!task || task.userId !== userId) {
-    throw new Error("TASK_NOT_FOUND");
-  }
-
-  const files = listTaskFiles(taskId);
-  const selectedFile = files.find((file) => file.id === fileId && file.userId === userId);
-
-  if (!selectedFile) {
-    throw new Error("FILE_NOT_FOUND");
-  }
-
-  const nextFiles = files.map((file) => ({
-    ...file,
-    role: file.id === fileId ? "requirement" : file.role,
-    isPrimary: file.id === fileId,
-    updatedAt: new Date().toISOString()
-  }));
-
-  replaceTaskFiles(taskId, nextFiles);
-  updateTaskStatus(taskId, "building_rule_card");
-  const nextTask = patchTaskSummary(taskId, {
-    primaryRequirementFileId: fileId,
-    status: "building_rule_card"
-  });
-
-  if (!nextTask) {
-    throw new Error("TASK_NOT_FOUND");
-  }
-
-  const outlineBundle = await buildTaskOutlineBundle({
-    task: nextTask,
-    files: nextFiles,
-    primaryRequirementFileId: fileId
-  });
-  const savedOutlineVersion = await saveOutlineVersion({
-    task: {
-      ...nextTask,
-      topic: outlineBundle.ruleCard.topic
-    },
-    userId,
-    outline: outlineBundle.outline
-  });
-  const outlinedTask = patchTaskSummary(taskId, {
-    status: "awaiting_outline_approval",
-    topic: outlineBundle.ruleCard.topic,
-    requestedChapterCount: outlineBundle.ruleCard.chapterCountOverride,
-    targetWordCount: outlineBundle.ruleCard.targetWordCount,
-    citationStyle: outlineBundle.ruleCard.citationStyle,
-    latestOutlineVersionId: savedOutlineVersion.id
-  });
-
-  if (!outlinedTask) {
-    throw new Error("TASK_NOT_FOUND");
-  }
-
-  return {
-    task: outlinedTask,
-    files: nextFiles,
-    ruleCard: outlineBundle.ruleCard,
-    outline: outlineBundle.outline
-  };
-}
-
-async function confirmPrimaryTaskFileWithSupabase({
-  taskId,
-  userId,
-  fileId
-}: ConfirmPrimaryTaskFileInput): Promise<PersistedTaskFilesResult> {
-  const client = createSupabaseAdminClient();
-  const ownedTask = await getOwnedTaskSummary(taskId, userId);
-
-  if (!ownedTask) {
-    throw new Error("TASK_NOT_FOUND");
-  }
-
-  const { data: targetFile, error: targetFileError } = await client
-    .from("task_files")
-    .select("id")
-    .eq("id", fileId)
-    .eq("task_id", taskId)
-    .eq("user_id", userId)
-    .maybeSingle();
-
-  if (targetFileError) {
-    throw new Error(`读取任务文件失败：${targetFileError.message}`);
-  }
-
-  if (!targetFile) {
-    throw new Error("FILE_NOT_FOUND");
-  }
-
-  const { error: resetError } = await client
-    .from("task_files")
-    .update({
-      is_primary: false
-    })
-    .eq("task_id", taskId)
-    .eq("user_id", userId);
-
-  if (resetError) {
-    throw new Error(`重置主文件失败：${resetError.message}`);
-  }
-
-  const { error: fileError } = await client
-    .from("task_files")
-    .update({
-      role: "requirement",
-      is_primary: true
-    })
-    .eq("id", fileId)
-    .eq("task_id", taskId)
-    .eq("user_id", userId);
-
-  if (fileError) {
-    throw new Error(`确认主任务文件失败：${fileError.message}`);
+      userId: input.userId,
+      outline: input.outline
+    });
+    latestOutlineVersionId = savedOutlineVersion.id;
   }
 
   const { error: taskError } = await client
     .from("writing_tasks")
     .update({
-      status: "building_rule_card",
-      primary_requirement_file_id: fileId
+      status: nextStatus,
+      primary_requirement_file_id: input.analysis.chosenTaskFileId,
+      target_word_count: input.analysis.needsUserConfirmation
+        ? ownedTask.targetWordCount
+        : input.analysis.targetWordCount,
+      citation_style: input.analysis.needsUserConfirmation
+        ? ownedTask.citationStyle
+        : input.analysis.citationStyle,
+      topic: input.analysis.needsUserConfirmation ? ownedTask.topic : resolvedTopic,
+      requested_chapter_count: input.analysis.chapterCount,
+      latest_outline_version_id: latestOutlineVersionId,
+      analysis_snapshot: input.analysis,
+      analysis_status: "succeeded",
+      analysis_model: "gpt-5.2",
+      analysis_completed_at: new Date().toISOString()
     })
-    .eq("id", taskId)
-    .eq("user_id", userId);
+    .eq("id", input.taskId)
+    .eq("user_id", input.userId);
 
   if (taskError) {
-    throw new Error(`更新任务状态失败：${taskError.message}`);
-  }
-
-  const files = await listTaskFilesWithSupabase(taskId, userId);
-  const outlineBundle = await buildTaskOutlineBundle({
-    task: {
-      ...ownedTask,
-      status: "building_rule_card",
-      primaryRequirementFileId: fileId
-    },
-    files,
-    primaryRequirementFileId: fileId
-  });
-  const savedOutlineVersion = await saveOutlineVersion({
-    task: {
-      ...ownedTask,
-      status: "building_rule_card",
-      topic: outlineBundle.ruleCard.topic,
-      primaryRequirementFileId: fileId
-    },
-    userId,
-    outline: outlineBundle.outline
-  });
-  const { error: outlinedTaskError } = await client
-    .from("writing_tasks")
-    .update({
-      status: "awaiting_outline_approval",
-      target_word_count: outlineBundle.ruleCard.targetWordCount,
-      citation_style: outlineBundle.ruleCard.citationStyle,
-      topic: outlineBundle.ruleCard.topic,
-      requested_chapter_count: outlineBundle.ruleCard.chapterCountOverride,
-      latest_outline_version_id: savedOutlineVersion.id
-    })
-    .eq("id", taskId)
-    .eq("user_id", userId);
-
-  if (outlinedTaskError) {
-    throw new Error(`更新写作规则失败：${outlinedTaskError.message}`);
+    throw new Error(`保存分析结果失败：${taskError.message}`);
   }
 
   return {
     task: {
       ...ownedTask,
-      status: "awaiting_outline_approval",
-      targetWordCount: outlineBundle.ruleCard.targetWordCount,
-      citationStyle: outlineBundle.ruleCard.citationStyle,
-      topic: outlineBundle.ruleCard.topic,
-      requestedChapterCount: outlineBundle.ruleCard.chapterCountOverride,
-      primaryRequirementFileId: fileId
+      status: nextStatus,
+      primaryRequirementFileId: input.analysis.chosenTaskFileId,
+      targetWordCount: input.analysis.needsUserConfirmation
+        ? ownedTask.targetWordCount
+        : input.analysis.targetWordCount,
+      citationStyle: input.analysis.needsUserConfirmation
+        ? ownedTask.citationStyle
+        : input.analysis.citationStyle,
+      topic: input.analysis.needsUserConfirmation ? ownedTask.topic : resolvedTopic,
+      requestedChapterCount: input.analysis.chapterCount,
+      latestOutlineVersionId,
+      analysisSnapshot: input.analysis,
+      analysisStatus: "succeeded",
+      analysisModel: "gpt-5.2",
+      analysisCompletedAt: new Date().toISOString()
     },
-    files,
-    ruleCard: outlineBundle.ruleCard,
-    outline: outlineBundle.outline
+    files: await listTaskFilesWithSupabase(input.taskId, input.userId),
+    analysis: input.analysis,
+    ruleCard: input.analysis.needsUserConfirmation
+      ? null
+      : buildRuleCardFromAnalysis(input.analysis, input.outline),
+    outline: input.outline
   };
 }
 
@@ -585,7 +513,7 @@ async function listTaskFilesWithSupabase(taskId: string, userId: string) {
   const { data, error } = await client
     .from("task_files")
     .select(
-      "id,task_id,user_id,original_filename,storage_path,extracted_text,role,is_primary,created_at,updated_at"
+      "id,task_id,user_id,original_filename,storage_path,content_type,extracted_text,extraction_method,extraction_warnings,openai_file_id,openai_upload_status,role,is_primary,created_at,updated_at"
     )
     .eq("task_id", taskId)
     .eq("user_id", userId)
@@ -598,32 +526,18 @@ async function listTaskFilesWithSupabase(taskId: string, userId: string) {
   return data.map(mapTaskFileRow);
 }
 
-function resolveRoleForFile(
-  fileId: string,
-  classification: FileClassificationResult
-): TaskFileRecord["role"] {
-  if (fileId === classification.primaryRequirementFileId) {
-    return "requirement";
-  }
-
-  if (classification.backgroundFileIds.includes(fileId)) {
-    return "background";
-  }
-
-  if (classification.irrelevantFileIds.includes(fileId)) {
-    return "irrelevant";
-  }
-
-  return "unknown";
-}
-
 function mapTaskFileRow(row: {
   id: string;
   task_id: string;
   user_id: string;
   original_filename: string;
   storage_path: string;
+  content_type?: string | null;
   extracted_text: string;
+  extraction_method?: string | null;
+  extraction_warnings?: string[] | null;
+  openai_file_id?: string | null;
+  openai_upload_status?: "pending" | "uploaded" | "failed" | null;
   role: TaskFileRecord["role"];
   is_primary: boolean;
   created_at: string;
@@ -635,10 +549,51 @@ function mapTaskFileRow(row: {
     userId: String(row.user_id),
     originalFilename: String(row.original_filename),
     storagePath: String(row.storage_path),
+    contentType: row.content_type ? String(row.content_type) : undefined,
     extractedText: String(row.extracted_text ?? ""),
+    extractionMethod: row.extraction_method ? String(row.extraction_method) : undefined,
+    extractionWarnings: Array.isArray(row.extraction_warnings)
+      ? row.extraction_warnings.map(String)
+      : [],
+    openaiFileId: row.openai_file_id ? String(row.openai_file_id) : null,
+    openaiUploadStatus: row.openai_upload_status ?? "pending",
     role: row.role,
     isPrimary: Boolean(row.is_primary),
     createdAt: String(row.created_at),
     updatedAt: String(row.updated_at)
   } satisfies TaskFileRecord;
+}
+
+function resolveRoleFromAnalysis(
+  fileId: string,
+  analysis: TaskAnalysisSnapshot
+): TaskFileRecord["role"] {
+  if (fileId === analysis.chosenTaskFileId) {
+    return "requirement";
+  }
+
+  if (analysis.supportingFileIds.includes(fileId)) {
+    return "background";
+  }
+
+  if (analysis.ignoredFileIds.includes(fileId)) {
+    return "irrelevant";
+  }
+
+  return "unknown";
+}
+
+function buildRuleCardFromAnalysis(
+  analysis: TaskAnalysisSnapshot,
+  outline: OutlineScaffold | null
+) {
+  return {
+    topic: analysis.topic ?? outline?.articleTitle ?? null,
+    targetWordCount: analysis.targetWordCount,
+    citationStyle: analysis.citationStyle,
+    chapterCountOverride: analysis.chapterCount,
+    mustAnswer: analysis.mustCover,
+    gradingPriorities: analysis.gradingFocus,
+    specialRequirements: analysis.appliedSpecialRequirements
+  };
 }

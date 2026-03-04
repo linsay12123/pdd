@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { OutlineScaffold } from "@/src/lib/ai/prompts/generate-outline";
+import { reviseOutlineFromFilesWithOpenAI } from "@/src/lib/ai/services/revise-outline-from-files";
 import { shouldUseSupabasePersistence } from "@/src/lib/persistence/runtime-mode";
 import { createSupabaseAdminClient } from "@/src/lib/supabase/admin";
 import {
@@ -11,7 +12,7 @@ import {
   saveTaskSummary,
   saveTaskOutlineVersion
 } from "@/src/lib/tasks/repository";
-import { generateOutlineForTask } from "@/trigger/jobs/generate-outline";
+import { listTaskFilesForModel } from "@/src/lib/tasks/save-task-files";
 import type { TaskOutlineVersion, TaskSummary } from "@/src/types/tasks";
 
 const MAX_OUTLINE_REVISIONS = 5;
@@ -173,18 +174,23 @@ async function reviseOutlineVersionLocally({
   feedback
 }: ReviseOutlineInput): Promise<OutlineActionResult> {
   const task = getOwnedTaskLocally(taskId, userId);
+  const previousOutline = task.latestOutlineVersionId
+    ? getTaskOutlineVersion(taskId, task.latestOutlineVersionId)?.outline ?? null
+    : null;
 
   if ((task.outlineRevisionCount ?? 0) >= MAX_OUTLINE_REVISIONS) {
     throw new Error("OUTLINE_REVISION_LIMIT_REACHED");
   }
 
-  const outline = await generateOutlineForTask({
-    topic: task.topic ?? "General Academic Essay",
-    targetWordCount: task.targetWordCount,
-    citationStyle: task.citationStyle,
-    chapterCountOverride: task.requestedChapterCount ?? null,
-    shorterOutline: shouldShortenOutline(feedback),
-    specialRequirements: task.specialRequirements,
+  if (!task.analysisSnapshot) {
+    throw new Error("TASK_ANALYSIS_NOT_FOUND");
+  }
+
+  const files = await listTaskFilesForModel(taskId, userId);
+  const outline = await reviseOutlineFromFilesWithOpenAI({
+    files,
+    analysis: task.analysisSnapshot,
+    previousOutline,
     feedback
   });
   const nextTask = patchTaskSummary(taskId, {
@@ -215,18 +221,23 @@ async function reviseOutlineVersionWithSupabase({
   feedback
 }: ReviseOutlineInput): Promise<OutlineActionResult> {
   const task = await getOwnedTaskWithSupabase(taskId, userId);
+  const previousOutline = task.latestOutlineVersionId
+    ? await getTaskOutlineVersionWithSupabase(taskId, userId, task.latestOutlineVersionId)
+    : null;
 
   if ((task.outlineRevisionCount ?? 0) >= MAX_OUTLINE_REVISIONS) {
     throw new Error("OUTLINE_REVISION_LIMIT_REACHED");
   }
 
-  const outline = await generateOutlineForTask({
-    topic: task.topic ?? "General Academic Essay",
-    targetWordCount: task.targetWordCount,
-    citationStyle: task.citationStyle,
-    chapterCountOverride: task.requestedChapterCount ?? null,
-    shorterOutline: shouldShortenOutline(feedback),
-    specialRequirements: task.specialRequirements,
+  if (!task.analysisSnapshot) {
+    throw new Error("TASK_ANALYSIS_NOT_FOUND");
+  }
+
+  const files = await listTaskFilesForModel(taskId, userId);
+  const outline = await reviseOutlineFromFilesWithOpenAI({
+    files,
+    analysis: task.analysisSnapshot,
+    previousOutline: previousOutline?.outline ?? null,
     feedback
   });
   const updatedTask = {
@@ -391,7 +402,7 @@ async function getOwnedTaskWithSupabase(taskId: string, userId: string) {
   const { data, error } = await client
     .from("writing_tasks")
     .select(
-      "id,status,target_word_count,citation_style,special_requirements,topic,requested_chapter_count,outline_revision_count,primary_requirement_file_id,latest_outline_version_id"
+      "id,status,target_word_count,citation_style,special_requirements,topic,requested_chapter_count,outline_revision_count,primary_requirement_file_id,latest_outline_version_id,analysis_snapshot"
     )
     .eq("id", taskId)
     .eq("user_id", userId)
@@ -409,8 +420,11 @@ async function getOwnedTaskWithSupabase(taskId: string, userId: string) {
     id: String(data.id),
     userId,
     status: data.status,
-    targetWordCount: Number(data.target_word_count),
-    citationStyle: String(data.citation_style),
+    targetWordCount:
+      typeof data.target_word_count === "number"
+        ? Number(data.target_word_count)
+        : null,
+    citationStyle: data.citation_style ? String(data.citation_style) : null,
     specialRequirements: String(data.special_requirements ?? ""),
     topic: data.topic ? String(data.topic) : undefined,
     requestedChapterCount:
@@ -423,12 +437,12 @@ async function getOwnedTaskWithSupabase(taskId: string, userId: string) {
       : null,
     latestOutlineVersionId: data.latest_outline_version_id
       ? String(data.latest_outline_version_id)
-      : null
+      : null,
+    analysisSnapshot:
+      data.analysis_snapshot && typeof data.analysis_snapshot === "object"
+        ? data.analysis_snapshot
+        : null
   } satisfies TaskSummary;
-}
-
-function shouldShortenOutline(feedback: string) {
-  return /short|simpl|简|短/.test(feedback.toLowerCase());
 }
 
 function mapOutlineVersionRow(row: {
@@ -455,4 +469,31 @@ function mapOutlineVersionRow(row: {
     citationStyle: String(row.citation_style),
     createdAt: String(row.created_at)
   } satisfies TaskOutlineVersion;
+}
+
+async function getTaskOutlineVersionWithSupabase(
+  taskId: string,
+  userId: string,
+  outlineVersionId: string
+) {
+  const client = createSupabaseAdminClient();
+  const { data, error } = await client
+    .from("outline_versions")
+    .select(
+      "id,task_id,user_id,version_number,english_outline,feedback,is_approved,target_word_count,citation_style,created_at"
+    )
+    .eq("task_id", taskId)
+    .eq("user_id", userId)
+    .eq("id", outlineVersionId)
+    .maybeSingle();
+
+  if (error) {
+    throw new Error(`读取上一版大纲失败：${error.message}`);
+  }
+
+  if (!data) {
+    return null;
+  }
+
+  return mapOutlineVersionRow(data);
 }

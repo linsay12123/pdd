@@ -1,13 +1,3 @@
-const outlineSectionTitles = [
-  "Introduction",
-  "Context and Scope",
-  "Core Analysis",
-  "Evidence and Discussion",
-  "Strategic Implications",
-  "Recommendations",
-  "Conclusion"
-] as const;
-
 export type OutlineSection = {
   title: string;
   summary: string;
@@ -31,7 +21,6 @@ type OutlineScaffoldInput = {
   targetWordCount: number;
   citationStyle: string;
   chapterCountOverride?: number | null;
-  shorterOutline?: boolean;
 };
 
 export type GenerateOutlineInput = OutlineScaffoldInput & {
@@ -39,6 +28,7 @@ export type GenerateOutlineInput = OutlineScaffoldInput & {
   gradingPriorities?: string[];
   specialRequirements?: string;
   feedback?: string;
+  previousOutline?: OutlineScaffold | null;
 };
 
 export function calculateDefaultChapterCount(targetWordCount: number) {
@@ -46,13 +36,8 @@ export function calculateDefaultChapterCount(targetWordCount: number) {
 }
 
 export function determineOutlineBulletCount(
-  targetWordCount: number,
-  shorterOutline = false
+  targetWordCount: number
 ) {
-  if (shorterOutline) {
-    return 3;
-  }
-
   if (targetWordCount <= 1500) {
     return 3;
   }
@@ -64,68 +49,12 @@ export function determineOutlineBulletCount(
   return 5;
 }
 
-function pickSectionTitle(index: number) {
-  return outlineSectionTitles[index] ?? `Section ${index + 1}`;
-}
-
-function buildSectionBulletPoints(title: string, count: number) {
-  return Array.from({ length: count }, (_, index) => {
-    return `${title} focus point ${index + 1}`;
-  });
-}
-
-export function buildOutlineScaffold({
-  topic,
-  targetWordCount,
-  citationStyle,
-  chapterCountOverride,
-  shorterOutline = false
-}: OutlineScaffoldInput): OutlineScaffold {
-  const sectionCount = chapterCountOverride || calculateDefaultChapterCount(targetWordCount);
-  const bulletCount = determineOutlineBulletCount(
-    targetWordCount,
-    shorterOutline
-  );
-
-  const sections = Array.from({ length: sectionCount }, (_, index) => {
-    const title = pickSectionTitle(index);
-
-    return {
-      title,
-      summary: `${title} will explain how ${topic.toLowerCase()} develops in this section.`,
-      bulletPoints: buildSectionBulletPoints(title, bulletCount)
-    };
-  });
-
-  return {
-    articleTitle: `${topic}: A Structured Analysis`,
-    targetWordCount,
-    citationStyle,
-    sections,
-    chineseMirrorPending: true
-  };
-}
-
-function extractChapterCountFromFeedback(feedback?: string): number | null {
-  if (!feedback) return null;
-  const match = feedback.match(
-    /(?:写|要|改为?|设置?|分成?|用)\s*(\d{1,2})\s*(?:个|章|节|部分|sections?|chapters?|parts?)/i
-  ) ?? feedback.match(
-    /(\d{1,2})\s*(?:个|章|节|部分|sections?|chapters?|parts?)/i
-  );
-  return match ? Number(match[1]) : null;
-}
-
 export function buildGenerateOutlinePrompt(input: GenerateOutlineInput) {
-  const feedbackChapterCount = extractChapterCountFromFeedback(input.feedback);
   const sectionCount =
-    feedbackChapterCount ||
     input.chapterCountOverride ||
+    input.previousOutline?.sections.length ||
     calculateDefaultChapterCount(input.targetWordCount);
-  const bulletCount = determineOutlineBulletCount(
-    input.targetWordCount,
-    input.shorterOutline
-  );
+  const bulletCount = determineOutlineBulletCount(input.targetWordCount);
 
   const lines = [
     "Generate an academic article outline. Return ONLY valid JSON (no markdown fences, no explanation).",
@@ -155,8 +84,25 @@ export function buildGenerateOutlinePrompt(input: GenerateOutlineInput) {
 
   if (input.feedback) {
     lines.push(`- USER_REVISION_FEEDBACK: ${input.feedback}`);
+  }
+
+  if (input.previousOutline) {
+    lines.push(
+      `- PREVIOUS_OUTLINE_JSON: ${JSON.stringify({
+        articleTitle: input.previousOutline.articleTitle,
+        sections: input.previousOutline.sections
+      })}`
+    );
+  }
+
+  if (input.feedback || input.previousOutline) {
     lines.push("");
-    lines.push("IMPORTANT: The USER_REVISION_FEEDBACK above is the user's revision instruction. You MUST follow it precisely. If it specifies a number of sections, use exactly that number. If it asks to add/remove/change specific content, do so.");
+    lines.push(
+      "IMPORTANT: This is a revision task. Revise the previous outline instead of rewriting a generic template from scratch."
+    );
+    lines.push(
+      "You MUST follow USER_REVISION_FEEDBACK exactly as written. Do not ignore or simplify it."
+    );
   }
 
   lines.push(
@@ -165,7 +111,9 @@ export function buildGenerateOutlinePrompt(input: GenerateOutlineInput) {
     "- The articleTitle must be specific to the topic, not generic.",
     "- Each section title must be a short heading (2-6 words), NOT a full sentence.",
     "- Each summary must be a real sentence describing what will be argued or analyzed.",
+    "- Each summary must clearly state the concrete content or argument for that section.",
     "- Each bullet point must be a specific content guidance point, not a placeholder.",
+    "- Never use placeholders such as 'focus point 1', 'focus point 2', or similarly generic wording.",
     "- The outline must address all MUST_ANSWER items across the sections.",
     "- The first section should introduce the topic and the last section should conclude.",
     "- All text must be in English."

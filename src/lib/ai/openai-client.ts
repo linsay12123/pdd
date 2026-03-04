@@ -4,16 +4,19 @@ import { env } from "@/src/config/env";
 export const defaultOpenAIModel = "gpt-5.2";
 
 type OpenAITextResponseRequest = {
-  input: string;
+  input: string | Array<Record<string, unknown>>;
   model?: string;
   reasoningEffort?: "low" | "medium" | "high";
   safetyIdentifier?: string;
+  textFormat?: Record<string, unknown>;
+  tools?: Array<Record<string, unknown>>;
   apiKey?: string;
   fetchImpl?: typeof fetch;
 };
 
 type OpenAITextResponse = {
   output_text: string;
+  raw?: Record<string, unknown>;
 };
 
 export async function requestOpenAITextResponse({
@@ -21,6 +24,8 @@ export async function requestOpenAITextResponse({
   model = defaultOpenAIModel,
   reasoningEffort,
   safetyIdentifier,
+  textFormat,
+  tools,
   apiKey = env.OPENAI_API_KEY,
   fetchImpl = fetch
 }: OpenAITextResponseRequest): Promise<OpenAITextResponse> {
@@ -37,6 +42,14 @@ export async function requestOpenAITextResponse({
     body: JSON.stringify({
       model,
       input,
+      ...(textFormat
+        ? {
+            text: {
+              format: textFormat
+            }
+          }
+        : {}),
+      ...(tools?.length ? { tools } : {}),
       ...(reasoningEffort
         ? {
             reasoning: {
@@ -58,10 +71,11 @@ export async function requestOpenAITextResponse({
 
   const data = (await response.json()) as {
     output_text?: string;
-  };
+  } & Record<string, unknown>;
 
   return {
-    output_text: data.output_text ?? ""
+    output_text: data.output_text ?? "",
+    raw: data
   };
 }
 

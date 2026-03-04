@@ -14,8 +14,8 @@ describe("task bootstrap requests", () => {
           task: {
             id: "task-1",
             status: "created",
-            targetWordCount: 2000,
-            citationStyle: "APA 7",
+            targetWordCount: null,
+            citationStyle: null,
             specialRequirements: "Focus on finance."
           },
           frozenQuota: 0,
@@ -44,21 +44,44 @@ describe("task bootstrap requests", () => {
             primaryRequirementFileId: "file-1",
             needsUserConfirmation: false
           },
+          analysis: {
+            chosenTaskFileId: "file-1",
+            supportingFileIds: [],
+            ignoredFileIds: [],
+            needsUserConfirmation: false,
+            reasoning: "The uploaded brief explicitly requires a Harvard-style finance essay.",
+            targetWordCount: 1800,
+            citationStyle: "Harvard",
+            topic: "Finance Risk Management",
+            chapterCount: 4,
+            mustCover: ["Risk identification", "Control framework"],
+            gradingFocus: ["Critical analysis"],
+            appliedSpecialRequirements: "Focus on finance.",
+            usedDefaultWordCount: false,
+            usedDefaultCitationStyle: false,
+            warnings: []
+          },
           ruleCard: {
-            topic: "General Academic Essay",
+            topic: "Finance Risk Management",
             targetWordCount: 1800,
             citationStyle: "Harvard",
             chapterCountOverride: null,
-            mustAnswer: [],
-            gradingPriorities: [],
+            mustAnswer: ["Risk identification", "Control framework"],
+            gradingPriorities: ["Critical analysis"],
             specialRequirements: "Focus on finance."
           },
           outline: {
-            articleTitle: "General Academic Essay: A Structured Analysis",
+            articleTitle: "Finance Risk Management in Modern Banking",
             targetWordCount: 1800,
             citationStyle: "Harvard",
             chineseMirrorPending: true,
-            sections: []
+            sections: [
+              {
+                title: "Introduction",
+                summary: "Introduce the finance risk management problem and essay scope.",
+                bulletPoints: ["Define the scope", "Set the academic focus", "State the argument"]
+              }
+            ]
           },
           message: "大纲已生成"
         })
@@ -85,7 +108,10 @@ describe("task bootstrap requests", () => {
     expect(uploadedFiles[0]?.name).toBe("assignment.txt");
     expect(result.frozenQuota).toBe(0);
     expect(result.task.status).toBe("awaiting_outline_approval");
+    expect(result.analysis?.targetWordCount).toBe(1800);
+    expect(result.analysis?.usedDefaultWordCount).toBe(false);
     expect(result.outline?.citationStyle).toBe("Harvard");
+    expect(result.outline?.sections.length).toBeGreaterThan(0);
   });
 
   it("calls cancel to release quota when the upload fails, then rethrows", async () => {
@@ -97,8 +123,8 @@ describe("task bootstrap requests", () => {
           task: {
             id: "task-2",
             status: "created",
-            targetWordCount: 2000,
-            citationStyle: "APA 7",
+            targetWordCount: null,
+            citationStyle: null,
             specialRequirements: ""
           },
           frozenQuota: 0,
@@ -145,21 +171,51 @@ describe("task bootstrap requests", () => {
           specialRequirements: ""
         },
         files: [],
+        classification: {
+          primaryRequirementFileId: "file-2",
+          backgroundFileIds: [],
+          irrelevantFileIds: [],
+          needsUserConfirmation: false,
+          reasoning: "GPT selected the requirement file."
+        },
+        analysis: {
+          chosenTaskFileId: "file-2",
+          supportingFileIds: [],
+          ignoredFileIds: [],
+          needsUserConfirmation: false,
+          reasoning: "The confirmed file contains the explicit assignment constraints.",
+          targetWordCount: 2000,
+          citationStyle: "Harvard",
+          topic: "Corporate Governance",
+          chapterCount: 4,
+          mustCover: ["Board oversight"],
+          gradingFocus: ["Critical evaluation"],
+          appliedSpecialRequirements: "",
+          usedDefaultWordCount: false,
+          usedDefaultCitationStyle: false,
+          warnings: []
+        },
         ruleCard: {
-          topic: "General Academic Essay",
+          topic: "Corporate Governance",
           targetWordCount: 2000,
           citationStyle: "Harvard",
           chapterCountOverride: null,
-          mustAnswer: [],
-          gradingPriorities: [],
+          mustAnswer: ["Board oversight"],
+          gradingPriorities: ["Critical evaluation"],
           specialRequirements: ""
         },
         outline: {
-          articleTitle: "General Academic Essay: A Structured Analysis",
+          articleTitle: "Corporate Governance and Board Oversight",
           targetWordCount: 2000,
           citationStyle: "Harvard",
           chineseMirrorPending: true,
-          sections: []
+          sections: [
+            {
+              title: "Introduction",
+              summary: "Set up the board oversight issue and essay argument.",
+              bulletPoints: ["Explain the context", "State the problem", "Define the argument"]
+            }
+          ]
         },
         primaryRequirementFileId: "file-2",
         message: "主任务文件已确认"
@@ -178,6 +234,9 @@ describe("task bootstrap requests", () => {
     );
     expect(fetchSpy.mock.calls[0][1]?.method).toBe("POST");
     expect(result.primaryRequirementFileId).toBe("file-2");
+    expect(result.classification.primaryRequirementFileId).toBe("file-2");
+    expect(result.classification.needsUserConfirmation).toBe(false);
+    expect(result.analysis?.topic).toBe("Corporate Governance");
     expect(result.ruleCard).not.toBeNull();
     expect(result.ruleCard?.citationStyle).toBe("Harvard");
   });
@@ -198,11 +257,17 @@ describe("task bootstrap requests", () => {
           versionNumber: 2
         },
         outline: {
-          articleTitle: "General Academic Essay: A Structured Analysis",
+          articleTitle: "Corporate Governance and Board Oversight",
           targetWordCount: 2000,
           citationStyle: "APA 7",
           chineseMirrorPending: true,
-          sections: []
+          sections: [
+            {
+              title: "Introduction",
+              summary: "Set up the governance problem and explain the revised focus.",
+              bulletPoints: ["State the focus", "Explain the revision", "Set up the analysis"]
+            }
+          ]
         },
         message: "已生成新一版大纲"
       })

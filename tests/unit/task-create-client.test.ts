@@ -10,8 +10,8 @@ describe("task create client", () => {
         task: {
           id: "task-1",
           status: "created",
-          targetWordCount: 2000,
-          citationStyle: "APA 7",
+          targetWordCount: null,
+          citationStyle: null,
           specialRequirements: "Focus on finance."
         },
         frozenQuota: 0,

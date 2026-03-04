@@ -1,10 +1,10 @@
 import {
   buildGenerateOutlinePrompt,
-  buildOutlineScaffold,
   type GenerateOutlineInput,
   type OutlineScaffold,
   type OutlineSection
 } from "@/src/lib/ai/prompts/generate-outline";
+import { isMeaningfulOutline } from "@/src/lib/ai/outline-quality";
 import {
   requestOpenAITextResponse,
   safeParseJSON
@@ -15,51 +15,88 @@ export type { GenerateOutlineInput };
 export async function generateOutlineForTask(
   input: GenerateOutlineInput
 ): Promise<OutlineScaffold> {
+  const prompt = buildGenerateOutlinePrompt(input);
+  const response = await requestOpenAITextResponse({
+    input: prompt,
+    reasoningEffort: "low"
+  });
+  const parsed =
+    parseOutlineResponse(response.output_text) ??
+    (await repairOutlineResponse(response.output_text));
+
+  if (
+    !parsed?.articleTitle ||
+    !Array.isArray(parsed.sections) ||
+    parsed.sections.length === 0
+  ) {
+    console.warn(
+      "[generate-outline] GPT returned invalid outline payload. Raw:",
+      response.output_text.slice(0, 200)
+    );
+    throw new Error("MODEL_RETURNED_INVALID_OUTLINE");
+  }
+
+  const outline: OutlineScaffold = {
+    articleTitle: parsed.articleTitle,
+    targetWordCount: input.targetWordCount,
+    citationStyle: input.citationStyle,
+    sections: parsed.sections.map((section) => ({
+      title: String(section.title ?? ""),
+      summary: String(section.summary ?? ""),
+      bulletPoints: Array.isArray(section.bulletPoints)
+        ? section.bulletPoints.map(String)
+        : []
+    })),
+    chineseMirrorPending: true,
+    chineseMirror: null
+  };
+
+  if (!isMeaningfulOutline(outline)) {
+    throw new Error("MODEL_RETURNED_INVALID_OUTLINE");
+  }
+
+  const chineseMirror = await generateChineseMirror(outline);
+  if (chineseMirror) {
+    outline.chineseMirror = chineseMirror;
+    outline.chineseMirrorPending = false;
+  }
+
+  return outline;
+}
+
+function parseOutlineResponse(text: string) {
+  return safeParseJSON<{
+    articleTitle?: string;
+    sections?: OutlineSection[];
+  }>(text);
+}
+
+async function repairOutlineResponse(rawText: string) {
   try {
-    const prompt = buildGenerateOutlinePrompt(input);
-    const response = await requestOpenAITextResponse({
-      input: prompt,
+    const repairPrompt = [
+      "Repair the following outline response into valid JSON.",
+      "Return ONLY valid JSON with this exact structure:",
+      "{",
+      '  "articleTitle": "<string>",',
+      '  "sections": [',
+      '    { "title": "<string>", "summary": "<string>", "bulletPoints": ["<string>"] }',
+      "  ]",
+      "}",
+      "",
+      "Do not add explanations or markdown fences.",
+      "",
+      "RAW_RESPONSE:",
+      rawText
+    ].join("\n");
+
+    const repaired = await requestOpenAITextResponse({
+      input: repairPrompt,
       reasoningEffort: "low"
     });
-    const parsed = safeParseJSON<{
-      articleTitle?: string;
-      sections?: OutlineSection[];
-    }>(response.output_text);
 
-    if (
-      !parsed?.articleTitle ||
-      !Array.isArray(parsed.sections) ||
-      parsed.sections.length === 0
-    ) {
-      console.warn("[generate-outline] GPT returned unparseable outline, using template fallback. Raw:", response.output_text.slice(0, 200));
-      return buildOutlineScaffold(input);
-    }
-
-    const outline: OutlineScaffold = {
-      articleTitle: parsed.articleTitle,
-      targetWordCount: input.targetWordCount,
-      citationStyle: input.citationStyle,
-      sections: parsed.sections.map((section) => ({
-        title: String(section.title ?? ""),
-        summary: String(section.summary ?? ""),
-        bulletPoints: Array.isArray(section.bulletPoints)
-          ? section.bulletPoints.map(String)
-          : []
-      })),
-      chineseMirrorPending: true,
-      chineseMirror: null
-    };
-
-    const chineseMirror = await generateChineseMirror(outline);
-    if (chineseMirror) {
-      outline.chineseMirror = chineseMirror;
-      outline.chineseMirrorPending = false;
-    }
-
-    return outline;
-  } catch (error) {
-    console.error("[generate-outline] GPT outline generation failed:", error instanceof Error ? error.message : error);
-    return buildOutlineScaffold(input);
+    return parseOutlineResponse(repaired.output_text);
+  } catch {
+    return null;
   }
 }
 

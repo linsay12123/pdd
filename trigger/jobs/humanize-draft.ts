@@ -41,6 +41,10 @@ export async function humanizeDraft(
   }
 
   try {
+    if (!task?.citationStyle) {
+      throw new Error("TASK_CITATION_STYLE_NOT_READY");
+    }
+
     const provider = resolveHumanizeProvider(overrideProvider);
     const humanizedDraft = await humanizeDraftText(input.draftMarkdown, provider);
     const docxContent = draftToDocxContent(humanizedDraft);
@@ -53,7 +57,7 @@ export async function humanizeDraft(
         docxContent.references.length > 0
           ? docxContent.references
           : ["References preserved in the source draft."],
-      citationStyle: task?.citationStyle ?? "APA 7",
+      citationStyle: task.citationStyle,
       variant: "humanized",
       outputKind: "humanized_docx"
     });

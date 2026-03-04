@@ -103,8 +103,8 @@ describe("task create route", () => {
 
     expect(response.status).toBe(201);
     expect(payload.task.status).toBe("created");
-    expect(payload.task.targetWordCount).toBe(2200);
-    expect(payload.task.citationStyle).toBe("MLA");
+    expect(payload.task.targetWordCount).toBeNull();
+    expect(payload.task.citationStyle).toBeNull();
     expect(payload.task.specialRequirements).toContain("ASEAN banking");
     expect(payload.frozenQuota).toBe(0);
 
@@ -113,8 +113,8 @@ describe("task create route", () => {
       id: payload.task.id,
       userId: "user-ok",
       status: "created",
-      targetWordCount: 2200,
-      citationStyle: "MLA",
+      targetWordCount: null,
+      citationStyle: null,
       specialRequirements: "Focus on ASEAN banking examples."
     });
 

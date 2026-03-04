@@ -1,14 +1,22 @@
 import { NextResponse } from "next/server";
-import { classifyFilesByHeuristics } from "@/src/lib/ai/services/classify-files";
+import { uploadOpenAIUserFile } from "@/src/lib/ai/openai-file-client";
+import { isMeaningfulOutline } from "@/src/lib/ai/outline-quality";
+import {
+  analyzeUploadedTaskWithOpenAI,
+  type ModelReadyTaskFile
+} from "@/src/lib/ai/services/analyze-uploaded-task";
 import { extractTextFromImageWithVision } from "@/src/lib/ai/services/extract-text-from-image";
 import { requireCurrentSessionUser } from "@/src/lib/auth/current-user";
 import { extractTextFromUpload } from "@/src/lib/files/extract-text";
 import {
-  applyFileClassification,
   getOwnedTaskSummary,
-  saveTaskFiles
+  persistTaskModelAnalysis,
+  saveTaskFiles,
+  updateTaskFileOpenAIMetadata
 } from "@/src/lib/tasks/save-task-files";
 import { toSessionTaskPayload } from "@/src/lib/tasks/session-task";
+import type { OutlineScaffold } from "@/src/lib/ai/prompts/generate-outline";
+import type { TaskAnalysisSnapshot } from "@/src/types/tasks";
 import type { SessionUser } from "@/src/types/auth";
 
 export const maxDuration = 60;
@@ -21,6 +29,16 @@ type RouteContext = {
 
 type TaskFileUploadRouteDependencies = {
   requireUser?: () => Promise<SessionUser>;
+  analyzeTask?: (input: {
+    taskId: string;
+    userId: string;
+    specialRequirements: string;
+    files: ModelReadyTaskFile[];
+    forcedPrimaryFileId?: string | null;
+  }) => Promise<{
+    analysis: TaskAnalysisSnapshot;
+    outline: OutlineScaffold | null;
+  }>;
 };
 
 export async function handleTaskFileUploadRequest(
@@ -59,43 +77,110 @@ export async function handleTaskFileUploadRequest(
       );
     }
 
-    const extractedFiles = await Promise.all(
+    const preparedFiles = await Promise.all(
       files.map(async (file) => {
-        let text = await extractTextFromUpload(file);
+        let extractedText = await extractTextFromUpload(file);
+        const extractionWarnings: string[] = [];
+        let extractionMethod = "local_text";
 
-        if (text.startsWith("[image")) {
+        if (extractedText.startsWith("[image")) {
+          extractionMethod = "image_placeholder";
           try {
             const arrayBuffer = await file.arrayBuffer();
             const base64 = Buffer.from(arrayBuffer).toString("base64");
             const visionText = await extractTextFromImageWithVision(base64, file.name);
             if (visionText && !visionText.includes("[no text detected]")) {
-              text = visionText;
+              extractedText = visionText;
+              extractionMethod = "openai_vision";
+            } else {
+              extractionWarnings.push("本地没有稳定提取到图片文字，分析时会继续交给模型直接阅读。");
             }
           } catch {
-            // Vision extraction failed — keep the placeholder
+            extractionWarnings.push("图片文字提取失败，分析时会继续交给模型直接阅读。");
           }
+        } else if (
+          extractedText.startsWith("[extraction pending") ||
+          extractedText.startsWith("[image-based content")
+        ) {
+          extractionWarnings.push("本地没有稳定提取到完整文字，分析时会继续交给模型直接阅读。");
+          extractionMethod = "partial_or_failed_extraction";
         }
 
-        return { originalFilename: file.name, extractedText: text };
+        const body = Buffer.from(await file.arrayBuffer());
+        let openaiFileId: string | null = null;
+        let openaiUploadStatus: "pending" | "uploaded" | "failed" = "pending";
+
+        try {
+          const uploaded = await uploadOpenAIUserFile({
+            filename: file.name,
+            body,
+            contentType: file.type || "application/octet-stream"
+          });
+          openaiFileId = uploaded.id;
+          openaiUploadStatus = "uploaded";
+        } catch {
+          openaiUploadStatus = "failed";
+          extractionWarnings.push("原文件上传到 OpenAI 失败，本次只能依赖可用的原样文本或图片输入。");
+        }
+
+        return {
+          originalFilename: file.name,
+          contentType: file.type || "application/octet-stream",
+          body,
+          extractedText,
+          extractionMethod,
+          extractionWarnings,
+          openaiFileId,
+          openaiUploadStatus
+        };
       })
     );
 
     const persistedFiles = await saveTaskFiles({
       taskId: params.taskId,
       userId: user.id,
-      files: extractedFiles
+      files: preparedFiles
     });
-    const classification = classifyFilesByHeuristics(
-      persistedFiles.map((file) => ({
-        id: file.id,
-        originalFilename: file.originalFilename,
-        extractedText: file.extractedText
-      }))
-    );
-    const persistedResult = await applyFileClassification({
+
+    await updateTaskFileOpenAIMetadata({
       taskId: params.taskId,
       userId: user.id,
-      classification
+      files: persistedFiles.map((file, index) => ({
+        id: file.id,
+        openaiFileId: preparedFiles[index]?.openaiFileId ?? null,
+        openaiUploadStatus: preparedFiles[index]?.openaiUploadStatus ?? "failed",
+        extractionMethod: preparedFiles[index]?.extractionMethod,
+        extractionWarnings: preparedFiles[index]?.extractionWarnings ?? []
+      }))
+    });
+
+    const analyzeTask = dependencies.analyzeTask ?? analyzeUploadedTaskFromFiles;
+    const modelFiles = persistedFiles.map((file, index) => ({
+      ...file,
+      rawBody: preparedFiles[index]?.body ?? null,
+      contentType: preparedFiles[index]?.contentType ?? file.contentType,
+      openaiFileId: preparedFiles[index]?.openaiFileId ?? file.openaiFileId ?? null,
+      extractedText: preparedFiles[index]?.extractedText ?? file.extractedText
+    }));
+    const analyzed = await analyzeTask({
+      taskId: params.taskId,
+      userId: user.id,
+      specialRequirements: task.specialRequirements ?? "",
+      files: modelFiles
+    });
+
+    if (
+      !analyzed.analysis.needsUserConfirmation &&
+      (!analyzed.outline?.sections.length || !isMeaningfulOutline(analyzed.outline))
+    ) {
+      throw new Error("模型没有返回可展示的大纲，请重试。");
+    }
+
+    const persistedResult = await persistTaskModelAnalysis({
+      taskId: params.taskId,
+      userId: user.id,
+      analysis: analyzed.analysis,
+      outline: analyzed.outline
     });
 
     return NextResponse.json(
@@ -103,12 +188,19 @@ export async function handleTaskFileUploadRequest(
         ok: true,
         task: toSessionTaskPayload(persistedResult.task),
         files: persistedResult.files,
-        classification,
+        classification: {
+          primaryRequirementFileId: persistedResult.analysis?.chosenTaskFileId ?? null,
+          backgroundFileIds: persistedResult.analysis?.supportingFileIds ?? [],
+          irrelevantFileIds: persistedResult.analysis?.ignoredFileIds ?? [],
+          needsUserConfirmation: persistedResult.analysis?.needsUserConfirmation ?? false,
+          reasoning: persistedResult.analysis?.reasoning ?? "模型已完成文件分析。"
+        },
+        analysis: persistedResult.analysis,
         ruleCard: persistedResult.ruleCard,
         outline: persistedResult.outline,
-        message: classification.needsUserConfirmation
-          ? "系统发现多个文件都像任务书，请先确认主任务文件。"
-          : "文件已上传，系统已识别主任务文件并生成第一版大纲。"
+        message: persistedResult.analysis?.needsUserConfirmation
+          ? "模型已阅读全部材料，但它认为主任务文件还需要你确认。"
+          : "文件已上传，模型已读完材料并生成第一版大纲。"
       },
       { status: 201 }
     );
@@ -144,6 +236,20 @@ export async function handleTaskFileUploadRequest(
       { status: 500 }
     );
   }
+}
+
+async function analyzeUploadedTaskFromFiles(input: {
+  taskId: string;
+  userId: string;
+  specialRequirements: string;
+  files: ModelReadyTaskFile[];
+  forcedPrimaryFileId?: string | null;
+}) {
+  return analyzeUploadedTaskWithOpenAI({
+    files: input.files,
+    specialRequirements: input.specialRequirements,
+    forcedPrimaryFileId: input.forcedPrimaryFileId
+  });
 }
 
 export async function POST(request: Request, context: RouteContext) {

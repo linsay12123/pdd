@@ -4,8 +4,8 @@ export type OutlineFeedbackPayload = {
   task: {
     id: string;
     status: string;
-    targetWordCount: number;
-    citationStyle: string;
+    targetWordCount: number | null;
+    citationStyle: string | null;
     specialRequirements: string;
   };
   outlineVersion: {

@@ -1,10 +1,11 @@
 import type { OutlineScaffold } from "@/src/lib/ai/prompts/generate-outline";
+import type { TaskAnalysisSnapshot } from "@/src/types/tasks";
 
 export type TaskWorkflowTaskPayload = {
   id: string;
   status: string;
-  targetWordCount: number;
-  citationStyle: string;
+  targetWordCount: number | null;
+  citationStyle: string | null;
   specialRequirements: string;
 };
 
@@ -24,7 +25,7 @@ export type TaskWorkflowClassificationPayload = {
 };
 
 export type TaskWorkflowRuleCardPayload = {
-  topic: string;
+  topic: string | null;
   targetWordCount: number;
   citationStyle: string;
   chapterCountOverride: number | null;
@@ -33,10 +34,13 @@ export type TaskWorkflowRuleCardPayload = {
   specialRequirements: string;
 };
 
+export type TaskWorkflowAnalysisPayload = TaskAnalysisSnapshot;
+
 export type TaskWorkflowPayload = {
   task: TaskWorkflowTaskPayload;
   files: TaskWorkflowFilePayload[];
   classification: TaskWorkflowClassificationPayload;
+  analysis: TaskWorkflowAnalysisPayload | null;
   ruleCard: TaskWorkflowRuleCardPayload | null;
   outline: OutlineScaffold | null;
   message: string;

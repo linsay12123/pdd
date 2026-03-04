@@ -32,8 +32,8 @@ export async function handleTaskCreateRequest(
       targetWordCount:
         typeof body?.targetWordCount === "number" && body.targetWordCount > 0
           ? body.targetWordCount
-          : 2000,
-      citationStyle: body?.citationStyle?.trim() || "APA 7"
+          : null,
+      citationStyle: body?.citationStyle?.trim() || null
     });
 
     return NextResponse.json(

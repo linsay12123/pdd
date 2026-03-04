@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
+import { chargeQuota } from "../../src/lib/billing/charge-quota";
 import { quoteGenerationTaskCost, quoteHumanizeTaskCost } from "../../src/lib/billing/quote-task-cost";
 import { freezeQuota } from "../../src/lib/billing/freeze-quota";
+import { refundChargedQuota } from "../../src/lib/billing/refund-charged-quota";
 import { releaseQuota } from "../../src/lib/billing/release-quota";
 import { settleQuota } from "../../src/lib/billing/settle-quota";
 
@@ -116,5 +118,54 @@ describe("billing rules", () => {
       fromSubscription: 4,
       fromRecharge: 3
     });
+  });
+
+  it("charges generation quota immediately when writing starts", () => {
+    const result = chargeQuota({
+      wallet: {
+        rechargeQuota: 9,
+        subscriptionQuota: 4,
+        frozenQuota: 0
+      },
+      amount: 7,
+      taskId: "task-charge-1",
+      chargePath: "generation"
+    });
+
+    expect(result.wallet).toEqual({
+      rechargeQuota: 6,
+      subscriptionQuota: 0,
+      frozenQuota: 0
+    });
+    expect(result.reservation).toMatchObject({
+      fromSubscription: 4,
+      fromRecharge: 3
+    });
+    expect(result.entry.kind).toBe("task_settle");
+  });
+
+  it("refunds charged generation quota back to the original buckets", () => {
+    const charged = chargeQuota({
+      wallet: {
+        rechargeQuota: 5,
+        subscriptionQuota: 6,
+        frozenQuota: 0
+      },
+      amount: 9,
+      taskId: "task-charge-2",
+      chargePath: "generation"
+    });
+
+    const refunded = refundChargedQuota({
+      wallet: charged.wallet,
+      reservation: charged.reservation
+    });
+
+    expect(refunded.wallet).toEqual({
+      rechargeQuota: 5,
+      subscriptionQuota: 6,
+      frozenQuota: 0
+    });
+    expect(refunded.entry.kind).toBe("task_release");
   });
 });

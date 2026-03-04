@@ -16,17 +16,39 @@ export type TaskStatus =
   | "failed"
   | "expired";
 
+export type TaskAnalysisSnapshot = {
+  chosenTaskFileId: string | null;
+  supportingFileIds: string[];
+  ignoredFileIds: string[];
+  needsUserConfirmation: boolean;
+  reasoning: string;
+  targetWordCount: number;
+  citationStyle: string;
+  topic: string | null;
+  chapterCount: number | null;
+  mustCover: string[];
+  gradingFocus: string[];
+  appliedSpecialRequirements: string;
+  usedDefaultWordCount: boolean;
+  usedDefaultCitationStyle: boolean;
+  warnings: string[];
+};
+
 export type TaskSummary = {
   id: string;
   userId?: string;
   status: TaskStatus;
-  targetWordCount: number;
-  citationStyle: string;
+  targetWordCount: number | null;
+  citationStyle: string | null;
   specialRequirements?: string;
-  topic?: string;
+  topic?: string | null;
   requestedChapterCount?: number | null;
   outlineRevisionCount?: number;
   primaryRequirementFileId?: string | null;
+  analysisSnapshot?: TaskAnalysisSnapshot | null;
+  analysisStatus?: "pending" | "succeeded" | "failed";
+  analysisModel?: string | null;
+  analysisCompletedAt?: string | null;
   latestOutlineVersionId?: string | null;
   latestDraftVersionId?: string | null;
   currentCandidateDraftId?: string | null;
@@ -41,7 +63,12 @@ export type TaskFileRecord = {
   userId: string;
   originalFilename: string;
   storagePath: string;
+  contentType?: string;
   extractedText: string;
+  extractionMethod?: string;
+  extractionWarnings?: string[];
+  openaiFileId?: string | null;
+  openaiUploadStatus?: "pending" | "uploaded" | "failed";
   role: TaskFileRole;
   isPrimary: boolean;
   createdAt: string;

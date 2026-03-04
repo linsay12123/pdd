@@ -10,8 +10,8 @@ import type { TaskSummary } from "@/src/types/tasks";
 type CreateTaskInput = {
   user: SessionUser;
   specialRequirements: string;
-  targetWordCount: number;
-  citationStyle: string;
+  targetWordCount?: number | null;
+  citationStyle?: string | null;
 };
 
 type CreateTaskResult = {
@@ -33,7 +33,7 @@ export async function createTaskWithQuotaFreeze(
 }
 
 async function createTaskLocally(input: CreateTaskInput): Promise<CreateTaskResult> {
-  const quotaCost = resolveGenerationTaskQuotaCost(input.targetWordCount);
+  const quotaCost = resolveGenerationTaskQuotaCost(input.targetWordCount ?? 2000);
   const taskId = `task_${randomUUID()}`;
   const wallet = getUserWallet(input.user.id);
   const totalAvailable = wallet.subscriptionQuota + wallet.rechargeQuota;
@@ -46,9 +46,13 @@ async function createTaskLocally(input: CreateTaskInput): Promise<CreateTaskResu
     id: taskId,
     userId: input.user.id,
     status: "created",
-    targetWordCount: input.targetWordCount,
-    citationStyle: input.citationStyle,
-    specialRequirements: input.specialRequirements
+    targetWordCount: null,
+    citationStyle: null,
+    specialRequirements: input.specialRequirements,
+    analysisStatus: "pending",
+    analysisModel: null,
+    analysisCompletedAt: null,
+    analysisSnapshot: null
   });
 
   return {
@@ -61,7 +65,7 @@ async function createTaskWithSupabase(
   input: CreateTaskInput
 ): Promise<CreateTaskResult> {
   const client = createSupabaseAdminClient();
-  const quotaCost = resolveGenerationTaskQuotaCost(input.targetWordCount);
+  const quotaCost = resolveGenerationTaskQuotaCost(input.targetWordCount ?? 2000);
   const { data: walletRow, error: walletError } = await client
     .from("quota_wallets")
     .select("recharge_quota,subscription_quota,frozen_quota")
@@ -83,8 +87,8 @@ async function createTaskWithSupabase(
   const baseInsert = {
     user_id: input.user.id,
     status: "created" as const,
-    target_word_count: input.targetWordCount,
-    citation_style: input.citationStyle,
+    target_word_count: null,
+    citation_style: null,
     special_requirements: input.specialRequirements
   };
 
@@ -104,9 +108,13 @@ async function createTaskWithSupabase(
     id: taskId,
     userId: input.user.id,
     status: "created",
-    targetWordCount: input.targetWordCount,
-    citationStyle: input.citationStyle,
-    specialRequirements: input.specialRequirements
+    targetWordCount: null,
+    citationStyle: null,
+    specialRequirements: input.specialRequirements,
+    analysisStatus: "pending",
+    analysisModel: null,
+    analysisCompletedAt: null,
+    analysisSnapshot: null
   });
 
   return {

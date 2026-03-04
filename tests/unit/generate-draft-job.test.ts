@@ -7,7 +7,7 @@ import { generateDraftFromOutline } from "../../trigger/jobs/generate-draft";
 describe("generate draft job", () => {
   it("uses gpt-5.2 with high reasoning effort for article writing", async () => {
     const calls: Array<{
-      input: string;
+      input: string | Array<Record<string, unknown>>;
       model?: string;
       reasoningEffort?: "low" | "medium" | "high";
     }> = [];

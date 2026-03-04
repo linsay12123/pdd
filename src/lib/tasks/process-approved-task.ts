@@ -25,6 +25,21 @@ import type {
 import { generateDraftFromOutline } from "@/trigger/jobs/generate-draft";
 import { verifyReferencesForDraft } from "@/trigger/jobs/verify-references";
 
+export class TaskProcessingStageError extends Error {
+  stage: "drafting" | "adjusting_word_count" | "verifying_references" | "exporting";
+  cause?: unknown;
+
+  constructor(
+    stage: "drafting" | "adjusting_word_count" | "verifying_references" | "exporting",
+    cause: unknown
+  ) {
+    super(cause instanceof Error ? cause.message : String(cause));
+    this.name = "TaskProcessingStageError";
+    this.stage = stage;
+    this.cause = cause;
+  }
+}
+
 type RewriteDraftResult = {
   prompt: string;
   candidateDraft: string;
@@ -87,6 +102,8 @@ export async function processApprovedTask(
   dependencies: ProcessApprovedTaskDependencies = {}
 ): Promise<ProcessApprovedTaskResult> {
   const context = await loadApprovedTaskContext(input.taskId, input.userId);
+  const targetWordCount = requireTaskTargetWordCount(context.task);
+  const citationStyle = requireTaskCitationStyle(context.task);
 
   const generateDraft = dependencies.generateDraft ?? generateDraftFromOutline;
   const rewriteDraftToTarget = dependencies.rewriteDraftToTarget ?? requestAdjustedDraft;
@@ -95,101 +112,121 @@ export async function processApprovedTask(
   const exportReferenceReportImpl =
     dependencies.exportReferenceReport ?? defaultReferenceReportExporter;
 
-  const draftResult = await generateDraft({
-    outline: context.outlineVersion.outline,
-    specialRequirements: context.task.specialRequirements,
-    safetyIdentifier: input.safetyIdentifier
+  const draftResult = await runTaskStage("drafting", async () => {
+    return generateDraft({
+      outline: context.outlineVersion.outline,
+      specialRequirements: context.task.specialRequirements,
+      safetyIdentifier: input.safetyIdentifier
+    });
   });
-  const initialDraft = await saveDraftVersion({
-    taskId: input.taskId,
-    userId: input.userId,
-    markdown: draftResult.draft,
-    isActive: true,
-    isCandidate: false
+  const initialDraft = await runTaskStage("drafting", async () => {
+    return saveDraftVersion({
+      taskId: input.taskId,
+      userId: input.userId,
+      markdown: draftResult.draft,
+      isActive: true,
+      isCandidate: false
+    });
   });
 
   await setTaskStatus(input.taskId, input.userId, "adjusting_word_count");
 
-  const rewrittenDraft = await rewriteDraftToTarget({
-    currentDraft: draftResult.draft,
-    targetWordCount: context.task.targetWordCount,
-    citationStyle: context.task.citationStyle,
-    safetyIdentifier: input.safetyIdentifier
+  const rewrittenDraft = await runTaskStage("adjusting_word_count", async () => {
+    return rewriteDraftToTarget({
+      currentDraft: draftResult.draft,
+      targetWordCount,
+      citationStyle,
+      safetyIdentifier: input.safetyIdentifier
+    });
   });
-  await saveDraftVersion({
-    taskId: input.taskId,
-    userId: input.userId,
-    markdown: rewrittenDraft.candidateDraft,
-    isActive: false,
-    isCandidate: true
+  await runTaskStage("adjusting_word_count", async () => {
+    return saveDraftVersion({
+      taskId: input.taskId,
+      userId: input.userId,
+      markdown: rewrittenDraft.candidateDraft,
+      isActive: false,
+      isCandidate: true
+    });
   });
 
-  const wordCountResult = applyCandidateDraft({
-    currentDraft: draftResult.draft,
-    candidateDraft: rewrittenDraft.candidateDraft,
-    targetWordCount: context.task.targetWordCount
+  const wordCountResult = await runTaskStage("adjusting_word_count", async () => {
+    return applyCandidateDraft({
+      currentDraft: draftResult.draft,
+      candidateDraft: rewrittenDraft.candidateDraft,
+      targetWordCount
+    });
   });
 
   const finalDraftVersion = wordCountResult.candidateWasPromoted
-    ? await saveDraftVersion({
-        taskId: input.taskId,
-        userId: input.userId,
-        markdown: wordCountResult.chosenDraft,
-        isActive: true,
-        isCandidate: false
+    ? await runTaskStage("adjusting_word_count", async () => {
+        return saveDraftVersion({
+          taskId: input.taskId,
+          userId: input.userId,
+          markdown: wordCountResult.chosenDraft,
+          isActive: true,
+          isCandidate: false
+        });
       })
     : initialDraft;
 
   await setTaskStatus(input.taskId, input.userId, "verifying_references");
 
-  const referenceChecks = await verifyReferences({
-    draftMarkdown: wordCountResult.chosenDraft,
-    claimText: finalDraftVersion.bodyMarkdown
+  const referenceChecks = await runTaskStage("verifying_references", async () => {
+    return verifyReferences({
+      draftMarkdown: wordCountResult.chosenDraft,
+      claimText: finalDraftVersion.bodyMarkdown
+    });
   });
-  await saveReferenceChecks({
-    taskId: input.taskId,
-    draftVersionId: finalDraftVersion.id,
-    userId: input.userId,
-    checks: referenceChecks.map((check) => ({
-      rawReference: check.rawReference,
-      verdict: check.verdict,
-      reasoning: check.reasoning,
-      detectedTitle: check.detectedTitle,
-      detectedYear: check.detectedYear,
-      detectedDoi: check.detectedDoi,
-      detectedUrl: check.detectedUrl
-    }))
+  await runTaskStage("verifying_references", async () => {
+    return saveReferenceChecks({
+      taskId: input.taskId,
+      draftVersionId: finalDraftVersion.id,
+      userId: input.userId,
+      checks: referenceChecks.map((check) => ({
+        rawReference: check.rawReference,
+        verdict: check.verdict,
+        reasoning: check.reasoning,
+        detectedTitle: check.detectedTitle,
+        detectedYear: check.detectedYear,
+        detectedDoi: check.detectedDoi,
+        detectedUrl: check.detectedUrl
+      }))
+    });
   });
 
   await setTaskStatus(input.taskId, input.userId, "exporting");
 
   const docxContent = draftToDocxContent(wordCountResult.chosenDraft);
-  await exportDocxImpl({
-    taskId: input.taskId,
-    userId: input.userId,
-    title: docxContent.title,
-    sections: docxContent.sections,
-    references:
-      docxContent.references.length > 0
-        ? docxContent.references
-        : ["References preserved in the source draft."],
-    citationStyle: context.task.citationStyle
+  await runTaskStage("exporting", async () => {
+    return exportDocxImpl({
+      taskId: input.taskId,
+      userId: input.userId,
+      title: docxContent.title,
+      sections: docxContent.sections,
+      references:
+        docxContent.references.length > 0
+          ? docxContent.references
+          : ["References preserved in the source draft."],
+      citationStyle
+    });
   });
-  await exportReferenceReportImpl({
-    taskId: input.taskId,
-    userId: input.userId,
-    reportId: `REF-${input.taskId.slice(0, 8).toUpperCase()}`,
-    createdAt: new Date().toISOString(),
-    taskSummary: {
-      targetWordCount: context.task.targetWordCount,
-      citationStyle: context.task.citationStyle
-    },
-    entries: referenceChecks.map((check) => ({
-      rawReference: check.rawReference,
-      verdictLabel: mapReferenceVerdictLabel(check.verdict),
-      reasoning: check.reasoning
-    })),
-    closingSummary: buildReferenceClosingSummary(referenceChecks.length)
+  await runTaskStage("exporting", async () => {
+    return exportReferenceReportImpl({
+      taskId: input.taskId,
+      userId: input.userId,
+      reportId: `REF-${input.taskId.slice(0, 8).toUpperCase()}`,
+      createdAt: new Date().toISOString(),
+      taskSummary: {
+        targetWordCount,
+        citationStyle
+      },
+      entries: referenceChecks.map((check) => ({
+        rawReference: check.rawReference,
+        verdictLabel: mapReferenceVerdictLabel(check.verdict),
+        reasoning: check.reasoning
+      })),
+      closingSummary: buildReferenceClosingSummary(referenceChecks.length)
+    });
   });
 
   const nextTask = await setTaskStatus(input.taskId, input.userId, "deliverable_ready");
@@ -209,6 +246,17 @@ export async function processApprovedTask(
     },
     finalDraftMarkdown: wordCountResult.chosenDraft
   };
+}
+
+async function runTaskStage<T>(
+  stage: "drafting" | "adjusting_word_count" | "verifying_references" | "exporting",
+  action: () => Promise<T> | T
+) {
+  try {
+    return await action();
+  } catch (error) {
+    throw new TaskProcessingStageError(stage, error);
+  }
 }
 
 async function requestAdjustedDraft({
@@ -269,6 +317,10 @@ function loadApprovedTaskContextLocally(taskId: string, userId: string) {
     throw new Error("OUTLINE_VERSION_NOT_FOUND");
   }
 
+  if (typeof task.targetWordCount !== "number" || !task.citationStyle) {
+    throw new Error("TASK_REQUIREMENTS_NOT_READY");
+  }
+
   return {
     task,
     outlineVersion
@@ -324,8 +376,11 @@ async function loadApprovedTaskContextWithSupabase(taskId: string, userId: strin
       id: String(taskRow.id),
       userId: String(taskRow.user_id),
       status: taskRow.status,
-      targetWordCount: Number(taskRow.target_word_count),
-      citationStyle: String(taskRow.citation_style),
+      targetWordCount:
+        typeof taskRow.target_word_count === "number"
+          ? Number(taskRow.target_word_count)
+          : null,
+      citationStyle: taskRow.citation_style ? String(taskRow.citation_style) : null,
       specialRequirements: String(taskRow.special_requirements ?? ""),
       topic: taskRow.topic ? String(taskRow.topic) : undefined,
       requestedChapterCount:
@@ -357,6 +412,22 @@ async function loadApprovedTaskContextWithSupabase(taskId: string, userId: strin
       createdAt: String(outlineRow.created_at)
     } satisfies TaskOutlineVersion
   };
+}
+
+function requireTaskTargetWordCount(task: TaskSummary) {
+  if (typeof task.targetWordCount !== "number") {
+    throw new Error("TASK_REQUIREMENTS_NOT_READY");
+  }
+
+  return task.targetWordCount;
+}
+
+function requireTaskCitationStyle(task: TaskSummary) {
+  if (!task.citationStyle) {
+    throw new Error("TASK_REQUIREMENTS_NOT_READY");
+  }
+
+  return task.citationStyle;
 }
 
 async function setTaskStatus(taskId: string, userId: string, status: TaskSummary["status"]) {

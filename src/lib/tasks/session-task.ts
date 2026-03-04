@@ -3,8 +3,8 @@ import type { TaskSummary } from "@/src/types/tasks";
 export type SessionTaskPayload = {
   id: string;
   status: TaskSummary["status"];
-  targetWordCount: number;
-  citationStyle: string;
+  targetWordCount: number | null;
+  citationStyle: string | null;
   specialRequirements: string;
 };
 

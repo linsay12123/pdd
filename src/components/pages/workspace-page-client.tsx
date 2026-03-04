@@ -63,10 +63,23 @@ export function WorkspacePageClient({ initialQuota }: WorkspacePageClientProps) 
   const [downloadingOutputId, setDownloadingOutputId] = useState<string | null>(null);
   const [isHumanizing, setIsHumanizing] = useState(false);
 
+  async function syncWallet() {
+    try {
+      const response = await fetch("/api/quota/wallet");
+      const payload = await response.json();
+
+      if (response.ok) {
+        setQuota(payload.wallet.rechargeQuota);
+      }
+    } catch {
+      // Keep the existing wallet snapshot when the sync request fails.
+    }
+  }
+
   useEffect(() => {
     let cancelled = false;
 
-    async function syncWallet() {
+    async function syncWalletSafely() {
       try {
         const response = await fetch("/api/quota/wallet");
         const payload = await response.json();
@@ -79,7 +92,7 @@ export function WorkspacePageClient({ initialQuota }: WorkspacePageClientProps) 
       }
     }
 
-    void syncWallet();
+    void syncWalletSafely();
 
     return () => {
       cancelled = true;
@@ -115,7 +128,6 @@ export function WorkspacePageClient({ initialQuota }: WorkspacePageClientProps) 
 
       setActiveTask(result);
       setSelectedPrimaryFileId(result.classification.primaryRequirementFileId ?? "");
-      setQuota((currentQuota) => Math.max(0, currentQuota - result.frozenQuota));
       setNotice({
         tone: result.classification.needsUserConfirmation ? "info" : "success",
         text: result.message
@@ -161,10 +173,14 @@ export function WorkspacePageClient({ initialQuota }: WorkspacePageClientProps) 
         fileId: selectedPrimaryFileId
       });
 
-      setActiveTask({
-        ...result,
-        frozenQuota: activeTask.frozenQuota
-      });
+      setActiveTask((currentTask) =>
+        currentTask
+          ? {
+              ...result,
+              frozenQuota: currentTask.frozenQuota
+            }
+          : currentTask
+      );
       setSelectedPrimaryFileId(result.primaryRequirementFileId);
       setNotice({
         tone: "success",
@@ -269,6 +285,7 @@ export function WorkspacePageClient({ initialQuota }: WorkspacePageClientProps) 
         text: result.message
       });
       setStep(3);
+      await syncWallet();
     } catch (error) {
       setNotice({
         tone: "error",
@@ -310,6 +327,20 @@ export function WorkspacePageClient({ initialQuota }: WorkspacePageClientProps) 
   };
 
   const outlineSections = activeTask?.outline?.sections ?? [];
+  const taskFiles = activeTask?.files ?? [];
+  const analysis = activeTask?.analysis ?? null;
+  const hasOutline = outlineSections.length > 0;
+  const needsPrimaryFileConfirmation = Boolean(
+    analysis?.needsUserConfirmation ?? activeTask?.classification.needsUserConfirmation
+  );
+  const selectedTaskFileName =
+    taskFiles.find((file) => file.id === analysis?.chosenTaskFileId)?.originalFilename ??
+    "模型还没最终确认";
+  const displayedWordCount =
+    analysis?.targetWordCount ?? activeTask?.task.targetWordCount;
+  const displayedCitationStyle =
+    analysis?.citationStyle ?? activeTask?.task.citationStyle;
+  const displayedTopic = analysis?.topic ?? activeTask?.outline?.articleTitle ?? "模型还没给出主题";
 
   return (
     <div className="min-h-screen pt-24 pb-16 bg-brand-950">
@@ -382,8 +413,8 @@ export function WorkspacePageClient({ initialQuota }: WorkspacePageClientProps) 
 
               <div className="mt-8 pt-6 border-t border-white/10">
                 <div className="bg-brand-950 p-4 rounded-xl border border-white/5">
-                  <h4 className="text-sm font-medium text-cream-100 mb-3">费用说明</h4>
-                  <p className="text-xs text-brand-700">积分按字数计费，任务提交后系统自动计算并冻结所需积分。</p>
+                  <h4 className="text-sm font-medium text-cream-100 mb-3">流程提醒</h4>
+                  <p className="text-xs text-brand-700">系统会先分析材料并生成大纲，确认大纲后再进入正式写作。</p>
                 </div>
               </div>
             </div>
@@ -451,9 +482,9 @@ export function WorkspacePageClient({ initialQuota }: WorkspacePageClientProps) 
                     <div className="flex flex-col gap-1">
                       <div className="flex items-center gap-2 text-sm text-brand-700">
                         <AlertCircle className="w-4 h-4 text-gold-500" />
-                        点击开始后，积分将按目标字数自动扣除
+                        点击开始后，系统会先分析材料并生成第一版大纲
                       </div>
-                      <div className="text-xs text-brand-700 ml-6">生成失败全额返还积分</div>
+                      <div className="text-xs text-brand-700 ml-6">确认大纲后才会进入正式写作</div>
                     </div>
                     <Button
                       size="lg"
@@ -485,7 +516,7 @@ export function WorkspacePageClient({ initialQuota }: WorkspacePageClientProps) 
                   </div>
                 )}
 
-                {activeTask?.classification.needsUserConfirmation ? (
+                {needsPrimaryFileConfirmation ? (
                   <div className="glass-panel p-6 rounded-2xl border border-gold-500/30 shadow-[0_0_15px_rgba(245,158,11,0.1)]">
                     <div className="flex items-center justify-between mb-6 pb-4 border-b border-white/10">
                       <h2 className="text-xl font-bold text-cream-50 flex items-center gap-2">
@@ -501,7 +532,7 @@ export function WorkspacePageClient({ initialQuota }: WorkspacePageClientProps) 
                       </p>
 
                       <div className="space-y-3">
-                        {activeTask.files.map((file) => (
+                        {taskFiles.map((file) => (
                           <label
                             key={file.id}
                             className="flex cursor-pointer items-center gap-3 rounded-xl border border-white/5 bg-brand-900/50 px-4 py-3 text-sm text-cream-100"
@@ -532,7 +563,7 @@ export function WorkspacePageClient({ initialQuota }: WorkspacePageClientProps) 
                       </div>
                     </div>
                   </div>
-                ) : (
+                ) : hasOutline ? (
                 <div className="glass-panel p-6 rounded-2xl border border-gold-500/30 shadow-[0_0_15px_rgba(245,158,11,0.1)]">
                   <div className="flex items-center justify-between mb-6 pb-4 border-b border-white/10">
                     <h2 className="text-xl font-bold text-cream-50 flex items-center gap-2">
@@ -543,23 +574,82 @@ export function WorkspacePageClient({ initialQuota }: WorkspacePageClientProps) 
                   </div>
 
                   <div className="bg-brand-950 rounded-xl p-6 border border-white/5 mb-6">
+                    {analysis && (
+                      <div className="mb-6 pb-6 border-b border-white/5">
+                        <h3 className="text-sm font-bold text-gold-400 uppercase tracking-wider mb-4">
+                          模型分析结果
+                        </h3>
+
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
+                          <div>
+                            <span className="text-brand-700 block mb-1">模型选中的主任务文件</span>
+                            <span className="text-cream-50">{selectedTaskFileName}</span>
+                          </div>
+                          <div>
+                            <span className="text-brand-700 block mb-1">主题</span>
+                            <span className="text-cream-50">{displayedTopic}</span>
+                          </div>
+                          <div>
+                            <span className="text-brand-700 block mb-1">目标字数</span>
+                            <span className="text-cream-50 font-mono">
+                              {typeof displayedWordCount === "number"
+                                ? `${displayedWordCount.toLocaleString("en-US")} Words`
+                                : "模型还没给出"}
+                            </span>
+                            {analysis.usedDefaultWordCount && (
+                              <p className="text-xs text-brand-700 mt-1">
+                                文件里没有明确写字数，本次暂按 2000 字处理。
+                              </p>
+                            )}
+                          </div>
+                          <div>
+                            <span className="text-brand-700 block mb-1">引用格式</span>
+                            <span className="text-cream-50">
+                              {displayedCitationStyle ?? "模型还没给出"}
+                            </span>
+                            {analysis.usedDefaultCitationStyle && (
+                              <p className="text-xs text-brand-700 mt-1">
+                                文件里没有明确写引用格式，本次暂按 APA 7 处理。
+                              </p>
+                            )}
+                          </div>
+                        </div>
+
+                        <div className="mt-4 space-y-2">
+                          <p className="text-sm text-brand-700">{analysis.reasoning}</p>
+                          {analysis.appliedSpecialRequirements && (
+                            <p className="text-xs text-brand-700">
+                              已纳入的特殊要求：{analysis.appliedSpecialRequirements}
+                            </p>
+                          )}
+                          {analysis.warnings.length > 0 && (
+                            <div className="rounded-xl border border-yellow-500/20 bg-yellow-500/5 px-4 py-3">
+                              <p className="text-xs text-yellow-100">提醒：{analysis.warnings.join("；")}</p>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    )}
+
                     <div className="grid grid-cols-2 gap-4 mb-6 pb-6 border-b border-white/5 text-sm">
                       <div>
                         <span className="text-brand-700 block mb-1">提取标题</span>
                         <span className="text-cream-50 font-medium">
-                          {activeTask?.outline?.articleTitle ?? "General Academic Essay: A Structured Analysis"}
+                          {activeTask?.outline?.articleTitle ?? "模型还没给出标题"}
                         </span>
                       </div>
                       <div>
                         <span className="text-brand-700 block mb-1">目标字数</span>
                         <span className="text-cream-50 font-mono">
-                          {(activeTask?.task.targetWordCount ?? 2000).toLocaleString("en-US")} Words
+                          {typeof displayedWordCount === "number"
+                            ? `${displayedWordCount.toLocaleString("en-US")} Words`
+                            : "模型还没给出"}
                         </span>
                       </div>
                       <div>
                         <span className="text-brand-700 block mb-1">引用格式</span>
                         <span className="text-cream-50">
-                          {activeTask?.task.citationStyle ?? "APA 7"}
+                          {displayedCitationStyle ?? "模型还没给出"}
                         </span>
                       </div>
                       <div>
@@ -639,6 +729,22 @@ export function WorkspacePageClient({ initialQuota }: WorkspacePageClientProps) 
                     </div>
                   </div>
                 </div>
+                ) : (
+                  <div className="glass-panel p-6 rounded-2xl border border-red-500/20">
+                    <div className="flex items-center justify-between mb-4 pb-4 border-b border-white/10">
+                      <h2 className="text-xl font-bold text-cream-50 flex items-center gap-2">
+                        <AlertCircle className="w-5 h-5 text-red-300" />
+                        暂时还没有可展示的大纲
+                      </h2>
+                      <span className="px-3 py-1 bg-red-500/10 text-red-200 text-xs rounded-full border border-red-500/20">
+                        需要处理
+                      </span>
+                    </div>
+
+                    <p className="text-sm text-brand-700">
+                      系统还没有返回一份完整可展示的大纲。通常是模型还没稳定读完材料，或者这次返回格式坏了。你可以重新上传、重试，或者先检查文件是否完整。
+                    </p>
+                  </div>
                 )}
               </div>
             )}
