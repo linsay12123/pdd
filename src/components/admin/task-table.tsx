@@ -28,15 +28,8 @@ function formatTaskDate(value: string | null) {
 
 function describeTaskStatus(status: string) {
   switch (status) {
-    case "quota_frozen":
-      return "已冻结积分，等待分析文件";
-    case "extracting_files":
-      return "正在提取文件文字";
     case "awaiting_primary_file_confirmation":
       return "等待用户确认主任务文件";
-    case "building_rule_card":
-      return "正在整理写作要求";
-    case "outline_ready":
     case "awaiting_outline_approval":
       return "大纲已生成，等待用户确认";
     case "drafting":
@@ -112,13 +105,15 @@ export function TaskTableView({ tasks }: { tasks: AdminTaskSummary[] }) {
                 <div className="rounded-xl border border-white/5 bg-brand-900/60 px-4 py-3">
                   <div className="text-xs text-brand-700">目标字数</div>
                   <div className="text-xl font-bold text-cream-50 font-mono">
-                    {task.targetWordCount.toLocaleString("en-US")}
+                    {task.targetWordCount
+                      ? task.targetWordCount.toLocaleString("en-US")
+                      : "等待分析"}
                   </div>
                 </div>
                 <div className="rounded-xl border border-white/5 bg-brand-900/60 px-4 py-3">
                   <div className="text-xs text-brand-700">引用格式</div>
                   <div className="text-xl font-bold text-cream-50">
-                    {task.citationStyle}
+                    {task.citationStyle || "等待分析"}
                   </div>
                 </div>
                 <div className="rounded-xl border border-white/5 bg-brand-900/60 px-4 py-3">

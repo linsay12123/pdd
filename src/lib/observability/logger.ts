@@ -1,16 +1,12 @@
-import type { PaymentProvider } from "@/src/types/billing";
 import type { TaskStatus } from "@/src/types/tasks";
 
 export type WorkflowLogEntry = {
-  eventType: "task_transition" | "payment_event" | "manual_retry";
+  eventType: "task_transition" | "manual_retry";
   createdAt: string;
   taskId?: string;
-  orderId?: string;
   userId?: string;
   oldStatus?: TaskStatus;
   newStatus?: TaskStatus;
-  provider?: PaymentProvider;
-  providerEventId?: string;
   retryAttempt?: number;
   note?: string;
 };
@@ -38,19 +34,6 @@ export function logTaskTransition(input: {
 }) {
   return appendWorkflowLog({
     eventType: "task_transition",
-    ...input
-  });
-}
-
-export function logPaymentEvent(input: {
-  orderId: string;
-  userId: string;
-  provider: PaymentProvider;
-  providerEventId: string;
-  note?: string;
-}) {
-  return appendWorkflowLog({
-    eventType: "payment_event",
     ...input
   });
 }

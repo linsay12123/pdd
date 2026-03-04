@@ -1,10 +1,6 @@
 export type TaskStatus =
   | "created"
-  | "quota_frozen"
-  | "extracting_files"
   | "awaiting_primary_file_confirmation"
-  | "building_rule_card"
-  | "outline_ready"
   | "awaiting_outline_approval"
   | "drafting"
   | "adjusting_word_count"

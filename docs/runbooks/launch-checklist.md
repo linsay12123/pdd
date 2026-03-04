@@ -14,12 +14,17 @@
 ## 2. 数据库
 
 - 运行 `corepack pnpm exec supabase migration list --db-url <你的数据库地址>`，确认本地和线上迁移编号一致。
-- 如有新表或新字段，先执行 `corepack pnpm exec supabase db push --db-url <你的数据库地址>`。
+- 只要这次提交里有 `supabase/migrations/` 新文件，就必须先执行 `corepack pnpm exec supabase db push --db-url <你的数据库地址> --include-all`，不能只发代码不推数据库。
+- 推完后再执行 `corepack pnpm exec supabase db push --db-url <你的数据库地址> --dry-run --include-all`，确认线上库已经追平，没有漏迁移。
 - 人工检查一次以下核心表是否存在且字段完整：
   - `activation_codes`
   - `quota_wallets`
-  - `tasks`
+  - `writing_tasks`
+  - `task_files`
+  - `outline_versions`
+  - `draft_versions`
   - `task_outputs`
+- 再访问一次 `/api/health`，确认里面的数据库结构检查和旧结构检查都通过，不是只看“能连上数据库”。
 
 ## 3. 后台任务
 
@@ -46,3 +51,4 @@
 - 用普通用户账号走一遍“注册 -> 登录 -> 看余额 -> 兑换激活码 -> 建任务 -> 下载”的流程。
 - 用管理员账号打开中控后台，确认能看到真实用户、激活码、任务和财务汇总。
 - 手动点一次“自动降AI”，确认按钮、下载位和“人工降ai 请联系客服”提示都正常显示。
+- 如果这次动过数据库结构，再加一条：先推数据库，再发代码，再看 `/api/health`，最后才做人手走查。

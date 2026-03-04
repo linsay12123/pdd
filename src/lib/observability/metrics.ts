@@ -1,6 +1,5 @@
 export type MetricName =
   | "task_status_transition"
-  | "payment_paid"
   | "task_manual_retry";
 
 const metricStore = new Map<MetricName, number>();

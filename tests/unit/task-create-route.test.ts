@@ -125,4 +125,39 @@ describe("task create route", () => {
       frozenQuota: 0
     });
   });
+
+  it("returns a clear message when the database schema is still on the old version", async () => {
+    seedUserWallet("user-ok", {
+      rechargeQuota: 1000,
+      subscriptionQuota: 0,
+      frozenQuota: 0
+    });
+
+    const response = await handleTaskCreateRequest(
+      new Request("http://localhost/api/tasks/create", {
+        method: "POST",
+        body: JSON.stringify({
+          specialRequirements: "Focus on ASEAN banking examples."
+        }),
+        headers: {
+          "content-type": "application/json"
+        }
+      }),
+      {
+        requireUser: async () => ({
+          id: "user-ok",
+          email: "ok@example.com",
+          role: "user"
+        }),
+        createTask: async () => {
+          throw new Error("DATABASE_SCHEMA_OUT_OF_SYNC");
+        }
+      }
+    );
+    const payload = await response.json();
+
+    expect(response.status).toBe(503);
+    expect(payload.message).toContain("数据库");
+    expect(payload.message).toContain("升级");
+  });
 });

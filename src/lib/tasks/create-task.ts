@@ -99,6 +99,20 @@ async function createTaskWithSupabase(
     .single();
 
   if (taskError || !taskRow) {
+    if (
+      taskError?.message?.includes("target_word_count") &&
+      taskError.message.includes("not-null constraint")
+    ) {
+      throw new Error("DATABASE_SCHEMA_OUT_OF_SYNC");
+    }
+
+    if (
+      taskError?.message?.includes("citation_style") &&
+      taskError.message.includes("not-null constraint")
+    ) {
+      throw new Error("DATABASE_SCHEMA_OUT_OF_SYNC");
+    }
+
     throw new Error(`创建任务失败：${taskError?.message ?? "数据库没有返回任务"}`);
   }
 

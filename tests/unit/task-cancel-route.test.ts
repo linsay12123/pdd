@@ -127,11 +127,11 @@ describe("task cancel route", () => {
     });
   });
 
-  it("releases quota and marks task as failed when quota was frozen", async () => {
+  it("releases quota and marks task as failed when an old reservation is still hanging on the pre-writing step", async () => {
     saveTaskSummary({
       id: "task-1",
       userId: "user-1",
-      status: "quota_frozen",
+      status: "awaiting_outline_approval",
       targetWordCount: 2000,
       citationStyle: "APA 7",
       quotaReservation: testReservation

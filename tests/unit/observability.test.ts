@@ -5,8 +5,6 @@ import {
   resetWorkflowLogs
 } from "../../src/lib/observability/logger";
 import {
-  completePaidOrder,
-  createPaymentOrder,
   resetPaymentState,
   seedUserWallet
 } from "../../src/lib/payments/repository";
@@ -14,6 +12,7 @@ import {
   saveTaskSummary,
   updateTaskStatus
 } from "../../src/lib/tasks/repository";
+import { retryTaskFromFailure } from "../../src/lib/tasks/manual-retry";
 
 describe("observability", () => {
   it("records a structured log and metric when task status changes", () => {
@@ -41,37 +40,37 @@ describe("observability", () => {
     ]);
   });
 
-  it("records a structured log and metric when a payment settles", () => {
+  it("records a structured log and metric when an admin retries a failed task", () => {
     resetWorkflowLogs();
     resetMetrics();
     resetPaymentState();
     seedUserWallet("user-pay-1", {
-      rechargeQuota: 0,
+      rechargeQuota: 1000,
       subscriptionQuota: 0,
       frozenQuota: 0
     });
-    createPaymentOrder({
-      id: "order-observe-1",
+    saveTaskSummary({
+      id: "task-observe-2",
       userId: "user-pay-1",
-      provider: "stripe",
-      amountUsd: 19,
-      quotaAmount: 20,
-      kind: "recharge"
+      status: "failed",
+      targetWordCount: 2000,
+      citationStyle: "APA 7"
     });
 
-    completePaidOrder({
-      orderId: "order-observe-1",
-      providerPaymentId: "cs_test_observe_1"
+    retryTaskFromFailure({
+      taskId: "task-observe-2",
+      restartAt: "drafting",
+      operatorId: "admin-1"
     });
 
-    expect(getMetricCount("payment_paid")).toBe(1);
-    expect(listWorkflowLogs()).toEqual([
+    expect(getMetricCount("task_manual_retry")).toBe(1);
+    expect(listWorkflowLogs()).toEqual(expect.arrayContaining([
       expect.objectContaining({
-        eventType: "payment_event",
+        eventType: "manual_retry",
         userId: "user-pay-1",
-        providerEventId: "cs_test_observe_1",
-        orderId: "order-observe-1"
+        taskId: "task-observe-2",
+        retryAttempt: 1
       })
-    ]);
+    ]));
   });
 });

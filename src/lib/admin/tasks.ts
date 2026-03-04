@@ -8,8 +8,8 @@ export type AdminTaskSummary = {
   userDisplayName: string;
   status: string;
   title: string;
-  targetWordCount: number;
-  citationStyle: string;
+  targetWordCount: number | null;
+  citationStyle: string | null;
   outlineRevisionCount: number;
   createdAt: string;
   expiresAt: string | null;
@@ -26,8 +26,8 @@ type TaskRow = {
   status: string;
   title: string | null;
   topic: string | null;
-  target_word_count: number;
-  citation_style: string;
+  target_word_count: number | null;
+  citation_style: string | null;
   outline_revision_count: number;
   created_at: string;
   expires_at: string | null;

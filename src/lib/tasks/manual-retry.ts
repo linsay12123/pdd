@@ -21,8 +21,6 @@ export type ManualRetryResult = {
 };
 
 const safeRestartStatuses: TaskStatus[] = [
-  "extracting_files",
-  "building_rule_card",
   "drafting",
   "adjusting_word_count",
   "verifying_references",

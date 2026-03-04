@@ -20,7 +20,7 @@ describe("admin tasks", () => {
                 {
                   id: "task-1",
                   user_id: "user-1",
-                  status: "outline_ready",
+                  status: "awaiting_outline_approval",
                   title: "Cross-border banking strategy",
                   topic: null,
                   target_word_count: 2200,
@@ -67,7 +67,7 @@ describe("admin tasks", () => {
         userEmail: "task-owner@example.com",
         userDisplayName: "任务拥有者",
         title: "Cross-border banking strategy",
-        status: "outline_ready",
+        status: "awaiting_outline_approval",
         targetWordCount: 2200
       })
     ]);
@@ -83,7 +83,7 @@ describe("admin tasks", () => {
             userId: "user-2",
             userEmail: "owner@example.com",
             userDisplayName: "演示任务用户",
-            status: "deliverable_ready",
+            status: "awaiting_outline_approval",
             title: "Supply Chain Risk Review",
             targetWordCount: 3000,
             citationStyle: "MLA",
@@ -97,7 +97,7 @@ describe("admin tasks", () => {
 
     expect(html).toContain("任务管理");
     expect(html).toContain("Supply Chain Risk Review");
-    expect(html).toContain("最终交付已准备好");
+    expect(html).toContain("大纲已生成，等待用户确认");
     expect(html).toContain("3,000");
     expect(html).not.toContain("task_001");
   });

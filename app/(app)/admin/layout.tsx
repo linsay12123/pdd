@@ -10,10 +10,10 @@ type AdminLayoutProps = {
 const adminNavigationItems = [
   { href: "/admin", label: "总览" },
   { href: "/admin/users", label: "用户" },
-  { href: "/admin/orders", label: "订单" },
+  { href: "/admin/orders", label: "激活码" },
   { href: "/admin/tasks", label: "任务" },
   { href: "/admin/files", label: "文件" },
-  { href: "/admin/pricing", label: "价格" },
+  { href: "/admin/pricing", label: "积分规则" },
   { href: "/admin/finance", label: "财务" }
 ];
 
@@ -41,7 +41,7 @@ export default async function AdminLayout({ children }: AdminLayoutProps) {
         </p>
         <h1 style={{ marginTop: "8px", marginBottom: "8px" }}>运营中控后台</h1>
         <p style={{ margin: 0 }}>
-          这里给你集中处理用户、订单、任务、价格和财务。所有操作都应该落审计日志。
+          这里给你集中处理用户、激活码、任务、积分规则和财务。所有操作都应该落审计日志。
         </p>
       </section>
 

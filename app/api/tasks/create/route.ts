@@ -76,6 +76,16 @@ export async function handleTaskCreateRequest(
       );
     }
 
+    if (error instanceof Error && error.message === "DATABASE_SCHEMA_OUT_OF_SYNC") {
+      return NextResponse.json(
+        {
+          ok: false,
+          message: "系统数据库还没同步到最新版本，所以现在暂时不能创建任务。先把数据库升级完，再试一次就行。"
+        },
+        { status: 503 }
+      );
+    }
+
     const errorMessage = error instanceof Error ? error.message : String(error);
     console.error("[task-create] 创建任务失败:", errorMessage, error);
     return NextResponse.json(

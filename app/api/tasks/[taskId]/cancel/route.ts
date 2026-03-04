@@ -27,18 +27,9 @@ type CancelRouteDependencies = {
   requireUser?: () => Promise<SessionUser>;
 };
 
-/**
- * Statuses where the task can be cancelled.
- * Before outline approval: no quota was frozen, so just mark as failed.
- * After outline approval (quota_frozen): release frozen quota, then mark as failed.
- */
 const CANCELLABLE_STATUSES = new Set([
   "created",
-  "quota_frozen",
-  "extracting_files",
   "awaiting_primary_file_confirmation",
-  "building_rule_card",
-  "outline_ready",
   "awaiting_outline_approval"
 ]);
 
@@ -149,30 +140,7 @@ async function cancelWithSupabase(taskId: string, user: SessionUser) {
     );
   }
 
-  let reservation = taskRow.quota_reservation as FrozenQuotaReservation | null;
-
-  // If no reservation stored, try to reconstruct from ledger
-  if (!reservation || !reservation.totalAmount) {
-    const { data: ledgerRow } = await client
-      .from("quota_ledger_entries")
-      .select("amount")
-      .eq("task_id", taskId)
-      .eq("user_id", user.id)
-      .eq("entry_kind", "task_freeze")
-      .order("created_at", { ascending: false })
-      .limit(1)
-      .maybeSingle();
-
-    if (ledgerRow?.amount) {
-      reservation = {
-        taskId,
-        chargePath: "generation",
-        totalAmount: Number(ledgerRow.amount),
-        fromSubscription: 0,
-        fromRecharge: Number(ledgerRow.amount)
-      };
-    }
-  }
+  const reservation = taskRow.quota_reservation as FrozenQuotaReservation | null;
 
   // If there's frozen quota to release, do so
   if (reservation && reservation.totalAmount > 0) {
