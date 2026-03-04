@@ -24,8 +24,7 @@ const safeRestartStatuses: TaskStatus[] = [
   "drafting",
   "adjusting_word_count",
   "verifying_references",
-  "exporting",
-  "humanizing"
+  "exporting"
 ];
 
 const manualRetryAuditStore: ManualRetryAuditEntry[] = [];

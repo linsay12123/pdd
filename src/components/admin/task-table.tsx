@@ -42,10 +42,6 @@ function describeTaskStatus(status: string) {
       return "正在导出交付文件";
     case "deliverable_ready":
       return "最终交付已准备好";
-    case "humanizing":
-      return "正在处理自动降AI";
-    case "humanized_ready":
-      return "降AI后版本已准备好";
     case "failed":
       return "任务失败";
     case "expired":

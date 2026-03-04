@@ -9,6 +9,7 @@ type SchemaHealthPayload = {
   citationStyleNullable: boolean;
   analysisFieldsReady: boolean;
   taskFileFieldsReady: boolean;
+  humanizeFieldsReady: boolean;
   legacyPaymentTablesRemaining: string[];
   legacyPaymentTypesRemaining: string[];
   legacyTaskStatusesRemaining: string[];
@@ -31,6 +32,7 @@ function normalizeSchemaHealth(data: unknown): SchemaHealthPayload | null {
     citationStyleNullable: payload.citationStyleNullable === true,
     analysisFieldsReady: payload.analysisFieldsReady === true,
     taskFileFieldsReady: payload.taskFileFieldsReady === true,
+    humanizeFieldsReady: payload.humanizeFieldsReady === true,
     legacyPaymentTablesRemaining: Array.isArray(payload.legacyPaymentTablesRemaining)
       ? payload.legacyPaymentTablesRemaining.map(String)
       : [],
@@ -69,10 +71,10 @@ export async function handleHealthRequest(
     ? { ok: true, detail: `已配置 (${runtimeEnv.OPENAI_API_KEY.length} 字符)` }
     : { ok: false, detail: "未配置 OPENAI_API_KEY" };
 
-  // 5. Check StealthGPT API Key
-  checks.STEALTHGPT_API_KEY = runtimeEnv.STEALTHGPT_API_KEY
-    ? { ok: true, detail: `已配置 (${runtimeEnv.STEALTHGPT_API_KEY.length} 字符)` }
-    : { ok: false, detail: "未配置（降AI功能不可用）" };
+  // 5. Check Undetectable API Key
+  checks.UNDETECTABLE_API_KEY = runtimeEnv.UNDETECTABLE_API_KEY
+    ? { ok: true, detail: `已配置 (${runtimeEnv.UNDETECTABLE_API_KEY.length} 字符)` }
+    : { ok: false, detail: "未配置（Undetectable 降AI功能不可用）" };
 
   // 6. Check Trigger Secret Key
   checks.TRIGGER_SECRET_KEY = runtimeEnv.TRIGGER_SECRET_KEY
@@ -185,6 +187,10 @@ export async function handleHealthRequest(
             schemaProblems.push("task_files 的 OpenAI 文件字段还没补齐");
           }
 
+          if (!schema.humanizeFieldsReady) {
+            schemaProblems.push("writing_tasks 的降AI附加字段还没补齐");
+          }
+
           const legacyProblems = [
             ...schema.legacyPaymentTablesRemaining,
             ...schema.legacyPaymentTypesRemaining,
@@ -215,7 +221,7 @@ export async function handleHealthRequest(
 
   const requiredKeys = [
     "SUPABASE_URL", "SUPABASE_ANON_KEY", "SUPABASE_SERVICE_ROLE_KEY",
-    "OPENAI_API_KEY", "STEALTHGPT_API_KEY", "TRIGGER_SECRET_KEY",
+    "OPENAI_API_KEY", "UNDETECTABLE_API_KEY", "TRIGGER_SECRET_KEY",
     "SUPABASE_DB_CONNECTION", "DB_TABLES",
     "DB_SCHEMA_COMPAT", "DB_LEGACY_STRUCTURES"
   ];

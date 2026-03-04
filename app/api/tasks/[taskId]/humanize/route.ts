@@ -1,8 +1,11 @@
 import { NextResponse } from "next/server";
+import { tasks } from "@trigger.dev/sdk/v3";
 import { requireCurrentSessionUser } from "@/src/lib/auth/current-user";
 import { freezeQuota } from "@/src/lib/billing/freeze-quota";
+import { releaseQuota } from "@/src/lib/billing/release-quota";
 import { quoteHumanizeTaskCost } from "@/src/lib/billing/quote-task-cost";
 import { countBodyWords } from "@/src/lib/drafts/word-count";
+import { defaultHumanizeProfile } from "@/src/lib/humanize/humanize-provider";
 import { shouldUseSupabasePersistence } from "@/src/lib/persistence/runtime-mode";
 import {
   appendPaymentLedgerEntryToSupabase,
@@ -11,12 +14,13 @@ import {
 } from "@/src/lib/payments/supabase-wallet";
 import {
   getLatestOwnedDraftFromSupabase,
-  getOwnedTaskFromSupabase
+  getOwnedTaskFromSupabase,
+  updateOwnedTaskHumanizeStateInSupabase
 } from "@/src/lib/tasks/supabase-task-records";
-import { humanizeDraft } from "@/trigger/jobs/humanize-draft";
+import { listOwnedTaskOutputs } from "@/src/lib/tasks/task-output-store";
 import type { FrozenQuotaReservation } from "@/src/types/billing";
 import type { SessionUser } from "@/src/types/auth";
-import type { TaskSummary } from "@/src/types/tasks";
+import type { TaskHumanizeStatus, TaskSummary } from "@/src/types/tasks";
 
 type RouteContext = {
   params: Promise<{
@@ -25,7 +29,7 @@ type RouteContext = {
 };
 
 type HumanizeTaskContext = {
-  task: Pick<TaskSummary, "id" | "userId" | "status"> & {
+  task: Pick<TaskSummary, "id" | "userId" | "status" | "humanizeStatus"> & {
     citationStyle: string;
   };
   draftMarkdown: string;
@@ -37,24 +41,47 @@ type HumanizeChargeResult = {
   reservation: FrozenQuotaReservation;
 };
 
+type HumanizeStateSnapshot = {
+  status: TaskHumanizeStatus;
+  outputId: string | null;
+  errorMessage: string | null;
+  provider?: string | null;
+  requestedAt?: string | null;
+  completedAt?: string | null;
+};
+
 type HumanizeRouteDependencies = {
   requireUser?: () => Promise<SessionUser>;
   isPersistenceReady?: () => boolean;
   loadTaskContext?: (taskId: string, userId: string) => Promise<HumanizeTaskContext>;
+  loadHumanizeStatus?: (taskId: string, userId: string) => Promise<HumanizeStateSnapshot>;
+  loadHumanizeStatusForUser?: (taskId: string, userId: string) => Promise<HumanizeStateSnapshot>;
   chargeQuota?: (
     taskId: string,
     userId: string,
     bodyWordCount: number
   ) => Promise<HumanizeChargeResult>;
-  runHumanize?: (input: {
+  releaseQuota?: (input: {
+    taskId: string;
+    userId: string;
+    reservation: FrozenQuotaReservation;
+  }) => Promise<void>;
+  saveQueuedState?: (input: {
+    taskId: string;
+    userId: string;
+  }) => Promise<void>;
+  saveFailedState?: (input: {
+    taskId: string;
+    userId: string;
+    message: string;
+  }) => Promise<void>;
+  enqueueHumanize?: (input: {
     taskId: string;
     userId: string;
     draftMarkdown: string;
     reservationSnapshot: FrozenQuotaReservation;
     citationStyle: string;
-  }) => Promise<{
-    outputId: string | null;
-  }>;
+  }) => Promise<void>;
 };
 
 export async function handleHumanizeRequest(
@@ -74,9 +101,16 @@ export async function handleHumanizeRequest(
     );
   }
 
-  if (!process.env.STEALTHGPT_API_KEY?.trim()) {
+  if (!process.env.UNDETECTABLE_API_KEY?.trim()) {
     return NextResponse.json(
-      { ok: false, taskId, message: "自动降AI功能暂未启用，请先配置真实服务密钥。" },
+      { ok: false, taskId, message: "Undetectable 降AI功能暂未启用，请先配置真实服务密钥。" },
+      { status: 503 }
+    );
+  }
+
+  if (!process.env.TRIGGER_SECRET_KEY?.trim()) {
+    return NextResponse.json(
+      { ok: false, taskId, message: "后台任务密钥还没配置好，暂时不能启动自动降AI。" },
       { status: 503 }
     );
   }
@@ -93,30 +127,85 @@ export async function handleHumanizeRequest(
       taskId,
       user.id
     );
+    const currentState = await (dependencies.loadHumanizeStatus ?? loadHumanizeStateWithSupabase)(
+      taskId,
+      user.id
+    );
+
+    if (currentState.status === "queued" || currentState.status === "processing" || currentState.status === "retrying") {
+      return NextResponse.json(
+        {
+          ok: true,
+          taskId,
+          humanizeStatus: currentState.status,
+          downloads: {
+            humanizedDocxOutputId: currentState.outputId
+          },
+          message: "降AI任务还在处理中，请稍后刷新。"
+        },
+        { status: 200 }
+      );
+    }
+
+    if (currentState.status === "completed" && currentState.outputId) {
+      return NextResponse.json(
+        {
+          ok: true,
+          taskId,
+          humanizeStatus: currentState.status,
+          downloads: {
+            humanizedDocxOutputId: currentState.outputId
+          },
+          message: "降AI后版本已经准备好，可以直接下载。"
+        },
+        { status: 200 }
+      );
+    }
+
     const charged = await (dependencies.chargeQuota ?? chargeHumanizeQuotaWithSupabase)(
       taskId,
       user.id,
       taskContext.bodyWordCount
     );
-    const result = await (dependencies.runHumanize ?? runHumanizeWithRealPipeline)({
+
+    await (dependencies.saveQueuedState ?? saveQueuedHumanizeStateWithSupabase)({
       taskId,
-      userId: user.id,
-      draftMarkdown: taskContext.draftMarkdown,
-      reservationSnapshot: charged.reservation,
-      citationStyle: taskContext.task.citationStyle
+      userId: user.id
     });
+
+    try {
+      await (dependencies.enqueueHumanize ?? enqueueHumanizeWithTrigger)({
+        taskId,
+        userId: user.id,
+        draftMarkdown: taskContext.draftMarkdown,
+        reservationSnapshot: charged.reservation,
+        citationStyle: taskContext.task.citationStyle
+      });
+    } catch (error) {
+      await (dependencies.releaseQuota ?? releaseQueuedHumanizeQuotaWithSupabase)({
+        taskId,
+        userId: user.id,
+        reservation: charged.reservation
+      });
+      await (dependencies.saveFailedState ?? saveFailedHumanizeStateWithSupabase)({
+        taskId,
+        userId: user.id,
+        message: error instanceof Error ? error.message : "降AI任务提交失败，请稍后再试。"
+      });
+      throw error;
+    }
 
     return NextResponse.json(
       {
         ok: true,
         taskId,
-        chargedQuota: charged.amount,
+        humanizeStatus: "queued",
         downloads: {
-          humanizedDocxOutputId: result.outputId
+          humanizedDocxOutputId: null
         },
-        message: "降AI处理已完成，现在可以直接下载新文档。"
+        message: "降AI任务已经提交，系统正在后台处理中。"
       },
-      { status: 200 }
+      { status: 202 }
     );
   } catch (error) {
     if (error instanceof Error && error.message === "TASK_NOT_FOUND") {
@@ -158,6 +247,63 @@ export async function handleHumanizeRequest(
   }
 }
 
+export async function handleHumanizeStatusRequest(
+  _request: Request,
+  context: RouteContext,
+  dependencies: HumanizeRouteDependencies = {}
+) {
+  const { taskId } = await context.params;
+
+  let user: SessionUser;
+  try {
+    user = await (dependencies.requireUser ?? requireCurrentSessionUser)();
+  } catch {
+    return NextResponse.json(
+      { ok: false, taskId, message: "请先登录后再查看降AI进度。" },
+      { status: 401 }
+    );
+  }
+
+  try {
+    const currentState = await (dependencies.loadHumanizeStatusForUser ?? loadHumanizeStateWithSupabase)(
+      taskId,
+      user.id
+    );
+
+    return NextResponse.json(
+      {
+        ok: true,
+        taskId,
+        humanizeStatus: currentState.status,
+        requestedAt: currentState.requestedAt ?? null,
+        completedAt: currentState.completedAt ?? null,
+        errorMessage: currentState.errorMessage,
+        downloads: {
+          humanizedDocxOutputId: currentState.outputId
+        },
+        provider: currentState.provider ?? "undetectable"
+      },
+      { status: 200 }
+    );
+  } catch (error) {
+    if (error instanceof Error && error.message === "TASK_NOT_FOUND") {
+      return NextResponse.json(
+        { ok: false, taskId, message: "未找到这个任务。" },
+        { status: 404 }
+      );
+    }
+
+    return NextResponse.json(
+      {
+        ok: false,
+        taskId,
+        message: error instanceof Error ? error.message : "读取降AI状态失败，请稍后再试。"
+      },
+      { status: 500 }
+    );
+  }
+}
+
 async function loadTaskContextWithSupabase(
   taskId: string,
   userId: string
@@ -179,7 +325,7 @@ async function loadTaskContextWithSupabase(
   }
 
   const draftMarkdown = [
-    draft.title ? `# ${draft.title}` : "",
+    task.topic ? `# ${task.topic}` : "",
     draft.bodyMarkdown,
     draft.referencesMarkdown ? `## References\n${draft.referencesMarkdown}` : ""
   ]
@@ -191,10 +337,36 @@ async function loadTaskContextWithSupabase(
       id: task.id,
       userId: task.userId,
       status: task.status,
+      humanizeStatus: task.humanizeStatus ?? "idle",
       citationStyle: task.citationStyle
     },
     draftMarkdown,
     bodyWordCount: draft.bodyWordCount || countBodyWords(draft.bodyMarkdown)
+  };
+}
+
+async function loadHumanizeStateWithSupabase(
+  taskId: string,
+  userId: string
+): Promise<HumanizeStateSnapshot> {
+  const task = await getOwnedTaskFromSupabase(taskId, userId);
+
+  if (!task) {
+    throw new Error("TASK_NOT_FOUND");
+  }
+
+  const outputs = await listOwnedTaskOutputs({
+    taskId,
+    userId
+  });
+
+  return {
+    status: task.humanizeStatus ?? "idle",
+    provider: task.humanizeProvider ?? "undetectable",
+    outputId: outputs.find((output) => output.outputKind === "humanized_docx")?.id ?? null,
+    errorMessage: task.humanizeErrorMessage ?? null,
+    requestedAt: task.humanizeRequestedAt ?? null,
+    completedAt: task.humanizeCompletedAt ?? null
   };
 }
 
@@ -232,20 +404,71 @@ async function chargeHumanizeQuotaWithSupabase(
   };
 }
 
-async function runHumanizeWithRealPipeline(input: {
+async function releaseQueuedHumanizeQuotaWithSupabase(input: {
+  taskId: string;
+  userId: string;
+  reservation: FrozenQuotaReservation;
+}) {
+  const wallet = await getUserWalletFromSupabase(input.userId);
+  const released = releaseQuota({
+    wallet,
+    reservation: input.reservation
+  });
+  await setUserWalletInSupabase(input.userId, released.wallet);
+  await appendPaymentLedgerEntryToSupabase({
+    userId: input.userId,
+    taskId: input.taskId,
+    entry: released.entry,
+    walletAfter: released.wallet
+  });
+}
+
+async function saveQueuedHumanizeStateWithSupabase(input: {
+  taskId: string;
+  userId: string;
+}) {
+  await updateOwnedTaskHumanizeStateInSupabase(input.taskId, input.userId, {
+    status: "queued",
+    provider: "undetectable",
+    profileSnapshot: defaultHumanizeProfile,
+    documentId: null,
+    retryDocumentId: null,
+    errorMessage: null,
+    requestedAt: new Date().toISOString(),
+    completedAt: null
+  });
+}
+
+async function saveFailedHumanizeStateWithSupabase(input: {
+  taskId: string;
+  userId: string;
+  message: string;
+}) {
+  await updateOwnedTaskHumanizeStateInSupabase(input.taskId, input.userId, {
+    status: "failed",
+    errorMessage: input.message,
+    completedAt: null
+  });
+}
+
+async function enqueueHumanizeWithTrigger(input: {
   taskId: string;
   userId: string;
   draftMarkdown: string;
   reservationSnapshot: FrozenQuotaReservation;
   citationStyle: string;
 }) {
-  const result = await humanizeDraft(input);
-
-  return {
-    outputId: result.outputId ?? null
-  };
+  await tasks.trigger("humanize-draft", input, {
+    queue: "humanize-draft",
+    concurrencyKey: `humanize-${input.taskId}`,
+    idempotencyKey: `humanize-${input.taskId}-${input.userId}`
+  });
 }
 
 export async function POST(request: Request, context: RouteContext) {
   return handleHumanizeRequest(request, context);
+}
+
+export async function GET(request: Request, context: RouteContext) {
+  return handleHumanizeStatusRequest(request, context);
 }

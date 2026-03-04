@@ -1,9 +1,15 @@
+import { task, wait } from "@trigger.dev/sdk/v3";
 import { exportDocx } from "@/src/lib/deliverables/export-docx";
 import {
+  buildHumanizeSubmission,
   draftToDocxContent,
-  humanizeDraft as humanizeDraftText
-} from "@/src/lib/humanize/stealthgpt-client";
+  rebuildDraftWithHumanizedBody,
+  validateHumanizedBody
+} from "@/src/lib/humanize/humanize-markdown";
 import type { HumanizeProvider } from "@/src/lib/humanize/humanize-provider";
+import {
+  defaultHumanizeProfile,
+} from "@/src/lib/humanize/humanize-provider";
 import { resolveHumanizeProvider } from "@/src/lib/humanize/resolve-provider";
 import { shouldUseSupabasePersistence } from "@/src/lib/persistence/runtime-mode";
 import {
@@ -13,7 +19,7 @@ import {
 } from "@/src/lib/payments/supabase-wallet";
 import { releaseQuota } from "@/src/lib/billing/release-quota";
 import { settleQuota } from "@/src/lib/billing/settle-quota";
-import { setOwnedTaskStatusInSupabase } from "@/src/lib/tasks/supabase-task-records";
+import { updateOwnedTaskHumanizeStateInSupabase } from "@/src/lib/tasks/supabase-task-records";
 import type { FrozenQuotaReservation } from "@/src/types/billing";
 
 export type HumanizeDraftJobInput = {
@@ -24,27 +30,99 @@ export type HumanizeDraftJobInput = {
   citationStyle: string;
 };
 
-export async function queueHumanizeDraft(input: HumanizeDraftJobInput) {
-  return {
-    job: "humanizeDraft",
-    queued: false,
-    input
-  };
-}
+type HumanizeDraftDependencies = {
+  provider?: HumanizeProvider;
+  waitFor?: (seconds: number) => Promise<void>;
+};
 
-export async function humanizeDraft(
+const humanizePollIntervalSeconds = 20;
+const humanizePollLimit = 24;
+
+export const humanizeDraftTask = task({
+  id: "humanize-draft",
+  run: async (payload: HumanizeDraftJobInput) => {
+    return runHumanizeDraftPipeline(payload);
+  }
+});
+
+export async function runHumanizeDraftPipeline(
   input: HumanizeDraftJobInput,
-  overrideProvider?: HumanizeProvider
+  dependencies: HumanizeDraftDependencies = {}
 ) {
   if (!shouldUseSupabasePersistence()) {
     throw new Error("REAL_PERSISTENCE_REQUIRED");
   }
 
-  await setOwnedTaskStatusInSupabase(input.taskId, input.userId, "humanizing");
+  const provider = dependencies.provider ?? resolveHumanizeProvider();
+  const pause = dependencies.waitFor ?? (async (seconds: number) => wait.for({ seconds }));
+  const submission = buildHumanizeSubmission(input.draftMarkdown);
 
   try {
-    const provider = resolveHumanizeProvider(overrideProvider);
-    const humanizedDraft = await humanizeDraftText(input.draftMarkdown, provider);
+    await updateOwnedTaskHumanizeStateInSupabase(input.taskId, input.userId, {
+      status: "processing",
+      provider: provider.name,
+      profileSnapshot: defaultHumanizeProfile,
+      errorMessage: null
+    });
+
+    const firstRun = await provider.submitDocument({
+      content: submission.bodyForHumanize,
+      profile: defaultHumanizeProfile
+    });
+
+    await updateOwnedTaskHumanizeStateInSupabase(input.taskId, input.userId, {
+      status: "processing",
+      documentId: firstRun.documentId,
+      errorMessage: null
+    });
+
+    const firstBody = await waitForHumanizedBody({
+      provider,
+      documentId: firstRun.documentId,
+      pause
+    });
+
+    let finalBody = firstBody;
+    let retryDocumentId: string | null = null;
+    let validation = validateHumanizedBody({
+      originalBody: submission.bodyForHumanize,
+      humanizedBody: firstBody
+    });
+
+    if (!validation.ok) {
+      await updateOwnedTaskHumanizeStateInSupabase(input.taskId, input.userId, {
+        status: "retrying",
+        errorMessage: `第一次降AI结果不可用：${validation.reason}`
+      });
+
+      const retryRun = await provider.rehumanize(firstRun.documentId);
+      retryDocumentId = retryRun.documentId;
+
+      await updateOwnedTaskHumanizeStateInSupabase(input.taskId, input.userId, {
+        status: "retrying",
+        retryDocumentId
+      });
+
+      finalBody = await waitForHumanizedBody({
+        provider,
+        documentId: retryDocumentId,
+        pause
+      });
+
+      validation = validateHumanizedBody({
+        originalBody: submission.bodyForHumanize,
+        humanizedBody: finalBody
+      });
+
+      if (!validation.ok) {
+        throw new Error(`HUMANIZE_RESULT_INVALID:${validation.reason}`);
+      }
+    }
+
+    const humanizedDraft = rebuildDraftWithHumanizedBody({
+      original: submission,
+      humanizedBody: finalBody
+    });
     const docxContent = draftToDocxContent(humanizedDraft);
     const exportResult = await exportDocx({
       taskId: input.taskId,
@@ -72,7 +150,13 @@ export async function humanizeDraft(
       entry: settled.entry,
       walletAfter: settled.wallet
     });
-    await setOwnedTaskStatusInSupabase(input.taskId, input.userId, "humanized_ready");
+
+    await updateOwnedTaskHumanizeStateInSupabase(input.taskId, input.userId, {
+      status: "completed",
+      retryDocumentId,
+      errorMessage: null,
+      completedAt: new Date().toISOString()
+    });
 
     return {
       taskId: input.taskId,
@@ -102,14 +186,55 @@ export async function humanizeDraft(
     }
 
     try {
-      await setOwnedTaskStatusInSupabase(input.taskId, input.userId, "failed");
+      await updateOwnedTaskHumanizeStateInSupabase(input.taskId, input.userId, {
+        status: "failed",
+        errorMessage: humanizeFailureMessage(error)
+      });
     } catch (statusError) {
       console.error(
-        "[humanize-draft] failed to update task status:",
+        "[humanize-draft] failed to update humanize state:",
         statusError instanceof Error ? statusError.message : statusError
       );
     }
 
     throw error;
   }
+}
+
+async function waitForHumanizedBody(input: {
+  provider: HumanizeProvider;
+  documentId: string;
+  pause: (seconds: number) => Promise<void>;
+}) {
+  for (let attempt = 1; attempt <= humanizePollLimit; attempt += 1) {
+    const result = await input.provider.getDocument(input.documentId);
+
+    if (result.output?.trim()) {
+      return result.output.trim();
+    }
+
+    if (attempt === humanizePollLimit) {
+      break;
+    }
+
+    await input.pause(humanizePollIntervalSeconds);
+  }
+
+  throw new Error("HUMANIZE_TIMEOUT");
+}
+
+function humanizeFailureMessage(error: unknown) {
+  if (error instanceof Error) {
+    if (error.message === "HUMANIZE_TIMEOUT") {
+      return "降AI处理超时，请稍后重试。";
+    }
+
+    if (error.message.startsWith("HUMANIZE_RESULT_INVALID:")) {
+      return "降AI返回的结果不完整，系统已经自动重试过一次，请稍后重试。";
+    }
+
+    return error.message;
+  }
+
+  return "降AI处理失败，请稍后再试。";
 }

@@ -9,7 +9,7 @@ import {
   type ReferenceReportInput
 } from "@/src/lib/deliverables/export-report";
 import { applyCandidateDraft } from "@/src/lib/drafts/word-count";
-import { draftToDocxContent } from "@/src/lib/humanize/stealthgpt-client";
+import { draftToDocxContent } from "@/src/lib/humanize/humanize-markdown";
 import {
   getTaskOutlineVersion,
   getTaskSummary,

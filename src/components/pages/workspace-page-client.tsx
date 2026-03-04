@@ -6,11 +6,17 @@ import { requestConfirmPrimaryFile } from "@/src/lib/tasks/request-confirm-prima
 import { requestTaskDownload } from "@/src/lib/tasks/request-task-download";
 import { requestOutlineApproval } from "@/src/lib/tasks/request-outline-approval";
 import { requestOutlineFeedback } from "@/src/lib/tasks/request-outline-feedback";
-import { requestHumanize } from "@/src/lib/tasks/request-humanize";
+import {
+  requestHumanize,
+  requestHumanizeStatus
+} from "@/src/lib/tasks/request-humanize";
 import {
   requestTaskBootstrap,
 } from "@/src/lib/tasks/request-task-bootstrap";
-import type { TaskWorkflowPayload } from "@/src/lib/tasks/request-task-file-upload";
+import type {
+  TaskWorkflowHumanizePayload,
+  TaskWorkflowPayload
+} from "@/src/lib/tasks/request-task-file-upload";
 import {
   UploadCloud,
   FileText,
@@ -42,9 +48,17 @@ type WorkspaceTaskState = TaskWorkflowPayload & {
   downloads?: {
     finalDocxOutputId: string | null;
     referenceReportOutputId: string | null;
-    humanizedDocxOutputId?: string | null;
+    humanizedDocxOutputId: string | null;
   };
   finalWordCount?: number;
+};
+
+const defaultHumanizeState: TaskWorkflowHumanizePayload = {
+  status: "idle",
+  provider: "undetectable",
+  requestedAt: null,
+  completedAt: null,
+  errorMessage: null
 };
 
 export function WorkspacePageClient({ initialQuota }: WorkspacePageClientProps) {
@@ -61,7 +75,7 @@ export function WorkspacePageClient({ initialQuota }: WorkspacePageClientProps) 
   const [isRegeneratingOutline, setIsRegeneratingOutline] = useState(false);
   const [isApprovingOutline, setIsApprovingOutline] = useState(false);
   const [downloadingOutputId, setDownloadingOutputId] = useState<string | null>(null);
-  const [isHumanizing, setIsHumanizing] = useState(false);
+  const [isSubmittingHumanize, setIsSubmittingHumanize] = useState(false);
 
   async function syncWallet() {
     try {
@@ -74,6 +88,26 @@ export function WorkspacePageClient({ initialQuota }: WorkspacePageClientProps) 
     } catch {
       // Keep the existing wallet snapshot when the sync request fails.
     }
+  }
+
+  function mergeTaskHumanizeState(
+    currentTask: WorkspaceTaskState,
+    nextHumanize?: Partial<TaskWorkflowHumanizePayload> | null,
+    nextDownloads?: Partial<NonNullable<WorkspaceTaskState["downloads"]>>
+  ): WorkspaceTaskState {
+    return {
+      ...currentTask,
+      humanize: {
+        ...(currentTask.humanize ?? defaultHumanizeState),
+        ...(nextHumanize ?? {})
+      },
+      downloads: {
+        finalDocxOutputId: currentTask.downloads?.finalDocxOutputId ?? null,
+        referenceReportOutputId: currentTask.downloads?.referenceReportOutputId ?? null,
+        humanizedDocxOutputId: currentTask.downloads?.humanizedDocxOutputId ?? null,
+        ...(nextDownloads ?? {})
+      }
+    };
   }
 
   useEffect(() => {
@@ -98,6 +132,83 @@ export function WorkspacePageClient({ initialQuota }: WorkspacePageClientProps) 
       cancelled = true;
     };
   }, []);
+
+  useEffect(() => {
+    if (!activeTask || step !== 3) {
+      return;
+    }
+
+    const currentHumanizeStatus = activeTask.humanize?.status ?? "idle";
+    if (!["queued", "processing", "retrying"].includes(currentHumanizeStatus)) {
+      return;
+    }
+
+    let cancelled = false;
+    const timer = window.setTimeout(() => {
+      void requestHumanizeStatus({ taskId: activeTask.task.id })
+        .then(async (result) => {
+          if (cancelled) {
+            return;
+          }
+
+          setActiveTask((currentTask) => {
+            if (!currentTask || currentTask.task.id !== activeTask.task.id) {
+              return currentTask;
+            }
+
+            return mergeTaskHumanizeState(
+              currentTask,
+              {
+                status: result.humanizeStatus,
+                provider: result.provider,
+                errorMessage: result.errorMessage,
+                requestedAt: result.requestedAt ?? currentTask.humanize?.requestedAt ?? null,
+                completedAt:
+                  result.completedAt ??
+                  (result.humanizeStatus === "completed"
+                    ? new Date().toISOString()
+                    : currentTask.humanize?.completedAt ?? null)
+              },
+              {
+                humanizedDocxOutputId: result.downloads.humanizedDocxOutputId
+              }
+            );
+          });
+
+          if (result.humanizeStatus === "completed") {
+            setNotice({
+              tone: "success",
+              text: "降AI后版本已经处理完成，现在可以下载。"
+            });
+            await syncWallet();
+            return;
+          }
+
+          if (result.humanizeStatus === "failed") {
+            setNotice({
+              tone: "error",
+              text: result.errorMessage ?? "降AI处理失败，请稍后重试。"
+            });
+            await syncWallet();
+          }
+        })
+        .catch(() => {
+          if (cancelled) {
+            return;
+          }
+
+          setNotice({
+            tone: "error",
+            text: "读取降AI进度失败，请稍后再试。"
+          });
+        });
+    }, 20_000);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [activeTask, step]);
 
   const handleUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files) {
@@ -126,7 +237,15 @@ export function WorkspacePageClient({ initialQuota }: WorkspacePageClientProps) 
         files
       });
 
-      setActiveTask(result);
+      setActiveTask({
+        ...result,
+        humanize: result.humanize ?? defaultHumanizeState,
+        downloads: {
+          finalDocxOutputId: null,
+          referenceReportOutputId: null,
+          humanizedDocxOutputId: null
+        }
+      });
       setSelectedPrimaryFileId(result.classification.primaryRequirementFileId ?? "");
       setNotice({
         tone: result.classification.needsUserConfirmation ? "info" : "success",
@@ -177,6 +296,12 @@ export function WorkspacePageClient({ initialQuota }: WorkspacePageClientProps) 
         currentTask
           ? {
               ...result,
+              humanize: result.humanize ?? currentTask.humanize ?? defaultHumanizeState,
+              downloads: currentTask.downloads ?? {
+                finalDocxOutputId: null,
+                referenceReportOutputId: null,
+                humanizedDocxOutputId: null
+              },
               frozenQuota: currentTask.frozenQuota
             }
           : currentTask
@@ -231,7 +356,8 @@ export function WorkspacePageClient({ initialQuota }: WorkspacePageClientProps) 
           ? {
               ...currentTask,
               task: result.task,
-              outline: result.outline
+              outline: result.outline,
+              humanize: result.humanize ?? currentTask.humanize ?? defaultHumanizeState
             }
           : currentTask
       );
@@ -275,8 +401,13 @@ export function WorkspacePageClient({ initialQuota }: WorkspacePageClientProps) 
           ? {
               ...currentTask,
               task: result.task,
-              downloads: result.downloads,
-              finalWordCount: result.finalWordCount
+              downloads: {
+                finalDocxOutputId: result.downloads.finalDocxOutputId,
+                referenceReportOutputId: result.downloads.referenceReportOutputId,
+                humanizedDocxOutputId: currentTask.downloads?.humanizedDocxOutputId ?? null
+              },
+              finalWordCount: result.finalWordCount,
+              humanize: result.humanize ?? currentTask.humanize ?? defaultHumanizeState
             }
           : currentTask
       );
@@ -341,6 +472,9 @@ export function WorkspacePageClient({ initialQuota }: WorkspacePageClientProps) 
   const displayedCitationStyle =
     analysis?.citationStyle ?? activeTask?.task.citationStyle;
   const displayedTopic = analysis?.topic ?? activeTask?.outline?.articleTitle ?? "模型还没给出主题";
+  const humanize = activeTask?.humanize ?? defaultHumanizeState;
+  const isHumanizeRunning = ["queued", "processing", "retrying"].includes(humanize.status);
+  const humanizeButtonBusy = isSubmittingHumanize || isHumanizeRunning;
 
   return (
     <div className="min-h-screen pt-24 pb-16 bg-brand-950">
@@ -870,46 +1004,84 @@ export function WorkspacePageClient({ initialQuota }: WorkspacePageClientProps) 
                         <p className="text-sm text-brand-700 max-w-md">
                           使用专属引擎优化文本特征，使其更贴近人类写作风格。处理完成后将生成一份新的 Word 文档。
                         </p>
+                        <div className="mt-3 space-y-1 text-xs text-brand-700">
+                          {humanize.status === "idle" && (
+                            <p>点击后系统会在后台慢慢处理，完成后这里会自动出现新的下载按钮。</p>
+                          )}
+                          {isHumanizeRunning && (
+                            <p>
+                              系统正在后台处理降AI版本。
+                              {humanize.status === "retrying"
+                                ? " 第一版结果不够稳，系统正在自动重做一次。"
+                                : " 你不用一直盯着这个页面，处理好后这里会更新。"}
+                            </p>
+                          )}
+                          {humanize.status === "completed" && (
+                            <p>降AI后版本已经准备好，原最终版和降AI后版本都可以分别下载。</p>
+                          )}
+                          {humanize.status === "failed" && (
+                            <p className="text-red-200">
+                              {humanize.errorMessage ?? "这次降AI没有成功，但原来的最终版还在，你可以直接重试。"}
+                            </p>
+                          )}
+                        </div>
                       </div>
                       <div className="flex flex-col items-end shrink-0">
                         <Button
                           className="gap-2"
-                          disabled={isHumanizing}
+                          disabled={humanizeButtonBusy}
                           onClick={async () => {
                             if (!activeTask) return;
-                            setIsHumanizing(true);
-                            setNotice({ tone: "info", text: "正在处理降AI，请稍候..." });
+                            setIsSubmittingHumanize(true);
+                            setNotice({ tone: "info", text: "降AI任务已经提交，系统正在后台处理中。" });
                             try {
                               const result = await requestHumanize({ taskId: activeTask.task.id });
                               await syncWallet();
                               setActiveTask((prev) =>
                                 prev
-                                  ? {
-                                      ...prev,
-                                      downloads: {
-                                        finalDocxOutputId:
-                                          prev.downloads?.finalDocxOutputId ?? null,
-                                        referenceReportOutputId:
-                                          prev.downloads?.referenceReportOutputId ?? null,
+                                  ? mergeTaskHumanizeState(
+                                      prev,
+                                      {
+                                        status: result.humanizeStatus,
+                                        errorMessage: null,
+                                        requestedAt:
+                                          prev.humanize?.requestedAt ?? new Date().toISOString(),
+                                        completedAt:
+                                          result.humanizeStatus === "completed"
+                                            ? new Date().toISOString()
+                                            : null
+                                      },
+                                      {
                                         humanizedDocxOutputId:
                                           result.downloads.humanizedDocxOutputId
                                       }
-                                    }
+                                    )
                                   : prev
                               );
-                              setNotice({ tone: "success", text: result.message });
+                              setNotice({
+                                tone: result.humanizeStatus === "completed" ? "success" : "info",
+                                text: result.message
+                              });
                             } catch (err) {
                               setNotice({
                                 tone: "error",
                                 text: err instanceof Error ? err.message : "降AI处理失败，请稍后再试。"
                               });
                             } finally {
-                              setIsHumanizing(false);
+                              setIsSubmittingHumanize(false);
                             }
                           }}
                         >
                           <Zap className="w-4 h-4" />
-                          {isHumanizing ? "处理中..." : "一键降AI"}
+                          {isSubmittingHumanize
+                            ? "提交中..."
+                            : humanize.status === "retrying"
+                              ? "正在重做..."
+                              : isHumanizeRunning
+                                ? "正在处理中..."
+                                : humanize.status === "completed"
+                                  ? "重新生成降AI版本"
+                                  : "一键降AI"}
                         </Button>
                       </div>
                     </div>

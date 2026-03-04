@@ -1,12 +1,8 @@
-import { beforeEach, describe, expect, it } from "vitest";
-import { handleHumanizeRequest } from "../../app/api/tasks/[taskId]/humanize/route";
-import { resetPaymentState, seedUserWallet } from "../../src/lib/payments/repository";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
-  resetTaskDraftStore,
-  resetTaskStore,
-  saveTaskDraftVersion,
-  saveTaskSummary
-} from "../../src/lib/tasks/repository";
+  handleHumanizeStatusRequest,
+  handleHumanizeRequest
+} from "../../app/api/tasks/[taskId]/humanize/route";
 
 function makeContext(taskId: string) {
   return { params: Promise.resolve({ taskId }) };
@@ -14,41 +10,13 @@ function makeContext(taskId: string) {
 
 describe("humanize route", () => {
   beforeEach(() => {
-    process.env.NEXT_PUBLIC_SUPABASE_URL = "";
-    process.env.SUPABASE_SERVICE_ROLE_KEY = "";
-    process.env.STEALTHGPT_API_KEY = "";
-    resetPaymentState();
-    resetTaskStore();
-    resetTaskDraftStore();
+    process.env.NEXT_PUBLIC_SUPABASE_URL = "https://example.supabase.co";
+    process.env.SUPABASE_SERVICE_ROLE_KEY = "service-role-key";
+    process.env.UNDETECTABLE_API_KEY = "";
+    process.env.TRIGGER_SECRET_KEY = "";
   });
 
-  it("does not pretend the feature is available when the real provider key is missing", async () => {
-    saveTaskSummary({
-      id: "task-humanize-1",
-      userId: "user-1",
-      status: "deliverable_ready",
-      targetWordCount: 2200,
-      citationStyle: "APA 7",
-      latestDraftVersionId: "draft-1"
-    });
-    saveTaskDraftVersion({
-      id: "draft-1",
-      taskId: "task-humanize-1",
-      userId: "user-1",
-      versionNumber: 1,
-      title: "Essay Title",
-      bodyMarkdown: "This is the final draft body.",
-      bodyWordCount: 6,
-      referencesMarkdown: "Author, A. (2024). Source.",
-      isActive: true,
-      isCandidate: false
-    });
-    seedUserWallet("user-1", {
-      rechargeQuota: 3000,
-      subscriptionQuota: 0,
-      frozenQuota: 0
-    });
-
+  it("does not pretend the feature is available when the real Undetectable key is missing", async () => {
     const response = await handleHumanizeRequest(
       new Request("http://localhost/api/tasks/task-humanize-1/humanize", {
         method: "POST"
@@ -60,17 +28,18 @@ describe("humanize route", () => {
           email: "user-1@example.com",
           role: "user"
         })
-      }
+      } as never
     );
     const payload = await response.json();
 
     expect(response.status).toBe(503);
     expect(payload.ok).toBe(false);
-    expect(payload.message).toContain("未启用");
+    expect(payload.message).toContain("Undetectable");
   });
 
-  it("returns a completed humanized output instead of a fake queued success message", async () => {
-    process.env.STEALTHGPT_API_KEY = "stealth-live-key";
+  it("accepts the request, queues the background work, and returns 202 instead of fake instant success", async () => {
+    process.env.UNDETECTABLE_API_KEY = "undetectable-live-key";
+    process.env.TRIGGER_SECRET_KEY = "trigger-secret";
 
     const response = await handleHumanizeRequest(
       new Request("http://localhost/api/tasks/task-humanize-2/humanize", {
@@ -94,6 +63,11 @@ describe("humanize route", () => {
           draftMarkdown: "# Title\n\n## Body\n\nDraft paragraph.\n\n## References\n\nRef",
           bodyWordCount: 200
         }),
+        loadHumanizeStatus: async () => ({
+          status: "idle",
+          outputId: null,
+          errorMessage: null
+        }),
         chargeQuota: async () => ({
           amount: 250,
           reservation: {
@@ -104,16 +78,88 @@ describe("humanize route", () => {
             fromRecharge: 250
           }
         }),
-        runHumanize: async () => ({
-          outputId: "out-humanized-1"
-        })
-      } as any
+        saveQueuedState: async () => undefined,
+        enqueueHumanize: vi.fn(async () => undefined)
+      } as never
+    );
+    const payload = await response.json();
+
+    expect(response.status).toBe(202);
+    expect(payload.ok).toBe(true);
+    expect(payload.humanizeStatus).toBe("queued");
+    expect(payload.downloads.humanizedDocxOutputId).toBeNull();
+    expect(payload.message).toContain("处理中");
+  });
+
+  it("does not recharge or queue the task again when a humanize run is already processing", async () => {
+    process.env.UNDETECTABLE_API_KEY = "undetectable-live-key";
+    process.env.TRIGGER_SECRET_KEY = "trigger-secret";
+    const chargeQuota = vi.fn();
+    const enqueueHumanize = vi.fn();
+
+    const response = await handleHumanizeRequest(
+      new Request("http://localhost/api/tasks/task-humanize-3/humanize", {
+        method: "POST"
+      }),
+      makeContext("task-humanize-3"),
+      {
+        requireUser: async () => ({
+          id: "user-3",
+          email: "user-3@example.com",
+          role: "user"
+        }),
+        isPersistenceReady: () => true,
+        loadTaskContext: async () => ({
+          task: {
+            id: "task-humanize-3",
+            userId: "user-3",
+            status: "deliverable_ready",
+            citationStyle: "APA 7"
+          },
+          draftMarkdown: "# Title\n\n## Body\n\nDraft paragraph.\n\n## References\n\nRef",
+          bodyWordCount: 200
+        }),
+        loadHumanizeStatus: async () => ({
+          status: "processing",
+          outputId: null,
+          errorMessage: null
+        }),
+        chargeQuota,
+        enqueueHumanize
+      } as never
     );
     const payload = await response.json();
 
     expect(response.status).toBe(200);
     expect(payload.ok).toBe(true);
-    expect(payload.downloads.humanizedDocxOutputId).toBe("out-humanized-1");
-    expect(payload.message).not.toContain("已排队");
+    expect(payload.humanizeStatus).toBe("processing");
+    expect(chargeQuota).not.toHaveBeenCalled();
+    expect(enqueueHumanize).not.toHaveBeenCalled();
+  });
+
+  it("returns the current background progress through GET", async () => {
+    const response = await handleHumanizeStatusRequest(
+      new Request("http://localhost/api/tasks/task-humanize-4/humanize"),
+      makeContext("task-humanize-4"),
+      {
+        requireUser: async () => ({
+          id: "user-4",
+          email: "user-4@example.com",
+          role: "user"
+        }),
+        loadHumanizeStatusForUser: async () => ({
+          status: "completed",
+          outputId: "out-humanized-4",
+          errorMessage: null,
+          provider: "undetectable"
+        })
+      } as never
+    );
+    const payload = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(payload.ok).toBe(true);
+    expect(payload.humanizeStatus).toBe("completed");
+    expect(payload.downloads.humanizedDocxOutputId).toBe("out-humanized-4");
   });
 });

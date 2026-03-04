@@ -20,7 +20,7 @@ describe("health route", () => {
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY = "anon-key";
     process.env.SUPABASE_SERVICE_ROLE_KEY = "service-role-key";
     process.env.OPENAI_API_KEY = "openai-key";
-    process.env.STEALTHGPT_API_KEY = "stealth-key";
+    process.env.UNDETECTABLE_API_KEY = "undetectable-key";
     process.env.TRIGGER_SECRET_KEY = "trigger-key";
   });
 
@@ -40,6 +40,7 @@ describe("health route", () => {
         citationStyleNullable: true,
         analysisFieldsReady: true,
         taskFileFieldsReady: true,
+        humanizeFieldsReady: true,
         legacyPaymentTablesRemaining: ["pricing_plans"],
         legacyPaymentTypesRemaining: ["payment_provider"],
         legacyTaskStatusesRemaining: ["quota_frozen"]
@@ -76,6 +77,7 @@ describe("health route", () => {
         citationStyleNullable: true,
         analysisFieldsReady: true,
         taskFileFieldsReady: true,
+        humanizeFieldsReady: true,
         legacyPaymentTablesRemaining: [],
         legacyPaymentTypesRemaining: [],
         legacyTaskStatusesRemaining: []
@@ -93,8 +95,8 @@ describe("health route", () => {
     expect(payload.checks.DB_LEGACY_STRUCTURES.ok).toBe(true);
   });
 
-  it("reports unhealthy when the humanize provider key is missing, so the route cannot truthfully claim readiness", async () => {
-    process.env.STEALTHGPT_API_KEY = "";
+  it("reports unhealthy when the Undetectable key is missing, so the route cannot truthfully claim readiness", async () => {
+    process.env.UNDETECTABLE_API_KEY = "";
 
     fromMock.mockImplementation((table: string) => ({
       select: () => ({
@@ -111,6 +113,7 @@ describe("health route", () => {
         citationStyleNullable: true,
         analysisFieldsReady: true,
         taskFileFieldsReady: true,
+        humanizeFieldsReady: true,
         legacyPaymentTablesRemaining: [],
         legacyPaymentTypesRemaining: [],
         legacyTaskStatusesRemaining: []
@@ -124,8 +127,8 @@ describe("health route", () => {
 
     expect(response.status).toBe(503);
     expect(payload.status).toBe("unhealthy");
-    expect(payload.checks.STEALTHGPT_API_KEY.ok).toBe(false);
-    expect(payload.checks.STEALTHGPT_API_KEY.detail).toContain("不可用");
+    expect(payload.checks.UNDETECTABLE_API_KEY.ok).toBe(false);
+    expect(payload.checks.UNDETECTABLE_API_KEY.detail).toContain("不可用");
   });
 
   it("reports unhealthy when the background task secret is missing, so it cannot pretend the async pipeline is ready", async () => {
@@ -146,6 +149,7 @@ describe("health route", () => {
         citationStyleNullable: true,
         analysisFieldsReady: true,
         taskFileFieldsReady: true,
+        humanizeFieldsReady: true,
         legacyPaymentTablesRemaining: [],
         legacyPaymentTypesRemaining: [],
         legacyTaskStatusesRemaining: []

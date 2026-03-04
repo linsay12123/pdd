@@ -1,10 +1,12 @@
 import { createSupabaseAdminClient } from "@/src/lib/supabase/admin";
 import type {
+  TaskHumanizeStatus,
   TaskAnalysisSnapshot,
   TaskDraftVersion,
   TaskStatus,
   TaskSummary
 } from "@/src/types/tasks";
+import type { HumanizeProfile } from "@/src/lib/humanize/humanize-provider";
 
 type TaskRow = {
   id: string;
@@ -24,6 +26,14 @@ type TaskRow = {
   latest_outline_version_id: string | null;
   latest_draft_version_id: string | null;
   current_candidate_draft_id: string | null;
+  humanize_status: TaskHumanizeStatus | null;
+  humanize_provider: string | null;
+  humanize_profile_snapshot: unknown;
+  humanize_document_id: string | null;
+  humanize_retry_document_id: string | null;
+  humanize_error_message: string | null;
+  humanize_requested_at: string | null;
+  humanize_completed_at: string | null;
   quota_reservation?: TaskSummary["quotaReservation"];
 };
 
@@ -46,6 +56,7 @@ export async function getOwnedTaskFromSupabase(taskId: string, userId: string) {
     .from("writing_tasks")
     .select(
       "id,user_id,status,target_word_count,citation_style,special_requirements,topic,requested_chapter_count,outline_revision_count,primary_requirement_file_id,analysis_snapshot,analysis_status,analysis_model,analysis_completed_at,latest_outline_version_id,latest_draft_version_id,current_candidate_draft_id,quota_reservation"
+      + ",humanize_status,humanize_provider,humanize_profile_snapshot,humanize_document_id,humanize_retry_document_id,humanize_error_message,humanize_requested_at,humanize_completed_at"
     )
     .eq("id", taskId)
     .eq("user_id", userId)
@@ -55,7 +66,7 @@ export async function getOwnedTaskFromSupabase(taskId: string, userId: string) {
     throw new Error(`读取任务失败：${error.message}`);
   }
 
-  return data ? mapTaskRow(data as TaskRow) : null;
+  return data ? mapTaskRow(data as unknown as TaskRow) : null;
 }
 
 export async function getLatestOwnedDraftFromSupabase(taskId: string, userId: string) {
@@ -112,6 +123,7 @@ export async function setOwnedTaskStatusInSupabase(
     .eq("user_id", userId)
     .select(
       "id,user_id,status,target_word_count,citation_style,special_requirements,topic,requested_chapter_count,outline_revision_count,primary_requirement_file_id,analysis_snapshot,analysis_status,analysis_model,analysis_completed_at,latest_outline_version_id,latest_draft_version_id,current_candidate_draft_id,quota_reservation"
+      + ",humanize_status,humanize_provider,humanize_profile_snapshot,humanize_document_id,humanize_retry_document_id,humanize_error_message,humanize_requested_at,humanize_completed_at"
     )
     .maybeSingle();
 
@@ -123,7 +135,55 @@ export async function setOwnedTaskStatusInSupabase(
     throw new Error("TASK_NOT_FOUND");
   }
 
-  return mapTaskRow(data as TaskRow);
+  return mapTaskRow(data as unknown as TaskRow);
+}
+
+export async function updateOwnedTaskHumanizeStateInSupabase(
+  taskId: string,
+  userId: string,
+  input: {
+    status?: TaskHumanizeStatus;
+    provider?: string | null;
+    profileSnapshot?: HumanizeProfile | null;
+    documentId?: string | null;
+    retryDocumentId?: string | null;
+    errorMessage?: string | null;
+    requestedAt?: string | null;
+    completedAt?: string | null;
+  }
+) {
+  const client = createSupabaseAdminClient();
+  const patch: Record<string, unknown> = {};
+
+  if (input.status !== undefined) patch.humanize_status = input.status;
+  if (input.provider !== undefined) patch.humanize_provider = input.provider;
+  if (input.profileSnapshot !== undefined) patch.humanize_profile_snapshot = input.profileSnapshot;
+  if (input.documentId !== undefined) patch.humanize_document_id = input.documentId;
+  if (input.retryDocumentId !== undefined) patch.humanize_retry_document_id = input.retryDocumentId;
+  if (input.errorMessage !== undefined) patch.humanize_error_message = input.errorMessage;
+  if (input.requestedAt !== undefined) patch.humanize_requested_at = input.requestedAt;
+  if (input.completedAt !== undefined) patch.humanize_completed_at = input.completedAt;
+
+  const { data, error } = await client
+    .from("writing_tasks")
+    .update(patch)
+    .eq("id", taskId)
+    .eq("user_id", userId)
+    .select(
+      "id,user_id,status,target_word_count,citation_style,special_requirements,topic,requested_chapter_count,outline_revision_count,primary_requirement_file_id,analysis_snapshot,analysis_status,analysis_model,analysis_completed_at,latest_outline_version_id,latest_draft_version_id,current_candidate_draft_id,quota_reservation"
+      + ",humanize_status,humanize_provider,humanize_profile_snapshot,humanize_document_id,humanize_retry_document_id,humanize_error_message,humanize_requested_at,humanize_completed_at"
+    )
+    .maybeSingle();
+
+  if (error) {
+    throw new Error(`更新降AI状态失败：${error.message}`);
+  }
+
+  if (!data) {
+    throw new Error("TASK_NOT_FOUND");
+  }
+
+  return mapTaskRow(data as unknown as TaskRow);
 }
 
 export async function setOwnedTaskQuotaReservationInSupabase(
@@ -180,6 +240,25 @@ function mapTaskRow(row: TaskRow) {
       : null,
     currentCandidateDraftId: row.current_candidate_draft_id
       ? String(row.current_candidate_draft_id)
+      : null,
+    humanizeStatus: row.humanize_status ?? "idle",
+    humanizeProvider: row.humanize_provider ? String(row.humanize_provider) : null,
+    humanizeProfileSnapshot:
+      row.humanize_profile_snapshot && typeof row.humanize_profile_snapshot === "object"
+        ? (row.humanize_profile_snapshot as HumanizeProfile)
+        : null,
+    humanizeDocumentId: row.humanize_document_id ? String(row.humanize_document_id) : null,
+    humanizeRetryDocumentId: row.humanize_retry_document_id
+      ? String(row.humanize_retry_document_id)
+      : null,
+    humanizeErrorMessage: row.humanize_error_message
+      ? String(row.humanize_error_message)
+      : null,
+    humanizeRequestedAt: row.humanize_requested_at
+      ? String(row.humanize_requested_at)
+      : null,
+    humanizeCompletedAt: row.humanize_completed_at
+      ? String(row.humanize_completed_at)
       : null,
     quotaReservation: row.quota_reservation ?? undefined
   } satisfies TaskSummary;

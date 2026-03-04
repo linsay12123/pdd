@@ -13,6 +13,7 @@
   "dependencies": {
     "@supabase/ssr": "^0.8.0",
     "@supabase/supabase-js": "^2.98.0",
+    "@trigger.dev/sdk": "^4.4.2",
     "clsx": "^2.1.1",
     "jszip": "^3.10.1",
     "lucide-react": "^0.576.0",

@@ -11,12 +11,13 @@ describe("task status machine", () => {
     expect(canTransition("created", "awaiting_outline_approval")).toBe(true);
     expect(canTransition("awaiting_primary_file_confirmation", "awaiting_outline_approval")).toBe(true);
     expect(canTransition("awaiting_outline_approval", "drafting")).toBe(true);
-    expect(canTransition("deliverable_ready", "humanizing")).toBe(true);
+    expect(canTransition("deliverable_ready", "expired")).toBe(true);
   });
 
   it("rejects invalid transitions", () => {
     expect(canTransition("created", "drafting")).toBe(false);
     expect(canTransition("awaiting_outline_approval", "created")).toBe(false);
+    expect(canTransition("deliverable_ready", "failed")).toBe(false);
     expect(() => assertStatusTransition("created", "drafting")).toThrow(
       "Invalid task status transition"
     );

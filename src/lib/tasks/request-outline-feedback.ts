@@ -1,4 +1,5 @@
 import type { OutlineScaffold } from "@/src/lib/ai/prompts/generate-outline";
+import type { TaskWorkflowHumanizePayload } from "@/src/lib/tasks/request-task-file-upload";
 
 export type OutlineFeedbackPayload = {
   task: {
@@ -14,6 +15,7 @@ export type OutlineFeedbackPayload = {
     isApproved?: boolean;
   };
   outline: OutlineScaffold;
+  humanize?: TaskWorkflowHumanizePayload | null;
   message: string;
 };
 

@@ -2,7 +2,10 @@ import { NextResponse } from "next/server";
 import { requireCurrentSessionUser } from "@/src/lib/auth/current-user";
 import { shouldUseSupabasePersistence } from "@/src/lib/persistence/runtime-mode";
 import { reviseOutlineVersion } from "@/src/lib/tasks/save-outline-version";
-import { toSessionTaskPayload } from "@/src/lib/tasks/session-task";
+import {
+  toSessionTaskHumanizePayload,
+  toSessionTaskPayload
+} from "@/src/lib/tasks/session-task";
 import type { SessionUser } from "@/src/types/auth";
 
 type RouteContext = {
@@ -63,6 +66,7 @@ export async function handleOutlineFeedbackRequest(
       {
         ok: true,
         task: toSessionTaskPayload(result.task),
+        humanize: toSessionTaskHumanizePayload(result.task),
         outlineVersion: result.outlineVersion,
         outline: result.outlineVersion.outline,
         message: "系统已经根据你的意见生成了新一版大纲。"

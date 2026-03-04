@@ -16,7 +16,10 @@ import {
   TaskProcessingStageError
 } from "@/src/lib/tasks/process-approved-task";
 import { approveOutlineVersion } from "@/src/lib/tasks/save-outline-version";
-import { toSessionTaskPayload } from "@/src/lib/tasks/session-task";
+import {
+  toSessionTaskHumanizePayload,
+  toSessionTaskPayload
+} from "@/src/lib/tasks/session-task";
 import { resolveGenerationTaskQuotaCost } from "@/src/lib/tasks/task-cost";
 import type { SessionUser } from "@/src/types/auth";
 import type { FrozenQuotaReservation } from "@/src/types/billing";
@@ -119,6 +122,7 @@ export async function handleOutlineApprovalRequest(
     return NextResponse.json({
       ok: true,
       task: toSessionTaskPayload(processed.task),
+      humanize: toSessionTaskHumanizePayload(processed.task),
       outlineVersion: processed.outlineVersion,
       downloads: processed.downloads,
       finalWordCount: countBodyWords(processed.finalDraftMarkdown),

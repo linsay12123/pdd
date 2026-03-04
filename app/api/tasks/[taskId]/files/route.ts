@@ -15,7 +15,10 @@ import {
   saveTaskFiles,
   updateTaskFileOpenAIMetadata
 } from "@/src/lib/tasks/save-task-files";
-import { toSessionTaskPayload } from "@/src/lib/tasks/session-task";
+import {
+  toSessionTaskHumanizePayload,
+  toSessionTaskPayload
+} from "@/src/lib/tasks/session-task";
 import type { OutlineScaffold } from "@/src/lib/ai/prompts/generate-outline";
 import type { TaskAnalysisSnapshot } from "@/src/types/tasks";
 import type { SessionUser } from "@/src/types/auth";
@@ -210,6 +213,7 @@ export async function handleTaskFileUploadRequest(
         analysis: persistedResult.analysis,
         ruleCard: persistedResult.ruleCard,
         outline: persistedResult.outline,
+        humanize: toSessionTaskHumanizePayload(persistedResult.task),
         message: persistedResult.analysis?.needsUserConfirmation
           ? "模型已阅读全部材料，但它认为主任务文件还需要你确认。"
           : "文件已上传，模型已读完材料并生成第一版大纲。"

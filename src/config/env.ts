@@ -3,6 +3,6 @@ export const env = {
   NEXT_PUBLIC_SUPABASE_ANON_KEY: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? "",
   SUPABASE_SERVICE_ROLE_KEY: process.env.SUPABASE_SERVICE_ROLE_KEY ?? "",
   OPENAI_API_KEY: process.env.OPENAI_API_KEY ?? "",
-  STEALTHGPT_API_KEY: process.env.STEALTHGPT_API_KEY ?? "",
+  UNDETECTABLE_API_KEY: process.env.UNDETECTABLE_API_KEY ?? "",
   TRIGGER_SECRET_KEY: process.env.TRIGGER_SECRET_KEY ?? ""
 } as const;

@@ -7,7 +7,7 @@ describe("env", () => {
     expect(env.NEXT_PUBLIC_SUPABASE_ANON_KEY).toBeTypeOf("string");
     expect(env.SUPABASE_SERVICE_ROLE_KEY).toBeTypeOf("string");
     expect(env.OPENAI_API_KEY).toBeTypeOf("string");
-    expect(env.STEALTHGPT_API_KEY).toBeTypeOf("string");
+    expect(env.UNDETECTABLE_API_KEY).toBeTypeOf("string");
     expect(env.TRIGGER_SECRET_KEY).toBeTypeOf("string");
   });
 });

@@ -7,10 +7,16 @@ export type TaskStatus =
   | "verifying_references"
   | "exporting"
   | "deliverable_ready"
-  | "humanizing"
-  | "humanized_ready"
   | "failed"
   | "expired";
+
+export type TaskHumanizeStatus =
+  | "idle"
+  | "queued"
+  | "processing"
+  | "retrying"
+  | "completed"
+  | "failed";
 
 export type TaskAnalysisSnapshot = {
   chosenTaskFileId: string | null;
@@ -48,6 +54,14 @@ export type TaskSummary = {
   latestOutlineVersionId?: string | null;
   latestDraftVersionId?: string | null;
   currentCandidateDraftId?: string | null;
+  humanizeStatus?: TaskHumanizeStatus;
+  humanizeProvider?: string | null;
+  humanizeProfileSnapshot?: import("@/src/lib/humanize/humanize-provider").HumanizeProfile | null;
+  humanizeDocumentId?: string | null;
+  humanizeRetryDocumentId?: string | null;
+  humanizeErrorMessage?: string | null;
+  humanizeRequestedAt?: string | null;
+  humanizeCompletedAt?: string | null;
   quotaReservation?: import("@/src/types/billing").FrozenQuotaReservation;
 };
 

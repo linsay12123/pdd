@@ -12,9 +12,7 @@ export const allowedTransitions: Record<TaskStatus, TaskStatus[]> = {
   adjusting_word_count: ["verifying_references", "failed"],
   verifying_references: ["exporting", "failed"],
   exporting: ["deliverable_ready", "failed"],
-  deliverable_ready: ["humanizing", "expired"],
-  humanizing: ["humanized_ready", "failed"],
-  humanized_ready: ["expired"],
+  deliverable_ready: ["expired"],
   failed: [],
   expired: []
 };

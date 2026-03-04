@@ -1,3 +1,5 @@
+import type { TaskWorkflowHumanizePayload } from "@/src/lib/tasks/request-task-file-upload";
+
 export type OutlineApprovalPayload = {
   task: {
     id: string;
@@ -14,6 +16,7 @@ export type OutlineApprovalPayload = {
     finalDocxOutputId: string | null;
     referenceReportOutputId: string | null;
   };
+  humanize?: TaskWorkflowHumanizePayload | null;
   finalWordCount: number;
   message: string;
 };

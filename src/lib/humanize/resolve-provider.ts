@@ -1,7 +1,6 @@
 import { env } from "@/src/config/env";
 import type { HumanizeProvider } from "./humanize-provider";
-import { StealthGptProvider } from "./stealthgpt-provider";
-import { PlaceholderHumanizeProvider } from "./placeholder-provider";
+import { UndetectableProvider } from "./undetectable-provider";
 
 export function resolveHumanizeProvider(
   overrideProvider?: HumanizeProvider
@@ -10,9 +9,9 @@ export function resolveHumanizeProvider(
     return overrideProvider;
   }
 
-  if (env.STEALTHGPT_API_KEY) {
-    return new StealthGptProvider({ apiKey: env.STEALTHGPT_API_KEY });
+  if (!env.UNDETECTABLE_API_KEY) {
+    throw new Error("UNDETECTABLE_API_KEY_MISSING");
   }
 
-  return new PlaceholderHumanizeProvider();
+  return new UndetectableProvider({ apiKey: env.UNDETECTABLE_API_KEY });
 }

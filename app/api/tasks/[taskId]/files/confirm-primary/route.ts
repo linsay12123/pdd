@@ -13,7 +13,10 @@ import {
   persistTaskModelAnalysis
 } from "@/src/lib/tasks/save-task-files";
 import { shouldUseSupabasePersistence } from "@/src/lib/persistence/runtime-mode";
-import { toSessionTaskPayload } from "@/src/lib/tasks/session-task";
+import {
+  toSessionTaskHumanizePayload,
+  toSessionTaskPayload
+} from "@/src/lib/tasks/session-task";
 import type { TaskAnalysisSnapshot } from "@/src/types/tasks";
 import type { SessionUser } from "@/src/types/auth";
 
@@ -119,6 +122,7 @@ export async function handleConfirmPrimaryFileRequest(
       analysis: result.analysis,
       ruleCard: result.ruleCard,
       outline: result.outline,
+      humanize: toSessionTaskHumanizePayload(result.task),
       primaryRequirementFileId: fileId,
       message: "主任务文件已确认，模型已重新生成第一版大纲。"
     });

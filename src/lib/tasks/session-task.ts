@@ -1,4 +1,5 @@
 import type { TaskSummary } from "@/src/types/tasks";
+import type { TaskWorkflowHumanizePayload } from "@/src/lib/tasks/request-task-file-upload";
 
 export type SessionTaskPayload = {
   id: string;
@@ -15,5 +16,17 @@ export function toSessionTaskPayload(task: TaskSummary): SessionTaskPayload {
     targetWordCount: task.targetWordCount,
     citationStyle: task.citationStyle,
     specialRequirements: task.specialRequirements ?? ""
+  };
+}
+
+export function toSessionTaskHumanizePayload(
+  task: TaskSummary
+): TaskWorkflowHumanizePayload {
+  return {
+    status: task.humanizeStatus ?? "idle",
+    provider: task.humanizeProvider ?? null,
+    requestedAt: task.humanizeRequestedAt ?? null,
+    completedAt: task.humanizeCompletedAt ?? null,
+    errorMessage: task.humanizeErrorMessage ?? null
   };
 }
