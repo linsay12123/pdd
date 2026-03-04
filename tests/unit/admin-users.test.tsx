@@ -94,6 +94,8 @@ describe("admin users", () => {
     expect(html).toContain("演示用户");
     expect(html).toContain("8,800");
     expect(html).toContain("管理员");
+    expect(html).not.toContain("下一步接成真");
+    expect(html).not.toContain("订阅积分");
     expect(html).not.toContain("client-a@example.com");
   });
 });

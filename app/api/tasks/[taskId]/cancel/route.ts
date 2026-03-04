@@ -1,16 +1,12 @@
 import { NextResponse } from "next/server";
 import { requireCurrentSessionUser } from "@/src/lib/auth/current-user";
 import { releaseQuota } from "@/src/lib/billing/release-quota";
-import {
-  appendPaymentLedgerEntry,
-  getUserWallet,
-  setUserWallet
-} from "@/src/lib/payments/repository";
-import {
-  getTaskSummary,
-  updateTaskStatus
-} from "@/src/lib/tasks/repository";
 import { shouldUseSupabasePersistence } from "@/src/lib/persistence/runtime-mode";
+import {
+  appendPaymentLedgerEntryToSupabase,
+  getUserWalletFromSupabase,
+  setUserWalletInSupabase
+} from "@/src/lib/payments/supabase-wallet";
 import { createSupabaseAdminClient } from "@/src/lib/supabase/admin";
 import type { SessionUser } from "@/src/types/auth";
 import type { FrozenQuotaReservation } from "@/src/types/billing";
@@ -23,8 +19,23 @@ type RouteContext = {
   }>;
 };
 
+type CancelTaskContext = {
+  taskId: string;
+  userId: string;
+  status: string;
+  quotaReservation: FrozenQuotaReservation | null;
+};
+
 type CancelRouteDependencies = {
   requireUser?: () => Promise<SessionUser>;
+  isPersistenceReady?: () => boolean;
+  loadTask?: (taskId: string, userId: string) => Promise<CancelTaskContext | null>;
+  releaseQuotaReservation?: (
+    taskId: string,
+    userId: string,
+    reservation: FrozenQuotaReservation
+  ) => Promise<void>;
+  markTaskFailed?: (taskId: string, userId: string) => Promise<void>;
 };
 
 const CANCELLABLE_STATUSES = new Set([
@@ -50,186 +61,138 @@ export async function handleCancelRequest(
     );
   }
 
-  return shouldUseSupabasePersistence()
-    ? cancelWithSupabase(taskId, user)
-    : cancelLocally(taskId, user);
-}
-
-function cancelLocally(taskId: string, user: SessionUser) {
-  const task = getTaskSummary(taskId);
-
-  if (!task || task.userId !== user.id) {
+  if (!(dependencies.isPersistenceReady ?? shouldUseSupabasePersistence)()) {
     return NextResponse.json(
-      { ok: false, taskId, message: "未找到这个任务。" },
-      { status: 404 }
+      { ok: false, taskId, message: "当前环境还没接入真实数据库，不能继续走正式取消流程。" },
+      { status: 503 }
     );
   }
 
-  if (!CANCELLABLE_STATUSES.has(task.status)) {
-    return NextResponse.json(
-      { ok: false, taskId, message: "当前任务状态不允许取消。" },
-      { status: 400 }
-    );
-  }
+  try {
+    const task = await (dependencies.loadTask ?? loadTaskWithSupabase)(taskId, user.id);
 
-  const reservation = task.quotaReservation;
+    if (!task) {
+      return NextResponse.json(
+        { ok: false, taskId, message: "未找到这个任务。" },
+        { status: 404 }
+      );
+    }
 
-  // If quota was frozen (post-outline-approval), release it
-  if (reservation && reservation.totalAmount > 0) {
-    const wallet = getUserWallet(user.id);
-    const released = releaseQuota({ wallet, reservation });
-    setUserWallet(user.id, released.wallet);
-    appendPaymentLedgerEntry(user.id, released.entry);
-    updateTaskStatus(taskId, "failed");
+    if (!CANCELLABLE_STATUSES.has(task.status)) {
+      return NextResponse.json(
+        { ok: false, taskId, message: "当前任务状态不允许取消。" },
+        { status: 400 }
+      );
+    }
+
+    if (task.quotaReservation && task.quotaReservation.totalAmount > 0) {
+      await (dependencies.releaseQuotaReservation ?? releaseQuotaReservationWithSupabase)(
+        taskId,
+        user.id,
+        task.quotaReservation
+      );
+    }
+
+    await (dependencies.markTaskFailed ?? markTaskFailedWithSupabase)(taskId, user.id);
 
     return NextResponse.json(
       {
         ok: true,
         taskId,
-        releasedQuota: reservation.totalAmount,
-        message: "任务已取消，积分已返还。"
+        releasedQuota: task.quotaReservation?.totalAmount ?? 0,
+        message: task.quotaReservation?.totalAmount
+          ? "任务已取消，积分已返还。"
+          : "任务已取消。"
       },
       { status: 200 }
     );
-  }
+  } catch (error) {
+    if (error instanceof Error && error.message === "REAL_PERSISTENCE_REQUIRED") {
+      return NextResponse.json(
+        { ok: false, taskId, message: "当前环境还没接入真实数据库，不能继续走正式取消流程。" },
+        { status: 503 }
+      );
+    }
 
-  // No quota was frozen (pre-outline-approval), just mark as failed
-  updateTaskStatus(taskId, "failed");
-
-  return NextResponse.json(
-    {
-      ok: true,
-      taskId,
-      releasedQuota: 0,
-      message: "任务已取消。"
-    },
-    { status: 200 }
-  );
-}
-
-async function cancelWithSupabase(taskId: string, user: SessionUser) {
-  const client = createSupabaseAdminClient();
-
-  // 1. Load task with quota_reservation
-  const { data: taskRow, error: taskError } = await client
-    .from("writing_tasks")
-    .select("id,status,quota_reservation")
-    .eq("id", taskId)
-    .eq("user_id", user.id)
-    .maybeSingle();
-
-  if (taskError) {
-    console.error("[task-cancel] 查询任务失败:", taskError.message);
     return NextResponse.json(
-      { ok: false, taskId, message: `查询任务失败：${taskError.message}` },
+      {
+        ok: false,
+        taskId,
+        message: error instanceof Error ? error.message : "取消任务失败"
+      },
       { status: 500 }
     );
   }
+}
 
-  if (!taskRow) {
-    return NextResponse.json(
-      { ok: false, taskId, message: "未找到这个任务。" },
-      { status: 404 }
-    );
+async function loadTaskWithSupabase(taskId: string, userId: string) {
+  if (!shouldUseSupabasePersistence()) {
+    throw new Error("REAL_PERSISTENCE_REQUIRED");
   }
 
-  if (!CANCELLABLE_STATUSES.has(taskRow.status)) {
-    return NextResponse.json(
-      { ok: false, taskId, message: "当前任务状态不允许取消。" },
-      { status: 400 }
-    );
-  }
-
-  const reservation = taskRow.quota_reservation as FrozenQuotaReservation | null;
-
-  // If there's frozen quota to release, do so
-  if (reservation && reservation.totalAmount > 0) {
-    // 2. Load wallet
-    const { data: walletRow, error: walletError } = await client
-      .from("quota_wallets")
-      .select("recharge_quota,subscription_quota,frozen_quota")
-      .eq("user_id", user.id)
-      .maybeSingle();
-
-    if (walletError) {
-      console.error("[task-cancel] 查询钱包失败:", walletError.message);
-      return NextResponse.json(
-        { ok: false, taskId, message: `查询钱包失败：${walletError.message}` },
-        { status: 500 }
-      );
-    }
-
-    const wallet = {
-      rechargeQuota: Number(walletRow?.recharge_quota ?? 0),
-      subscriptionQuota: Number(walletRow?.subscription_quota ?? 0),
-      frozenQuota: Number(walletRow?.frozen_quota ?? 0)
-    };
-
-    // 3. Compute release
-    const released = releaseQuota({ wallet, reservation });
-
-    // 4. Update wallet
-    const { error: walletUpdateError } = await client
-      .from("quota_wallets")
-      .update({
-        recharge_quota: released.wallet.rechargeQuota,
-        subscription_quota: released.wallet.subscriptionQuota,
-        frozen_quota: released.wallet.frozenQuota
-      })
-      .eq("user_id", user.id);
-
-    if (walletUpdateError) {
-      console.error("[task-cancel] 更新钱包失败:", walletUpdateError.message);
-      return NextResponse.json(
-        { ok: false, taskId, message: `释放积分失败：${walletUpdateError.message}` },
-        { status: 500 }
-      );
-    }
-
-    // 5. Write ledger entry
-    const { error: ledgerError } = await client
-      .from("quota_ledger_entries")
-      .insert({
-        user_id: user.id,
-        task_id: taskId,
-        entry_kind: released.entry.kind,
-        amount: released.entry.amount,
-        balance_recharge_after: released.wallet.rechargeQuota,
-        balance_subscription_after: released.wallet.subscriptionQuota,
-        balance_frozen_after: released.wallet.frozenQuota,
-        unique_event_key: released.entry.ledgerKey,
-        metadata: {
-          note: released.entry.note
-        }
-      });
-
-    if (ledgerError) {
-      console.error("[task-cancel] 写入流水失败:", ledgerError.message);
-    }
-  }
-
-  // 6. Mark task as failed
-  const { error: statusError } = await client
+  const client = createSupabaseAdminClient();
+  const { data, error } = await client
     .from("writing_tasks")
-    .update({ status: "failed" })
+    .select("id,user_id,status,quota_reservation")
     .eq("id", taskId)
-    .eq("user_id", user.id);
+    .eq("user_id", userId)
+    .maybeSingle();
 
-  if (statusError) {
-    console.error("[task-cancel] 更新任务状态失败:", statusError.message);
+  if (error) {
+    throw new Error(`查询任务失败：${error.message}`);
   }
 
-  return NextResponse.json(
-    {
-      ok: true,
-      taskId,
-      releasedQuota: reservation?.totalAmount ?? 0,
-      message: reservation?.totalAmount
-        ? "任务已取消，积分已返还。"
-        : "任务已取消。"
-    },
-    { status: 200 }
-  );
+  if (!data) {
+    return null;
+  }
+
+  return {
+    taskId: String(data.id),
+    userId: String(data.user_id),
+    status: String(data.status),
+    quotaReservation: (data.quota_reservation as FrozenQuotaReservation | null) ?? null
+  } satisfies CancelTaskContext;
+}
+
+async function releaseQuotaReservationWithSupabase(
+  taskId: string,
+  userId: string,
+  reservation: FrozenQuotaReservation
+) {
+  if (!shouldUseSupabasePersistence()) {
+    throw new Error("REAL_PERSISTENCE_REQUIRED");
+  }
+
+  const wallet = await getUserWalletFromSupabase(userId);
+  const released = releaseQuota({ wallet, reservation });
+
+  await setUserWalletInSupabase(userId, released.wallet);
+  await appendPaymentLedgerEntryToSupabase({
+    userId,
+    taskId,
+    entry: released.entry,
+    walletAfter: released.wallet
+  });
+}
+
+async function markTaskFailedWithSupabase(taskId: string, userId: string) {
+  if (!shouldUseSupabasePersistence()) {
+    throw new Error("REAL_PERSISTENCE_REQUIRED");
+  }
+
+  const client = createSupabaseAdminClient();
+  const { error } = await client
+    .from("writing_tasks")
+    .update({
+      status: "failed",
+      quota_reservation: null
+    })
+    .eq("id", taskId)
+    .eq("user_id", userId);
+
+  if (error) {
+    throw new Error(`更新任务状态失败：${error.message}`);
+  }
 }
 
 export async function POST(request: Request, context: RouteContext) {

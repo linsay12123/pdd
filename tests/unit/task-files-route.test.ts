@@ -119,6 +119,7 @@ describe("task file routes", () => {
         taskId: "task-1"
       },
       {
+        isPersistenceReady: () => true,
         requireUser: async () => makeUser(),
         analyzeTask: async ({ files }) => ({
           analysis: makeAnalysis({
@@ -192,6 +193,7 @@ describe("task file routes", () => {
         taskId: "task-2"
       },
       {
+        isPersistenceReady: () => true,
         requireUser: async () => makeUser(),
         analyzeTask: async ({ files }) => ({
           analysis: makeAnalysis({
@@ -262,6 +264,7 @@ describe("task file routes", () => {
         taskId: "task-3"
       },
       {
+        isPersistenceReady: () => true,
         requireUser: async () => makeUser(),
         analyzeTask: async ({ files }) => ({
           analysis: makeAnalysis({
@@ -300,6 +303,7 @@ describe("task file routes", () => {
         taskId: "task-3"
       },
       {
+        isPersistenceReady: () => true,
         requireUser: async () => makeUser(),
         analyzeTask: async () => ({
           analysis: makeAnalysis({
@@ -362,6 +366,7 @@ describe("task file routes", () => {
         taskId: "task-4"
       },
       {
+        isPersistenceReady: () => true,
         requireUser: async () => makeUser(),
         analyzeTask: async ({ files }) => ({
           analysis: makeAnalysis({
@@ -410,6 +415,7 @@ describe("task file routes", () => {
         taskId: "task-5"
       },
       {
+        isPersistenceReady: () => true,
         requireUser: async () => makeUser(),
         analyzeTask: async ({ files }) => ({
           analysis: makeAnalysis({
@@ -439,5 +445,33 @@ describe("task file routes", () => {
 
     expect(response.status).toBe(500);
     expect(String(payload.message)).toContain("大纲");
+  });
+
+  it("returns 503 when the official task persistence pipeline is unavailable", async () => {
+    const formData = new FormData();
+    formData.append(
+      "files",
+      new File(["Assignment brief. Write 2750 words. Use Harvard."], "assignment.txt", {
+        type: "text/plain"
+      })
+    );
+
+    const response = await handleTaskFileUploadRequest(
+      new Request("http://localhost/api/tasks/task-6/files", {
+        method: "POST",
+        body: formData
+      }),
+      {
+        taskId: "task-6"
+      },
+      {
+        isPersistenceReady: () => false,
+        requireUser: async () => makeUser()
+      }
+    );
+    const payload = await response.json();
+
+    expect(response.status).toBe(503);
+    expect(String(payload.message)).toContain("正式任务数据库");
   });
 });

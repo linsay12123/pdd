@@ -112,6 +112,7 @@ describe("admin files", () => {
     expect(html).toContain("文件管理");
     expect(html).toContain("引用核验 PDF");
     expect(html).toContain("已过期");
+    expect(html).not.toContain("下一步接成真");
     expect(html).not.toContain("file_001");
   });
 });

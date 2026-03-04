@@ -86,6 +86,16 @@ export async function handleTaskCreateRequest(
       );
     }
 
+    if (error instanceof Error && error.message === "REAL_PERSISTENCE_REQUIRED") {
+      return NextResponse.json(
+        {
+          ok: false,
+          message: "系统现在还没连上正式数据库，所以这个任务还不能真的创建。先把线上数据库配置好，再试一次。"
+        },
+        { status: 503 }
+      );
+    }
+
     const errorMessage = error instanceof Error ? error.message : String(error);
     console.error("[task-create] 创建任务失败:", errorMessage, error);
     return NextResponse.json(

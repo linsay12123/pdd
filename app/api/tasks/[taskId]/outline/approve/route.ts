@@ -4,22 +4,17 @@ import { buildSafetyIdentifier } from "@/src/lib/ai/safety-identifier";
 import { chargeQuota } from "@/src/lib/billing/charge-quota";
 import { refundChargedQuota } from "@/src/lib/billing/refund-charged-quota";
 import { countBodyWords } from "@/src/lib/drafts/word-count";
-import {
-  appendPaymentLedgerEntry,
-  getUserWallet,
-  setUserWallet
-} from "@/src/lib/payments/repository";
 import { shouldUseSupabasePersistence } from "@/src/lib/persistence/runtime-mode";
+import {
+  appendPaymentLedgerEntryToSupabase,
+  getUserWalletFromSupabase,
+  setUserWalletInSupabase
+} from "@/src/lib/payments/supabase-wallet";
 import { createSupabaseAdminClient } from "@/src/lib/supabase/admin";
 import {
   processApprovedTask,
   TaskProcessingStageError
 } from "@/src/lib/tasks/process-approved-task";
-import {
-  getTaskSummary,
-  patchTaskSummary,
-  updateTaskStatus
-} from "@/src/lib/tasks/repository";
 import { approveOutlineVersion } from "@/src/lib/tasks/save-outline-version";
 import { toSessionTaskPayload } from "@/src/lib/tasks/session-task";
 import { resolveGenerationTaskQuotaCost } from "@/src/lib/tasks/task-cost";
@@ -40,6 +35,18 @@ type OutlineApproveBody = {
 
 type OutlineApproveDependencies = {
   requireUser?: () => Promise<SessionUser>;
+  isPersistenceReady?: () => boolean;
+  approveOutline?: typeof approveOutlineVersion;
+  chargeQuotaForTask?: (
+    taskId: string,
+    userId: string
+  ) => Promise<FrozenQuotaReservation>;
+  refundQuotaForTask?: (
+    taskId: string,
+    userId: string,
+    reservation: FrozenQuotaReservation
+  ) => Promise<void>;
+  markTaskFailed?: (taskId: string, userId: string) => Promise<void>;
   processTask?: typeof processApprovedTask;
 };
 
@@ -55,15 +62,28 @@ export async function handleOutlineApprovalRequest(
   try {
     const user = await (dependencies.requireUser ?? requireCurrentSessionUser)();
 
+    if (!(dependencies.isPersistenceReady ?? shouldUseSupabasePersistence)()) {
+      return NextResponse.json(
+        {
+          ok: false,
+          message: "当前环境还没接入真实数据库，不能继续走正式写作流程。"
+        },
+        { status: 503 }
+      );
+    }
+
     // 1. Approve the outline
-    await approveOutlineVersion({
+    await (dependencies.approveOutline ?? approveOutlineVersion)({
       taskId: params.taskId,
       userId: user.id,
       outlineVersionId: body?.outlineVersionId?.trim() || undefined
     });
 
     // 2. Charge quota NOW (right before writing starts)
-    const reservation = await chargeQuotaForTask(params.taskId, user.id);
+    const reservation = await (dependencies.chargeQuotaForTask ?? chargeQuotaForTask)(
+      params.taskId,
+      user.id
+    );
 
     // 3. Process the task (writing pipeline) — refund quota only for early-stage failures
     let processed;
@@ -85,8 +105,12 @@ export async function handleOutlineApprovalRequest(
       );
 
       if (shouldRefund) {
-        await refundQuotaForTask(params.taskId, user.id, reservation);
-        await markTaskFailed(params.taskId, user.id);
+        await (dependencies.refundQuotaForTask ?? refundQuotaForTask)(
+          params.taskId,
+          user.id,
+          reservation
+        );
+        await (dependencies.markTaskFailed ?? markTaskFailed)(params.taskId, user.id);
       }
 
       throw writingError;
@@ -134,6 +158,16 @@ export async function handleOutlineApprovalRequest(
       );
     }
 
+    if (error instanceof Error && error.message === "REAL_PERSISTENCE_REQUIRED") {
+      return NextResponse.json(
+        {
+          ok: false,
+          message: "当前环境还没接入真实数据库，不能继续走正式写作流程。"
+        },
+        { status: 503 }
+      );
+    }
+
     return NextResponse.json(
       {
         ok: false,
@@ -153,48 +187,10 @@ async function chargeQuotaForTask(
   userId: string
 ): Promise<FrozenQuotaReservation> {
   if (!shouldUseSupabasePersistence()) {
-    return chargeQuotaForTaskLocally(taskId, userId);
+    throw new Error("REAL_PERSISTENCE_REQUIRED");
   }
 
   return chargeQuotaForTaskWithSupabase(taskId, userId);
-}
-
-function chargeQuotaForTaskLocally(
-  taskId: string,
-  userId: string
-): FrozenQuotaReservation {
-  const task = getTaskSummary(taskId);
-
-  if (!task || task.userId !== userId) {
-    throw new Error("TASK_NOT_FOUND");
-  }
-
-  if (typeof task.targetWordCount !== "number") {
-    throw new Error("TASK_REQUIREMENTS_NOT_READY");
-  }
-
-  const quotaCost = resolveGenerationTaskQuotaCost(task.targetWordCount);
-  const wallet = getUserWallet(userId);
-  let charged;
-
-  try {
-    charged = chargeQuota({
-      wallet,
-      amount: quotaCost,
-      taskId,
-      chargePath: "generation"
-    });
-  } catch {
-    throw new Error("INSUFFICIENT_QUOTA");
-  }
-
-  setUserWallet(userId, charged.wallet);
-  appendPaymentLedgerEntry(userId, charged.entry);
-  patchTaskSummary(taskId, {
-    quotaReservation: charged.reservation
-  });
-
-  return charged.reservation;
 }
 
 async function chargeQuotaForTaskWithSupabase(
@@ -221,22 +217,7 @@ async function chargeQuotaForTaskWithSupabase(
 
   const quotaCost = resolveGenerationTaskQuotaCost(Number(taskRow.target_word_count));
 
-  // Read wallet
-  const { data: walletRow, error: walletError } = await client
-    .from("quota_wallets")
-    .select("recharge_quota,subscription_quota,frozen_quota")
-    .eq("user_id", userId)
-    .maybeSingle();
-
-  if (walletError) {
-    throw new Error(`读取积分余额失败：${walletError.message}`);
-  }
-
-  const wallet = {
-    rechargeQuota: Number(walletRow?.recharge_quota ?? 0),
-    subscriptionQuota: Number(walletRow?.subscription_quota ?? 0),
-    frozenQuota: Number(walletRow?.frozen_quota ?? 0)
-  };
+  const wallet = await getUserWalletFromSupabase(userId);
 
   let charged;
 
@@ -252,48 +233,15 @@ async function chargeQuotaForTaskWithSupabase(
   }
 
   // Update wallet
-  const { error: walletUpdateError } = await client
-    .from("quota_wallets")
-    .update({
-      recharge_quota: charged.wallet.rechargeQuota,
-      subscription_quota: charged.wallet.subscriptionQuota,
-      frozen_quota: charged.wallet.frozenQuota
-    })
-    .eq("user_id", userId);
-
-  if (walletUpdateError) {
-    throw new Error(`扣除积分失败：${walletUpdateError.message}`);
-  }
+  await setUserWalletInSupabase(userId, charged.wallet);
 
   // Write ledger entry
-  const { error: ledgerError } = await client
-    .from("quota_ledger_entries")
-    .insert({
-      user_id: userId,
-      task_id: taskId,
-      entry_kind: charged.entry.kind,
-      amount: charged.entry.amount,
-      balance_recharge_after: charged.wallet.rechargeQuota,
-      balance_subscription_after: charged.wallet.subscriptionQuota,
-      balance_frozen_after: charged.wallet.frozenQuota,
-      unique_event_key: charged.entry.ledgerKey,
-      metadata: {
-        note: charged.entry.note
-      }
-    });
-
-  if (ledgerError) {
-    // Rollback wallet update
-    await client
-      .from("quota_wallets")
-      .update({
-        recharge_quota: wallet.rechargeQuota,
-        subscription_quota: wallet.subscriptionQuota,
-        frozen_quota: wallet.frozenQuota
-      })
-      .eq("user_id", userId);
-    throw new Error(`写入积分流水失败：${ledgerError.message}`);
-  }
+  await appendPaymentLedgerEntryToSupabase({
+    userId,
+    taskId,
+    entry: charged.entry,
+    walletAfter: charged.wallet
+  });
 
   // Store reservation on task for later refund if needed
   await client
@@ -315,52 +263,20 @@ async function refundQuotaForTask(
 ) {
   try {
     if (!shouldUseSupabasePersistence()) {
-      const wallet = getUserWallet(userId);
-      const refunded = refundChargedQuota({ wallet, reservation });
-      setUserWallet(userId, refunded.wallet);
-      appendPaymentLedgerEntry(userId, refunded.entry);
-      patchTaskSummary(taskId, {
-        quotaReservation: undefined
-      });
-      return;
+      throw new Error("REAL_PERSISTENCE_REQUIRED");
     }
 
     const client = createSupabaseAdminClient();
-    const { data: walletRow } = await client
-      .from("quota_wallets")
-      .select("recharge_quota,subscription_quota,frozen_quota")
-      .eq("user_id", userId)
-      .maybeSingle();
-
-    const wallet = {
-      rechargeQuota: Number(walletRow?.recharge_quota ?? 0),
-      subscriptionQuota: Number(walletRow?.subscription_quota ?? 0),
-      frozenQuota: Number(walletRow?.frozen_quota ?? 0)
-    };
+    const wallet = await getUserWalletFromSupabase(userId);
 
     const refunded = refundChargedQuota({ wallet, reservation });
 
-    await client
-      .from("quota_wallets")
-      .update({
-        recharge_quota: refunded.wallet.rechargeQuota,
-        subscription_quota: refunded.wallet.subscriptionQuota,
-        frozen_quota: refunded.wallet.frozenQuota
-      })
-      .eq("user_id", userId);
-
-    await client.from("quota_ledger_entries").insert({
-      user_id: userId,
-      task_id: taskId,
-      entry_kind: refunded.entry.kind,
-      amount: refunded.entry.amount,
-      balance_recharge_after: refunded.wallet.rechargeQuota,
-      balance_subscription_after: refunded.wallet.subscriptionQuota,
-      balance_frozen_after: refunded.wallet.frozenQuota,
-      unique_event_key: refunded.entry.ledgerKey,
-      metadata: {
-        note: refunded.entry.note
-      }
+    await setUserWalletInSupabase(userId, refunded.wallet);
+    await appendPaymentLedgerEntryToSupabase({
+      userId,
+      taskId,
+      entry: refunded.entry,
+      walletAfter: refunded.wallet
     });
 
     await client
@@ -378,11 +294,7 @@ async function refundQuotaForTask(
 
 async function markTaskFailed(taskId: string, userId: string) {
   if (!shouldUseSupabasePersistence()) {
-    updateTaskStatus(taskId, "failed");
-    patchTaskSummary(taskId, {
-      quotaReservation: undefined
-    });
-    return;
+    throw new Error("REAL_PERSISTENCE_REQUIRED");
   }
 
   const client = createSupabaseAdminClient();

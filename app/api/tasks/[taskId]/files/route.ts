@@ -8,6 +8,7 @@ import {
 import { extractTextFromImageWithVision } from "@/src/lib/ai/services/extract-text-from-image";
 import { requireCurrentSessionUser } from "@/src/lib/auth/current-user";
 import { extractTextFromUpload } from "@/src/lib/files/extract-text";
+import { shouldUseSupabasePersistence } from "@/src/lib/persistence/runtime-mode";
 import {
   getOwnedTaskSummary,
   persistTaskModelAnalysis,
@@ -29,6 +30,7 @@ type RouteContext = {
 
 type TaskFileUploadRouteDependencies = {
   requireUser?: () => Promise<SessionUser>;
+  isPersistenceReady?: () => boolean;
   analyzeTask?: (input: {
     taskId: string;
     userId: string;
@@ -49,6 +51,16 @@ export async function handleTaskFileUploadRequest(
   dependencies: TaskFileUploadRouteDependencies = {}
 ) {
   try {
+    if (!(dependencies.isPersistenceReady ?? shouldUseSupabasePersistence)()) {
+      return NextResponse.json(
+        {
+          ok: false,
+          message: "系统现在还没连上正式任务数据库，所以文件暂时不能真的上传分析。"
+        },
+        { status: 503 }
+      );
+    }
+
     const user = await (dependencies.requireUser ?? requireCurrentSessionUser)();
     const task = await getOwnedTaskSummary(params.taskId, user.id);
 

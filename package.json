@@ -6,7 +6,7 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "next typegen && tsc --noEmit",
+    "lint": "node scripts/run-lint.mjs",
     "test": "vitest run",
     "test:e2e": "node scripts/run-e2e.mjs"
   },

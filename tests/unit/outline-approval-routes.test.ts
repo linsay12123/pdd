@@ -23,17 +23,23 @@ vi.mock("../../src/lib/tasks/save-task-files", async () => {
 import { handleOutlineApprovalRequest } from "../../app/api/tasks/[taskId]/outline/approve/route";
 import { handleOutlineFeedbackRequest } from "../../app/api/tasks/[taskId]/outline/feedback/route";
 import {
+  getTaskOutlineVersion,
   getTaskSummary,
+  patchTaskSummary,
   resetTaskOutlineStore,
   resetTaskStore,
   updateTaskStatus
 } from "../../src/lib/tasks/repository";
 import {
+  appendPaymentLedgerEntry,
   getPaymentLedgerEntries,
   getUserWallet,
   resetPaymentState,
-  seedUserWallet
+  seedUserWallet,
+  setUserWallet
 } from "../../src/lib/payments/repository";
+import { chargeQuota } from "../../src/lib/billing/charge-quota";
+import { refundChargedQuota } from "../../src/lib/billing/refund-charged-quota";
 import { TaskProcessingStageError } from "../../src/lib/tasks/process-approved-task";
 import { saveOutlineVersion } from "../../src/lib/tasks/save-outline-version";
 
@@ -52,6 +58,120 @@ describe("outline approval routes", () => {
     });
     reviseOutlineFromFilesWithOpenAIMock.mockReset();
     listTaskFilesForModelMock.mockReset();
+  });
+
+  function makeApprovedOutlineDeps(taskId: string, outlineVersionId: string, userId = "user-1") {
+    return {
+      requireUser: async () => ({
+        id: userId,
+        email: `${userId}@example.com`,
+        role: "user" as const
+      }),
+      isPersistenceReady: () => true,
+      approveOutline: async () => {
+        patchTaskSummary(taskId, {
+          status: "drafting",
+          latestOutlineVersionId: outlineVersionId
+        });
+
+        return {
+          task: getTaskSummary(taskId)!,
+          outlineVersion: {
+            ...getTaskOutlineVersion(taskId, outlineVersionId)!,
+            isApproved: true
+          }
+        };
+      },
+      chargeQuotaForTask: async () => {
+        const task = getTaskSummary(taskId)!;
+        const wallet = getUserWallet(userId);
+        const charged = chargeQuota({
+          wallet,
+          amount: 690,
+          taskId,
+          chargePath: "generation"
+        });
+
+        setUserWallet(userId, charged.wallet);
+        appendPaymentLedgerEntry(userId, charged.entry);
+        patchTaskSummary(taskId, {
+          quotaReservation: charged.reservation
+        });
+
+        return charged.reservation;
+      },
+      refundQuotaForTask: async (_taskId: string, refundUserId: string, reservation: any) => {
+        const wallet = getUserWallet(refundUserId);
+        const refunded = refundChargedQuota({ wallet, reservation });
+        setUserWallet(refundUserId, refunded.wallet);
+        appendPaymentLedgerEntry(refundUserId, refunded.entry);
+        patchTaskSummary(taskId, {
+          quotaReservation: undefined
+        });
+      },
+      markTaskFailed: async () => {
+        updateTaskStatus(taskId, "failed");
+        patchTaskSummary(taskId, {
+          quotaReservation: undefined
+        });
+      }
+    };
+  }
+
+  it("refuses to use the local in-memory task store as a fake production pipeline", async () => {
+    const initialVersion = await saveOutlineVersion({
+      task: {
+        id: "task-outline-offline",
+        userId: "user-1",
+        status: "awaiting_outline_approval",
+        targetWordCount: 2200,
+        citationStyle: "APA 7",
+        specialRequirements: "",
+        topic: "Corporate Governance",
+        outlineRevisionCount: 0
+      },
+      userId: "user-1",
+      outline: {
+        articleTitle: "Corporate Governance in ASEAN Banking",
+        targetWordCount: 2200,
+        citationStyle: "APA 7",
+        chineseMirrorPending: true,
+        sections: [
+          {
+            title: "Introduction",
+            summary: "Outline summary",
+            bulletPoints: ["a", "b", "c"]
+          }
+        ]
+      }
+    });
+
+    const response = await handleOutlineApprovalRequest(
+      new Request("http://localhost/api/tasks/task-outline-offline/outline/approve", {
+        method: "POST",
+        body: JSON.stringify({
+          outlineVersionId: initialVersion.id
+        }),
+        headers: {
+          "content-type": "application/json"
+        }
+      }),
+      {
+        taskId: "task-outline-offline"
+      },
+      {
+        requireUser: async () => ({
+          id: "user-1",
+          email: "user-1@example.com",
+          role: "user"
+        })
+      }
+    );
+    const payload = await response.json();
+
+    expect(response.status).toBe(503);
+    expect(payload.ok).toBe(false);
+    expect(payload.message).toContain("真实数据库");
   });
 
   it("creates a new outline version from user feedback and increases the revision count", async () => {
@@ -143,6 +263,7 @@ describe("outline approval routes", () => {
         taskId: "task-outline-1"
       },
       {
+        isPersistenceReady: () => true,
         requireUser: async () => ({
           id: "user-1",
           email: "user-1@example.com",
@@ -195,6 +316,7 @@ describe("outline approval routes", () => {
         taskId: "task-outline-2"
       },
       {
+        isPersistenceReady: () => true,
         requireUser: async () => ({
           id: "user-1",
           email: "user-1@example.com",
@@ -244,11 +366,7 @@ describe("outline approval routes", () => {
         taskId: "task-outline-3"
       },
       {
-        requireUser: async () => ({
-          id: "user-1",
-          email: "user-1@example.com",
-          role: "user"
-        }),
+        ...makeApprovedOutlineDeps("task-outline-3", initialVersion.id),
         processTask: async () => ({
           task: {
             ...getTaskSummary("task-outline-3")!,
@@ -310,11 +428,7 @@ describe("outline approval routes", () => {
         taskId: "task-outline-4"
       },
       {
-        requireUser: async () => ({
-          id: "user-1",
-          email: "user-1@example.com",
-          role: "user"
-        }),
+        ...makeApprovedOutlineDeps("task-outline-4", initialVersion.id),
         processTask: async () => ({
           task: {
             ...getTaskSummary("task-outline-4")!,
@@ -376,11 +490,7 @@ describe("outline approval routes", () => {
         taskId: "task-outline-5"
       },
       {
-        requireUser: async () => ({
-          id: "user-1",
-          email: "user-1@example.com",
-          role: "user"
-        }),
+        ...makeApprovedOutlineDeps("task-outline-5", initialVersion.id),
         processTask: async () => {
           throw new TaskProcessingStageError(
             "drafting",
@@ -439,11 +549,7 @@ describe("outline approval routes", () => {
         taskId: "task-outline-6"
       },
       {
-        requireUser: async () => ({
-          id: "user-1",
-          email: "user-1@example.com",
-          role: "user"
-        }),
+        ...makeApprovedOutlineDeps("task-outline-6", initialVersion.id),
         processTask: async () => {
           updateTaskStatus("task-outline-6", "verifying_references");
           throw new Error("verification exploded");

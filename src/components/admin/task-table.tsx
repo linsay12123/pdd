@@ -47,7 +47,7 @@ function describeTaskStatus(status: string) {
     case "humanized_ready":
       return "降AI后版本已准备好";
     case "failed":
-      return "任务失败，后续要补真重试按钮";
+      return "任务失败";
     case "expired":
       return "文件已过期";
     default:
@@ -65,7 +65,7 @@ export function TaskTableView({ tasks }: { tasks: AdminTaskSummary[] }) {
             任务管理
           </h2>
           <p className="text-sm text-brand-700 mt-2">
-            这里显示真实任务状态和真实到期时间。重试任务、延长保留这两个按钮我下一步接成真操作。
+            这里显示真实任务状态、分析结果和文件保留到期时间，方便你先查主流程卡在哪一步。
           </p>
         </div>
         <div className="rounded-2xl border border-white/10 bg-brand-950/50 px-4 py-3 text-right min-w-28">

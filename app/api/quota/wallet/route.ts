@@ -1,19 +1,14 @@
 import { NextResponse } from "next/server";
 import { requireCurrentSessionUser } from "@/src/lib/auth/current-user";
-import { getUserWallet } from "@/src/lib/payments/repository";
 import { getUserWalletFromSupabase } from "@/src/lib/payments/supabase-wallet";
 import type { SessionUser } from "@/src/types/auth";
 import type { WalletSnapshot } from "@/src/types/billing";
-import {
-  isUuidLike,
-  shouldUseSupabasePersistence
-} from "@/src/lib/persistence/runtime-mode";
+import { isUuidLike, shouldUseSupabasePersistence } from "@/src/lib/persistence/runtime-mode";
 
 type QuotaWalletRouteDependencies = {
   requireUser?: () => Promise<SessionUser>;
   shouldUseSupabase?: () => boolean;
   getSupabaseWallet?: (userId: string) => Promise<WalletSnapshot>;
-  getLocalWallet?: (userId: string) => WalletSnapshot;
 };
 
 export async function handleQuotaWalletRequest(
@@ -24,12 +19,28 @@ export async function handleQuotaWalletRequest(
     const user = await (dependencies.requireUser ?? requireCurrentSessionUser)();
     const useSupabase = (dependencies.shouldUseSupabase ?? shouldUseSupabasePersistence)();
     const loadSupabaseWallet = dependencies.getSupabaseWallet ?? getUserWalletFromSupabase;
-    const loadLocalWallet = dependencies.getLocalWallet ?? getUserWallet;
 
-    const wallet =
-      useSupabase && isUuidLike(user.id)
-        ? await loadSupabaseWallet(user.id)
-        : loadLocalWallet(user.id);
+    if (!useSupabase) {
+      return NextResponse.json(
+        {
+          ok: false,
+          message: "系统现在还没连上正式积分数据库，所以当前积分暂时不能读取。"
+        },
+        { status: 503 }
+      );
+    }
+
+    if (!isUuidLike(user.id)) {
+      return NextResponse.json(
+        {
+          ok: false,
+          message: "用户标识格式不正确，请重新登录后再试。"
+        },
+        { status: 400 }
+      );
+    }
+
+    const wallet = await loadSupabaseWallet(user.id);
 
     return NextResponse.json({
       ok: true,

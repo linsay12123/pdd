@@ -2,16 +2,12 @@ import { NextResponse } from "next/server";
 import { requireCurrentSessionUser } from "@/src/lib/auth/current-user";
 import { getPaymentLedgerHistory, getUserLedgerHistoryFromSupabase } from "@/src/lib/payments/ledger-history";
 import type { SessionUser } from "@/src/types/auth";
-import {
-  isUuidLike,
-  shouldUseSupabasePersistence
-} from "@/src/lib/persistence/runtime-mode";
+import { isUuidLike, shouldUseSupabasePersistence } from "@/src/lib/persistence/runtime-mode";
 
 type QuotaLedgerRouteDependencies = {
   requireUser?: () => Promise<SessionUser>;
   shouldUseSupabase?: () => boolean;
   getSupabaseLedger?: (userId: string, limit?: number) => Promise<ReturnType<typeof getPaymentLedgerHistory>>;
-  getLocalLedger?: (userId: string, limit?: number) => ReturnType<typeof getPaymentLedgerHistory>;
 };
 
 export async function handleQuotaLedgerRequest(
@@ -23,12 +19,28 @@ export async function handleQuotaLedgerRequest(
     const useSupabase = (dependencies.shouldUseSupabase ?? shouldUseSupabasePersistence)();
     const loadSupabaseLedger =
       dependencies.getSupabaseLedger ?? getUserLedgerHistoryFromSupabase;
-    const loadLocalLedger = dependencies.getLocalLedger ?? getPaymentLedgerHistory;
 
-    const entries =
-      useSupabase && isUuidLike(user.id)
-        ? await loadSupabaseLedger(user.id, 8)
-        : loadLocalLedger(user.id, 8);
+    if (!useSupabase) {
+      return NextResponse.json(
+        {
+          ok: false,
+          message: "系统现在还没连上正式积分数据库，所以积分记录暂时不能读取。"
+        },
+        { status: 503 }
+      );
+    }
+
+    if (!isUuidLike(user.id)) {
+      return NextResponse.json(
+        {
+          ok: false,
+          message: "用户标识格式不正确，请重新登录后再试。"
+        },
+        { status: 400 }
+      );
+    }
+
+    const entries = await loadSupabaseLedger(user.id, 8);
 
     return NextResponse.json({
       ok: true,

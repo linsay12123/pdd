@@ -1,7 +1,10 @@
 export type HumanizeRequestPayload = {
   ok: boolean;
   taskId: string;
-  frozenQuota: number;
+  chargedQuota: number;
+  downloads: {
+    humanizedDocxOutputId: string | null;
+  };
   message: string;
 };
 

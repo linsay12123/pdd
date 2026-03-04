@@ -2,8 +2,6 @@ import { randomUUID } from "node:crypto";
 import { createSupabaseAdminClient } from "@/src/lib/supabase/admin";
 import { shouldUseSupabasePersistence } from "@/src/lib/persistence/runtime-mode";
 import { resolveGenerationTaskQuotaCost } from "@/src/lib/tasks/task-cost";
-import { getUserWallet } from "@/src/lib/payments/repository";
-import { saveTaskSummary } from "@/src/lib/tasks/repository";
 import type { SessionUser } from "@/src/types/auth";
 import type { TaskSummary } from "@/src/types/tasks";
 
@@ -27,38 +25,11 @@ type CreateTaskResult = {
 export async function createTaskWithQuotaFreeze(
   input: CreateTaskInput
 ): Promise<CreateTaskResult> {
-  return shouldUseSupabasePersistence()
-    ? createTaskWithSupabase(input)
-    : createTaskLocally(input);
-}
-
-async function createTaskLocally(input: CreateTaskInput): Promise<CreateTaskResult> {
-  const quotaCost = resolveGenerationTaskQuotaCost(input.targetWordCount ?? 2000);
-  const taskId = `task_${randomUUID()}`;
-  const wallet = getUserWallet(input.user.id);
-  const totalAvailable = wallet.subscriptionQuota + wallet.rechargeQuota;
-
-  if (totalAvailable < quotaCost) {
-    throw new Error("INSUFFICIENT_QUOTA");
+  if (!shouldUseSupabasePersistence()) {
+    throw new Error("REAL_PERSISTENCE_REQUIRED");
   }
 
-  const task = saveTaskSummary({
-    id: taskId,
-    userId: input.user.id,
-    status: "created",
-    targetWordCount: null,
-    citationStyle: null,
-    specialRequirements: input.specialRequirements,
-    analysisStatus: "pending",
-    analysisModel: null,
-    analysisCompletedAt: null,
-    analysisSnapshot: null
-  });
-
-  return {
-    task,
-    frozenQuota: 0
-  };
+  return createTaskWithSupabase(input);
 }
 
 async function createTaskWithSupabase(
@@ -118,7 +89,7 @@ async function createTaskWithSupabase(
 
   const taskId = String(taskRow.id);
 
-  const task = saveTaskSummary({
+  const task = {
     id: taskId,
     userId: input.user.id,
     status: "created",
@@ -129,7 +100,7 @@ async function createTaskWithSupabase(
     analysisModel: null,
     analysisCompletedAt: null,
     analysisSnapshot: null
-  });
+  } satisfies TaskSummary;
 
   return {
     task,

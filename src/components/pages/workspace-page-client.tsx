@@ -776,7 +776,11 @@ export function WorkspacePageClient({ initialQuota }: WorkspacePageClientProps) 
                     <p className="text-brand-700">您的文章与核验报告已生成完毕，请下载查阅。</p>
                   </div>
 
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-10">
+                  <div
+                    className={`grid grid-cols-1 gap-6 mb-10 ${
+                      activeTask?.downloads?.humanizedDocxOutputId ? "md:grid-cols-3" : "md:grid-cols-2"
+                    }`}
+                  >
                     <div className="bg-brand-950 p-6 rounded-xl border border-white/5 flex flex-col items-center text-center hover:border-gold-500/30 transition-colors">
                       <FileText className="w-10 h-10 text-blue-400 mb-4" />
                       <h3 className="text-lg font-bold text-cream-50 mb-1">最终版正文</h3>
@@ -825,6 +829,33 @@ export function WorkspacePageClient({ initialQuota }: WorkspacePageClientProps) 
                           : "下载报告"}
                       </Button>
                     </div>
+
+                    {activeTask?.downloads?.humanizedDocxOutputId && (
+                      <div className="bg-brand-950 p-6 rounded-xl border border-white/5 flex flex-col items-center text-center hover:border-gold-500/30 transition-colors">
+                        <Sparkles className="w-10 h-10 text-gold-400 mb-4" />
+                        <h3 className="text-lg font-bold text-cream-50 mb-1">降AI后版本</h3>
+                        <p className="text-xs text-brand-700 mb-6">
+                          Word 格式 (.docx) | 已完成自动降AI处理
+                        </p>
+                        <Button
+                          variant="secondary"
+                          fullWidth
+                          className="gap-2 mt-auto"
+                          onClick={() =>
+                            void handleDownload(activeTask?.downloads?.humanizedDocxOutputId)
+                          }
+                          disabled={
+                            !activeTask?.downloads?.humanizedDocxOutputId ||
+                            downloadingOutputId === activeTask?.downloads?.humanizedDocxOutputId
+                          }
+                        >
+                          <Download className="w-4 h-4" />
+                          {downloadingOutputId === activeTask?.downloads?.humanizedDocxOutputId
+                            ? "准备下载中..."
+                            : "下载降AI版本"}
+                        </Button>
+                      </div>
+                    )}
                   </div>
 
                   <div className="border-t border-white/10 pt-8">
@@ -847,11 +878,26 @@ export function WorkspacePageClient({ initialQuota }: WorkspacePageClientProps) 
                           onClick={async () => {
                             if (!activeTask) return;
                             setIsHumanizing(true);
-                            setNotice({ tone: "info", text: "降AI处理已提交，请稍候..." });
+                            setNotice({ tone: "info", text: "正在处理降AI，请稍候..." });
                             try {
                               const result = await requestHumanize({ taskId: activeTask.task.id });
+                              await syncWallet();
+                              setActiveTask((prev) =>
+                                prev
+                                  ? {
+                                      ...prev,
+                                      downloads: {
+                                        finalDocxOutputId:
+                                          prev.downloads?.finalDocxOutputId ?? null,
+                                        referenceReportOutputId:
+                                          prev.downloads?.referenceReportOutputId ?? null,
+                                        humanizedDocxOutputId:
+                                          result.downloads.humanizedDocxOutputId
+                                      }
+                                    }
+                                  : prev
+                              );
                               setNotice({ tone: "success", text: result.message });
-                              setQuota((prev) => prev - result.frozenQuota);
                             } catch (err) {
                               setNotice({
                                 tone: "error",

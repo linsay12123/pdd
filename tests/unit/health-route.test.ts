@@ -92,4 +92,74 @@ describe("health route", () => {
     expect(payload.checks.DB_SCHEMA_COMPAT.ok).toBe(true);
     expect(payload.checks.DB_LEGACY_STRUCTURES.ok).toBe(true);
   });
+
+  it("reports unhealthy when the humanize provider key is missing, so the route cannot truthfully claim readiness", async () => {
+    process.env.STEALTHGPT_API_KEY = "";
+
+    fromMock.mockImplementation((table: string) => ({
+      select: () => ({
+        limit: async () => ({
+          data: table === "profiles" ? [{ id: "profile-1" }] : [],
+          error: null
+        })
+      })
+    }));
+
+    rpcMock.mockResolvedValue({
+      data: {
+        targetWordCountNullable: true,
+        citationStyleNullable: true,
+        analysisFieldsReady: true,
+        taskFileFieldsReady: true,
+        legacyPaymentTablesRemaining: [],
+        legacyPaymentTypesRemaining: [],
+        legacyTaskStatusesRemaining: []
+      },
+      error: null
+    });
+
+    const { GET } = await import("../../app/api/health/route");
+    const response = await GET();
+    const payload = await response.json();
+
+    expect(response.status).toBe(503);
+    expect(payload.status).toBe("unhealthy");
+    expect(payload.checks.STEALTHGPT_API_KEY.ok).toBe(false);
+    expect(payload.checks.STEALTHGPT_API_KEY.detail).toContain("不可用");
+  });
+
+  it("reports unhealthy when the background task secret is missing, so it cannot pretend the async pipeline is ready", async () => {
+    process.env.TRIGGER_SECRET_KEY = "";
+
+    fromMock.mockImplementation((table: string) => ({
+      select: () => ({
+        limit: async () => ({
+          data: table === "profiles" ? [{ id: "profile-1" }] : [],
+          error: null
+        })
+      })
+    }));
+
+    rpcMock.mockResolvedValue({
+      data: {
+        targetWordCountNullable: true,
+        citationStyleNullable: true,
+        analysisFieldsReady: true,
+        taskFileFieldsReady: true,
+        legacyPaymentTablesRemaining: [],
+        legacyPaymentTypesRemaining: [],
+        legacyTaskStatusesRemaining: []
+      },
+      error: null
+    });
+
+    const { GET } = await import("../../app/api/health/route");
+    const response = await GET();
+    const payload = await response.json();
+
+    expect(response.status).toBe(503);
+    expect(payload.status).toBe("unhealthy");
+    expect(payload.checks.TRIGGER_SECRET_KEY.ok).toBe(false);
+    expect(payload.checks.TRIGGER_SECRET_KEY.detail).toContain("后台任务不可用");
+  });
 });

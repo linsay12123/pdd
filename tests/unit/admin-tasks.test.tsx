@@ -99,6 +99,8 @@ describe("admin tasks", () => {
     expect(html).toContain("Supply Chain Risk Review");
     expect(html).toContain("大纲已生成，等待用户确认");
     expect(html).toContain("3,000");
+    expect(html).not.toContain("下一步接成真");
+    expect(html).not.toContain("补真重试按钮");
     expect(html).not.toContain("task_001");
   });
 });

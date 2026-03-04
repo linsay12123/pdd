@@ -2,14 +2,18 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { handleCancelRequest } from "../../app/api/tasks/[taskId]/cancel/route";
 import {
   getTaskSummary,
+  patchTaskSummary,
   resetTaskStore,
   saveTaskSummary
 } from "../../src/lib/tasks/repository";
 import {
+  appendPaymentLedgerEntry,
   getUserWallet,
   resetPaymentState,
-  seedUserWallet
+  seedUserWallet,
+  setUserWallet
 } from "../../src/lib/payments/repository";
+import { releaseQuota } from "../../src/lib/billing/release-quota";
 import type { FrozenQuotaReservation } from "../../src/types/billing";
 
 function makeRequest() {
@@ -30,12 +34,74 @@ const testReservation: FrozenQuotaReservation = {
   fromRecharge: 460
 };
 
+function makeRouteDeps(taskId: string, userId = "user-1") {
+  return {
+    requireUser: async () => ({
+      id: userId,
+      email: "user@example.com",
+      role: "user" as const
+    }),
+    isPersistenceReady: () => true,
+    loadTask: async () => {
+      const task = getTaskSummary(taskId);
+
+      return task
+        ? {
+            taskId,
+            userId,
+            status: task.status,
+            quotaReservation: task.quotaReservation ?? null
+          }
+        : null;
+    },
+    releaseQuotaReservation: async (_taskId: string, releaseUserId: string, reservation: FrozenQuotaReservation) => {
+      const wallet = getUserWallet(releaseUserId);
+      const released = releaseQuota({ wallet, reservation });
+      setUserWallet(releaseUserId, released.wallet);
+      appendPaymentLedgerEntry(releaseUserId, released.entry);
+    },
+    markTaskFailed: async () => {
+      patchTaskSummary(taskId, {
+        status: "failed",
+        quotaReservation: undefined
+      });
+    }
+  };
+}
+
 describe("task cancel route", () => {
   beforeEach(() => {
     process.env.NEXT_PUBLIC_SUPABASE_URL = "";
     process.env.SUPABASE_SERVICE_ROLE_KEY = "";
     resetPaymentState();
     resetTaskStore();
+  });
+
+  it("does not silently fall back to the local task store when the real database pipeline is unavailable", async () => {
+    saveTaskSummary({
+      id: "task-1",
+      userId: "user-1",
+      status: "awaiting_outline_approval",
+      targetWordCount: 2000,
+      citationStyle: "APA 7"
+    });
+
+    const response = await handleCancelRequest(
+      makeRequest(),
+      makeContext("task-1"),
+      {
+        requireUser: async () => ({
+          id: "user-1",
+          email: "user@example.com",
+          role: "user"
+        })
+      }
+    );
+    const payload = await response.json();
+
+    expect(response.status).toBe(503);
+    expect(payload.ok).toBe(false);
+    expect(payload.message).toContain("真实数据库");
   });
 
   it("rejects unauthenticated users with 401", async () => {
@@ -69,11 +135,7 @@ describe("task cancel route", () => {
       makeRequest(),
       makeContext("task-1"),
       {
-        requireUser: async () => ({
-          id: "user-1",
-          email: "user@example.com",
-          role: "user"
-        })
+        ...makeRouteDeps("task-1")
       }
     );
 
@@ -102,11 +164,7 @@ describe("task cancel route", () => {
       makeRequest(),
       makeContext("task-1"),
       {
-        requireUser: async () => ({
-          id: "user-1",
-          email: "user@example.com",
-          role: "user"
-        })
+        ...makeRouteDeps("task-1")
       }
     );
 
@@ -147,11 +205,7 @@ describe("task cancel route", () => {
       makeRequest(),
       makeContext("task-1"),
       {
-        requireUser: async () => ({
-          id: "user-1",
-          email: "user@example.com",
-          role: "user"
-        })
+        ...makeRouteDeps("task-1")
       }
     );
 
@@ -190,11 +244,7 @@ describe("task cancel route", () => {
       makeRequest(),
       makeContext("task-1"),
       {
-        requireUser: async () => ({
-          id: "user-1",
-          email: "user@example.com",
-          role: "user"
-        })
+        ...makeRouteDeps("task-1")
       }
     );
 

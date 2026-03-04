@@ -12,6 +12,7 @@ import {
   listTaskFilesForModel,
   persistTaskModelAnalysis
 } from "@/src/lib/tasks/save-task-files";
+import { shouldUseSupabasePersistence } from "@/src/lib/persistence/runtime-mode";
 import { toSessionTaskPayload } from "@/src/lib/tasks/session-task";
 import type { TaskAnalysisSnapshot } from "@/src/types/tasks";
 import type { SessionUser } from "@/src/types/auth";
@@ -28,6 +29,7 @@ type ConfirmPrimaryBody = {
 
 type ConfirmPrimaryRouteDependencies = {
   requireUser?: () => Promise<SessionUser>;
+  isPersistenceReady?: () => boolean;
   analyzeTask?: (input: {
     taskId: string;
     userId: string;
@@ -61,6 +63,16 @@ export async function handleConfirmPrimaryFileRequest(
   }
 
   try {
+    if (!(dependencies.isPersistenceReady ?? shouldUseSupabasePersistence)()) {
+      return NextResponse.json(
+        {
+          ok: false,
+          message: "系统现在还没连上正式任务数据库，所以主任务文件暂时不能确认。"
+        },
+        { status: 503 }
+      );
+    }
+
     const user = await (dependencies.requireUser ?? requireCurrentSessionUser)();
     const task = await getOwnedTaskSummary(params.taskId, user.id);
 

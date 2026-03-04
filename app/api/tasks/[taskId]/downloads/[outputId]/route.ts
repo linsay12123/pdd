@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { requireCurrentSessionUser } from "@/src/lib/auth/current-user";
+import { shouldUseSupabasePersistence } from "@/src/lib/persistence/runtime-mode";
 import { createSignedDownloadUrl } from "@/src/lib/storage/signed-url";
 import { getOwnedTaskOutput } from "@/src/lib/tasks/task-output-store";
 import type { SessionUser } from "@/src/types/auth";
@@ -13,6 +14,7 @@ type RouteContext = {
 
 type TaskDownloadRouteDependencies = {
   requireUser?: () => Promise<SessionUser>;
+  isPersistenceReady?: () => boolean;
 };
 
 export async function handleTaskDownloadRequest(
@@ -24,6 +26,16 @@ export async function handleTaskDownloadRequest(
   dependencies: TaskDownloadRouteDependencies = {}
 ) {
   let user: SessionUser;
+
+  if (!(dependencies.isPersistenceReady ?? shouldUseSupabasePersistence)()) {
+    return NextResponse.json(
+      {
+        ok: false,
+        message: "系统现在还没连上正式任务数据库，所以下载文件暂时不能读取。"
+      },
+      { status: 503 }
+    );
+  }
 
   try {
     user = await (dependencies.requireUser ?? requireCurrentSessionUser)();

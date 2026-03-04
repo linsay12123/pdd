@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { requireCurrentSessionUser } from "@/src/lib/auth/current-user";
+import { shouldUseSupabasePersistence } from "@/src/lib/persistence/runtime-mode";
 import { reviseOutlineVersion } from "@/src/lib/tasks/save-outline-version";
 import { toSessionTaskPayload } from "@/src/lib/tasks/session-task";
 import type { SessionUser } from "@/src/types/auth";
@@ -16,6 +17,8 @@ type OutlineFeedbackBody = {
 
 type OutlineFeedbackDependencies = {
   requireUser?: () => Promise<SessionUser>;
+  isPersistenceReady?: () => boolean;
+  reviseOutline?: typeof reviseOutlineVersion;
 };
 
 export async function handleOutlineFeedbackRequest(
@@ -39,8 +42,18 @@ export async function handleOutlineFeedbackRequest(
   }
 
   try {
+    if (!(dependencies.isPersistenceReady ?? shouldUseSupabasePersistence)()) {
+      return NextResponse.json(
+        {
+          ok: false,
+          message: "系统现在还没连上正式任务数据库，所以大纲暂时不能重新生成。"
+        },
+        { status: 503 }
+      );
+    }
+
     const user = await (dependencies.requireUser ?? requireCurrentSessionUser)();
-    const result = await reviseOutlineVersion({
+    const result = await (dependencies.reviseOutline ?? reviseOutlineVersion)({
       taskId: params.taskId,
       userId: user.id,
       feedback

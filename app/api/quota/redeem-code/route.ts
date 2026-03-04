@@ -1,18 +1,13 @@
 import { NextResponse } from "next/server";
 import { requireCurrentSessionUser } from "@/src/lib/auth/current-user";
-import { redeemActivationCode } from "@/src/lib/activation-codes/redeem-activation-code";
 import { redeemActivationCodeInSupabase } from "@/src/lib/activation-codes/supabase-repository";
 import type { SessionUser } from "@/src/types/auth";
-import {
-  isUuidLike,
-  shouldUseSupabasePersistence
-} from "@/src/lib/persistence/runtime-mode";
+import { isUuidLike, shouldUseSupabasePersistence } from "@/src/lib/persistence/runtime-mode";
 
 type RedeemCodeRouteDependencies = {
   requireUser?: () => Promise<SessionUser>;
   shouldUseSupabase?: () => boolean;
   redeemInSupabase?: typeof redeemActivationCodeInSupabase;
-  redeemLocally?: typeof redeemActivationCode;
 };
 
 export async function handleRedeemCodeRequest(
@@ -39,7 +34,16 @@ export async function handleRedeemCodeRequest(
     const code = payload.code.trim();
     const useSupabase = (dependencies.shouldUseSupabase ?? shouldUseSupabasePersistence)();
     const redeemViaSupabase = dependencies.redeemInSupabase ?? redeemActivationCodeInSupabase;
-    const redeemViaLocal = dependencies.redeemLocally ?? redeemActivationCode;
+
+    if (!useSupabase) {
+      return NextResponse.json(
+        {
+          ok: false,
+          message: "系统现在还没连上正式积分数据库，所以激活码暂时不能兑换。"
+        },
+        { status: 503 }
+      );
+    }
 
     if (useSupabase && !isUuidLike(user.id)) {
       return NextResponse.json(
@@ -51,30 +55,16 @@ export async function handleRedeemCodeRequest(
       );
     }
 
-    if (useSupabase) {
-      const result = await redeemViaSupabase({
-        userId: user.id,
-        code
-      });
-
-      return NextResponse.json({
-        ok: true,
-        code: result.code,
-        creditedQuota: result.quotaAmount,
-        currentQuota: result.currentQuota
-      });
-    }
-
-    const result = redeemViaLocal({
+    const result = await redeemViaSupabase({
       userId: user.id,
       code
     });
 
     return NextResponse.json({
       ok: true,
-      code: result.redemption.code,
-      creditedQuota: result.redemption.quotaAmount,
-      currentQuota: result.wallet.rechargeQuota
+      code: result.code,
+      creditedQuota: result.quotaAmount,
+      currentQuota: result.currentQuota
     });
   } catch (error) {
     if (error instanceof Error && error.message === "AUTH_REQUIRED") {

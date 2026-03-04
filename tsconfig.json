@@ -16,7 +16,7 @@
     "resolveJsonModule": true,
     "isolatedModules": true,
     "jsx": "react-jsx",
-    "incremental": true,
+    "incremental": false,
     "baseUrl": ".",
     "paths": {
       "@/*": [
@@ -33,6 +33,8 @@
     "next-env.d.ts",
     "**/*.ts",
     "**/*.tsx",
+    ".next/types/routes.d.ts",
+    ".next/types/validator.ts",
     ".next/types/**/*.ts",
     ".next/dev/types/**/*.ts"
   ],

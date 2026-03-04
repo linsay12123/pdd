@@ -66,7 +66,7 @@ export async function exportDocx(input: DocxExportInput) {
     contentType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
   });
 
-  await saveTaskOutput({
+  const output = await saveTaskOutput({
     taskId: input.taskId,
     userId: input.userId,
     outputKind:
@@ -75,6 +75,7 @@ export async function exportDocx(input: DocxExportInput) {
   });
 
   return {
+    outputId: output.id,
     outputPath: artifact.outputPath,
     payloadPath,
     storagePath

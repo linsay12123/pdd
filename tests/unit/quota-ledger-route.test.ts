@@ -1,18 +1,7 @@
-import { beforeEach, describe, expect, it } from "vitest";
-import { createLedgerEntry } from "../../src/lib/billing/ledger";
-import {
-  appendPaymentLedgerEntry,
-  resetPaymentState
-} from "../../src/lib/payments/repository";
+import { describe, expect, it } from "vitest";
 import { handleQuotaLedgerRequest } from "../../app/api/quota/ledger/route";
 
 describe("quota ledger route", () => {
-  beforeEach(() => {
-    process.env.NEXT_PUBLIC_SUPABASE_URL = "";
-    process.env.SUPABASE_SERVICE_ROLE_KEY = "";
-    resetPaymentState();
-  });
-
   it("returns 401 when user context is missing", async () => {
     const response = await handleQuotaLedgerRequest(
       new Request("http://localhost/api/quota/ledger", {
@@ -30,39 +19,38 @@ describe("quota ledger route", () => {
     expect(payload.message).toContain("登录");
   });
 
-  it("returns mapped ledger entries for the current user", async () => {
-    appendPaymentLedgerEntry(
-      "user-ledger-1",
-      createLedgerEntry({
-        kind: "activation_credit",
-        amount: 5000,
-        taskId: "PDD-5000-TEST",
-        note: "Redeemed activation code"
-      }),
-      "2026-03-03T08:30:00.000Z"
-    );
-
-    appendPaymentLedgerEntry(
-      "user-ledger-1",
-      createLedgerEntry({
-        kind: "task_freeze",
-        amount: 500,
-        taskId: "task-1",
-        note: "Froze 500 quota for generation"
-      }),
-      "2026-03-03T09:00:00.000Z"
-    );
-
+  it("returns mapped ledger entries from the real database path", async () => {
     const response = await handleQuotaLedgerRequest(
       new Request("http://localhost/api/quota/ledger", {
         method: "GET"
       }),
       {
         requireUser: async () => ({
-          id: "user-ledger-1",
+          id: "11111111-1111-4111-8111-111111111111",
           email: "ledger@example.com",
           role: "user"
-        })
+        }),
+        shouldUseSupabase: () => true,
+        getSupabaseLedger: async () => [
+          {
+            id: "entry-1",
+            kind: "task_settle",
+            title: "生成文章",
+            detail: "扣除 500 积分",
+            amount: -500,
+            balanceAfter: 4500,
+            createdAt: "2026-03-03T09:00:00.000Z"
+          },
+          {
+            id: "entry-2",
+            kind: "activation_credit",
+            title: "激活码兑换",
+            detail: "充值 5000 积分",
+            amount: 5000,
+            balanceAfter: 5000,
+            createdAt: "2026-03-03T08:30:00.000Z"
+          }
+        ]
       }
     );
     const payload = await response.json();
@@ -77,5 +65,25 @@ describe("quota ledger route", () => {
       title: "激活码兑换",
       amount: 5000
     });
+  });
+
+  it("returns 503 instead of silently reading fake local ledger data when the real database is unavailable", async () => {
+    const response = await handleQuotaLedgerRequest(
+      new Request("http://localhost/api/quota/ledger", {
+        method: "GET"
+      }),
+      {
+        requireUser: async () => ({
+          id: "11111111-1111-4111-8111-111111111111",
+          email: "ledger@example.com",
+          role: "user"
+        }),
+        shouldUseSupabase: () => false
+      }
+    );
+    const payload = await response.json();
+
+    expect(response.status).toBe(503);
+    expect(payload.message).toContain("正式积分数据库");
   });
 });

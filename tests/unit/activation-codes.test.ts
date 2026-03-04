@@ -58,16 +58,24 @@ describe("activation codes", () => {
       }
     }), {
       requireUser: async () => ({
-        id: "user-9",
+        id: "11111111-1111-4111-8111-111111111119",
         email: "user9@example.com",
         role: "user"
+      }),
+      shouldUseSupabase: () => true,
+      redeemInSupabase: async () => ({
+        code: code.code,
+        tier: 5000 as const,
+        quotaAmount: 5000,
+        currentQuota: 5000,
+        frozenQuota: 0
       })
     });
     const payload = await response.json();
 
     expect(response.status).toBe(200);
     expect(payload.currentQuota).toBe(5000);
-    expect(getUserWallet("user-9").rechargeQuota).toBe(5000);
+    expect(getUserWallet("11111111-1111-4111-8111-111111111119").rechargeQuota).toBe(0);
   });
 
   it("rejects unauthenticated redemption requests", async () => {

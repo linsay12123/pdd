@@ -215,7 +215,8 @@ export async function handleHealthRequest(
 
   const requiredKeys = [
     "SUPABASE_URL", "SUPABASE_ANON_KEY", "SUPABASE_SERVICE_ROLE_KEY",
-    "OPENAI_API_KEY", "SUPABASE_DB_CONNECTION", "DB_TABLES",
+    "OPENAI_API_KEY", "STEALTHGPT_API_KEY", "TRIGGER_SECRET_KEY",
+    "SUPABASE_DB_CONNECTION", "DB_TABLES",
     "DB_SCHEMA_COMPAT", "DB_LEGACY_STRUCTURES"
   ];
   const allOk = requiredKeys.every((k) => checks[k]?.ok);

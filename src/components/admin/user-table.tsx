@@ -32,7 +32,7 @@ export function UserTableView({ users }: { users: AdminUserSummary[] }) {
             用户管理
           </h2>
           <p className="text-sm text-brand-700 mt-2">
-            这里显示真实注册用户、真实积分余额和账号状态。冻结、解冻、手动调额按钮我下一步接成真操作。
+            这里显示真实注册用户、当前余额和账号状态，方便你先做运营排查和人工核对。
           </p>
         </div>
         <div className="rounded-2xl border border-white/10 bg-brand-950/50 px-4 py-3 text-right min-w-28">
@@ -101,13 +101,11 @@ export function UserTableView({ users }: { users: AdminUserSummary[] }) {
               <div className="flex flex-wrap gap-3 text-xs text-brand-700">
                 <span className="inline-flex items-center gap-1 rounded-full border border-white/5 bg-brand-900/60 px-3 py-1">
                   <ShieldCheck className="w-3.5 h-3.5 text-gold-400" />
-                  订阅积分：{user.subscriptionQuota.toLocaleString("en-US")}
+                  账号角色：{user.role === "admin" ? "管理员" : "普通用户"}
                 </span>
                 <span className="inline-flex items-center gap-1 rounded-full border border-white/5 bg-brand-900/60 px-3 py-1">
                   <Snowflake className="w-3.5 h-3.5 text-blue-300" />
-                  {user.status === "frozen"
-                    ? "当前账号已被冻结，后续要补真操作按钮"
-                    : "当前账号状态正常"}
+                  {user.status === "frozen" ? "当前账号已被冻结" : "当前账号状态正常"}
                 </span>
               </div>
             </article>

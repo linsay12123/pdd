@@ -20,6 +20,7 @@ describe("task download route", () => {
         outputId: "out-1"
       },
       {
+        isPersistenceReady: () => true,
         requireUser: async () => {
           throw new Error("AUTH_REQUIRED");
         }
@@ -47,6 +48,7 @@ describe("task download route", () => {
         outputId: "out-1"
       },
       {
+        isPersistenceReady: () => true,
         requireUser: async () => ({
           id: "user-1",
           email: "user1@example.com",
@@ -58,5 +60,27 @@ describe("task download route", () => {
 
     expect(response.status).toBe(200);
     expect(payload.signedUrl).toContain("final.docx");
+  });
+
+  it("returns 503 when the official task output database path is unavailable", async () => {
+    const response = await handleTaskDownloadRequest(
+      new Request("http://localhost/api/tasks/task-1/downloads/out-1"),
+      {
+        taskId: "task-1",
+        outputId: "out-1"
+      },
+      {
+        isPersistenceReady: () => false,
+        requireUser: async () => ({
+          id: "user-1",
+          email: "user1@example.com",
+          role: "user"
+        })
+      }
+    );
+    const payload = await response.json();
+
+    expect(response.status).toBe(503);
+    expect(payload.message).toContain("正式任务数据库");
   });
 });

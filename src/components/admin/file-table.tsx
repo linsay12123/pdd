@@ -47,7 +47,7 @@ export function FileTableView({ files }: { files: AdminFileSummary[] }) {
             文件管理
           </h2>
           <p className="text-sm text-brand-700 mt-2">
-            这里显示真实交付文件、真实所属任务和真实到期时间。删除、延长保留这两个动作我下一步接成真按钮。
+            这里显示真实交付文件、所属任务和保留到期时间，方便你先判断哪些文件还有效。
           </p>
         </div>
         <div className="rounded-2xl border border-white/10 bg-brand-950/50 px-4 py-3 text-right min-w-28">
