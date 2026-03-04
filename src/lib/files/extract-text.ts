@@ -30,6 +30,10 @@ export async function extractTextFromUpload(file: File): Promise<string> {
     return extractLegacyPptText(buffer, file.name);
   }
 
+  if (fileKind === "jpg" || fileKind === "jpeg" || fileKind === "png") {
+    return `[image content: ${file.name}]`;
+  }
+
   return fallbackExtraction(file.name);
 }
 
@@ -80,26 +84,41 @@ async function extractPptxText(buffer: Buffer, filename: string) {
 }
 
 async function extractPdfText(buffer: Buffer, filename: string) {
-  // Dynamic import: pdf-parse v2 depends on @napi-rs/canvas (native binary)
-  // which crashes on Vercel serverless. Dynamic import lets us fall back
-  // to the regex-based extractor if the module fails to load.
   try {
-    const { PDFParse } = await import("pdf-parse");
-    const parser = new PDFParse({ data: buffer });
-    const parsed = await parser.getText();
-    await parser.destroy();
-    const extracted = normalizeExtractedText(parsed.text ?? "", filename);
+    const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs");
+    const loadingTask = pdfjs.getDocument({
+      data: new Uint8Array(buffer),
+      verbosity: 0,
+      useSystemFonts: true
+    });
+    const doc = await loadingTask.promise;
+    const pages: string[] = [];
 
+    for (let i = 1; i <= doc.numPages; i++) {
+      const page = await doc.getPage(i);
+      const content = await page.getTextContent();
+      const text = (content.items as Array<{ str?: string; hasEOL?: boolean }>)
+        .filter((item) => typeof item.str === "string")
+        .map((item) => item.str + (item.hasEOL ? "\n" : ""))
+        .join("");
+      pages.push(text);
+      page.cleanup();
+    }
+    await doc.destroy();
+
+    const extracted = normalizeExtractedText(pages.join("\n\n"), filename);
     if (extracted !== fallbackExtraction(filename)) {
       return extracted;
     }
   } catch {
-    // pdf-parse failed (module load or parsing error).
-    // Fall through to the lightweight stream parser below.
+    // pdfjs-dist failed — fall through to lightweight stream parser
   }
 
   const streamText = extractPdfStrings(buffer);
-  return normalizeExtractedText(streamText, filename);
+  if (streamText.length > 50) {
+    return normalizeExtractedText(streamText, filename);
+  }
+  return `[image-based content: ${filename}]`;
 }
 
 function extractLegacyPptText(buffer: Buffer, filename: string) {

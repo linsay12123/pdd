@@ -14,7 +14,10 @@ describe("file extraction", () => {
       "docx",
       "pdf",
       "ppt",
-      "pptx"
+      "pptx",
+      "jpg",
+      "jpeg",
+      "png"
     ]);
   });
 
@@ -25,9 +28,23 @@ describe("file extraction", () => {
   });
 
   it("rejects unsupported file kinds", () => {
-    expect(() => detectSupportedFileKind("image.png")).toThrow(
+    expect(() => detectSupportedFileKind("archive.zip")).toThrow(
       "Unsupported file type"
     );
+  });
+
+  it("detects image file kinds", () => {
+    expect(detectSupportedFileKind("photo.jpg")).toBe("jpg");
+    expect(detectSupportedFileKind("scan.jpeg")).toBe("jpeg");
+    expect(detectSupportedFileKind("screenshot.png")).toBe("png");
+  });
+
+  it("returns image placeholder for image uploads", async () => {
+    const file = new File([new Uint8Array(8)], "photo.jpg", {
+      type: "image/jpeg"
+    });
+    const result = await extractTextFromUpload(file);
+    expect(result).toBe("[image content: photo.jpg]");
   });
 
   it("extracts actual text for plain text files", async () => {

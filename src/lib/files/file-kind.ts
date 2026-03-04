@@ -4,7 +4,10 @@ export const supportedFileExtensions = [
   "docx",
   "pdf",
   "ppt",
-  "pptx"
+  "pptx",
+  "jpg",
+  "jpeg",
+  "png"
 ] as const;
 
 export type SupportedFileKind = (typeof supportedFileExtensions)[number];

@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { classifyFilesByHeuristics } from "@/src/lib/ai/services/classify-files";
+import { extractTextFromImageWithVision } from "@/src/lib/ai/services/extract-text-from-image";
 import { requireCurrentSessionUser } from "@/src/lib/auth/current-user";
 import { extractTextFromUpload } from "@/src/lib/files/extract-text";
 import {
@@ -59,10 +60,24 @@ export async function handleTaskFileUploadRequest(
     }
 
     const extractedFiles = await Promise.all(
-      files.map(async (file) => ({
-        originalFilename: file.name,
-        extractedText: await extractTextFromUpload(file)
-      }))
+      files.map(async (file) => {
+        let text = await extractTextFromUpload(file);
+
+        if (text.startsWith("[image")) {
+          try {
+            const arrayBuffer = await file.arrayBuffer();
+            const base64 = Buffer.from(arrayBuffer).toString("base64");
+            const visionText = await extractTextFromImageWithVision(base64, file.name);
+            if (visionText && !visionText.includes("[no text detected]")) {
+              text = visionText;
+            }
+          } catch {
+            // Vision extraction failed — keep the placeholder
+          }
+        }
+
+        return { originalFilename: file.name, extractedText: text };
+      })
     );
 
     const persistedFiles = await saveTaskFiles({
