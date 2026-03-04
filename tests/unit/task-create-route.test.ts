@@ -72,7 +72,7 @@ describe("task create route", () => {
     expect(payload.message).toContain("积分不足");
   });
 
-  it("freezes per-word quota and stores special requirements", async () => {
+  it("checks balance and creates task without freezing quota", async () => {
     seedUserWallet("user-ok", {
       rechargeQuota: 1000,
       subscriptionQuota: 0,
@@ -102,26 +102,27 @@ describe("task create route", () => {
     const payload = await response.json();
 
     expect(response.status).toBe(201);
-    expect(payload.task.status).toBe("quota_frozen");
+    expect(payload.task.status).toBe("created");
     expect(payload.task.targetWordCount).toBe(2200);
     expect(payload.task.citationStyle).toBe("MLA");
     expect(payload.task.specialRequirements).toContain("ASEAN banking");
-    expect(payload.frozenQuota).toBe(690);
+    expect(payload.frozenQuota).toBe(0);
 
     const storedTask = getTaskSummary(payload.task.id);
     expect(storedTask).toMatchObject({
       id: payload.task.id,
       userId: "user-ok",
-      status: "quota_frozen",
+      status: "created",
       targetWordCount: 2200,
       citationStyle: "MLA",
       specialRequirements: "Focus on ASEAN banking examples."
     });
 
+    // Wallet should remain unchanged — quota is only frozen at outline approval
     expect(getUserWallet("user-ok")).toEqual({
-      rechargeQuota: 310,
+      rechargeQuota: 1000,
       subscriptionQuota: 0,
-      frozenQuota: 690
+      frozenQuota: 0
     });
   });
 });

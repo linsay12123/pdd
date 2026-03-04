@@ -13,12 +13,12 @@ describe("task bootstrap requests", () => {
         json: async () => ({
           task: {
             id: "task-1",
-            status: "quota_frozen",
+            status: "created",
             targetWordCount: 2000,
             citationStyle: "APA 7",
             specialRequirements: "Focus on finance."
           },
-          frozenQuota: 500,
+          frozenQuota: 0,
           message: "任务已创建"
         })
       })
@@ -83,7 +83,7 @@ describe("task bootstrap requests", () => {
 
     expect(uploadedFiles).toHaveLength(1);
     expect(uploadedFiles[0]?.name).toBe("assignment.txt");
-    expect(result.frozenQuota).toBe(500);
+    expect(result.frozenQuota).toBe(0);
     expect(result.task.status).toBe("awaiting_outline_approval");
     expect(result.outline?.citationStyle).toBe("Harvard");
   });
@@ -96,12 +96,12 @@ describe("task bootstrap requests", () => {
         json: async () => ({
           task: {
             id: "task-2",
-            status: "quota_frozen",
+            status: "created",
             targetWordCount: 2000,
             citationStyle: "APA 7",
             specialRequirements: ""
           },
-          frozenQuota: 500,
+          frozenQuota: 0,
           message: "任务已创建"
         })
       })

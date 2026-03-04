@@ -8,8 +8,12 @@ import {
 describe("task status machine", () => {
   it("allows valid transitions", () => {
     expect(canTransition("created", "quota_frozen")).toBe(true);
+    expect(canTransition("created", "extracting_files")).toBe(true);
+    expect(canTransition("created", "building_rule_card")).toBe(true);
     expect(canTransition("quota_frozen", "extracting_files")).toBe(true);
     expect(canTransition("outline_ready", "awaiting_outline_approval")).toBe(true);
+    expect(canTransition("awaiting_outline_approval", "drafting")).toBe(true);
+    expect(canTransition("awaiting_outline_approval", "quota_frozen")).toBe(true);
   });
 
   it("rejects invalid transitions", () => {

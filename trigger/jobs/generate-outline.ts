@@ -31,6 +31,7 @@ export async function generateOutlineForTask(
       !Array.isArray(parsed.sections) ||
       parsed.sections.length === 0
     ) {
+      console.warn("[generate-outline] GPT returned unparseable outline, using template fallback. Raw:", response.output_text.slice(0, 200));
       return buildOutlineScaffold(input);
     }
 
@@ -56,7 +57,8 @@ export async function generateOutlineForTask(
     }
 
     return outline;
-  } catch {
+  } catch (error) {
+    console.error("[generate-outline] GPT outline generation failed:", error instanceof Error ? error.message : error);
     return buildOutlineScaffold(input);
   }
 }

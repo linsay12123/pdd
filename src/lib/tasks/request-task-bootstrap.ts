@@ -42,7 +42,7 @@ export async function requestTaskBootstrap({
       fetchImpl
     });
   } catch (uploadError) {
-    // Best-effort: cancel the task and release frozen quota
+    // Best-effort: cancel the task (no quota frozen at this stage)
     await requestTaskCancel({
       taskId: createdTask.task.id,
       fetchImpl

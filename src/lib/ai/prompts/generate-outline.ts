@@ -38,6 +38,7 @@ export type GenerateOutlineInput = OutlineScaffoldInput & {
   mustAnswer?: string[];
   gradingPriorities?: string[];
   specialRequirements?: string;
+  feedback?: string;
 };
 
 export function calculateDefaultChapterCount(targetWordCount: number) {
@@ -105,15 +106,28 @@ export function buildOutlineScaffold({
   };
 }
 
+function extractChapterCountFromFeedback(feedback?: string): number | null {
+  if (!feedback) return null;
+  const match = feedback.match(
+    /(?:写|要|改为?|设置?|分成?|用)\s*(\d{1,2})\s*(?:个|章|节|部分|sections?|chapters?|parts?)/i
+  ) ?? feedback.match(
+    /(\d{1,2})\s*(?:个|章|节|部分|sections?|chapters?|parts?)/i
+  );
+  return match ? Number(match[1]) : null;
+}
+
 export function buildGenerateOutlinePrompt(input: GenerateOutlineInput) {
+  const feedbackChapterCount = extractChapterCountFromFeedback(input.feedback);
   const sectionCount =
-    input.chapterCountOverride || calculateDefaultChapterCount(input.targetWordCount);
+    feedbackChapterCount ||
+    input.chapterCountOverride ||
+    calculateDefaultChapterCount(input.targetWordCount);
   const bulletCount = determineOutlineBulletCount(
     input.targetWordCount,
     input.shorterOutline
   );
 
-  return [
+  const lines = [
     "Generate an academic article outline. Return ONLY valid JSON (no markdown fences, no explanation).",
     "",
     "Required JSON structure:",
@@ -137,6 +151,15 @@ export function buildGenerateOutlinePrompt(input: GenerateOutlineInput) {
     `- MUST_ANSWER: ${input.mustAnswer?.length ? input.mustAnswer.join("; ") : "(none)"}`,
     `- GRADING_PRIORITIES: ${input.gradingPriorities?.length ? input.gradingPriorities.join("; ") : "(none)"}`,
     `- SPECIAL_REQUIREMENTS: ${input.specialRequirements || "(none)"}`,
+  ];
+
+  if (input.feedback) {
+    lines.push(`- USER_REVISION_FEEDBACK: ${input.feedback}`);
+    lines.push("");
+    lines.push("IMPORTANT: The USER_REVISION_FEEDBACK above is the user's revision instruction. You MUST follow it precisely. If it specifies a number of sections, use exactly that number. If it asks to add/remove/change specific content, do so.");
+  }
+
+  lines.push(
     "",
     "Rules:",
     "- The articleTitle must be specific to the topic, not generic.",
@@ -146,5 +169,7 @@ export function buildGenerateOutlinePrompt(input: GenerateOutlineInput) {
     "- The outline must address all MUST_ANSWER items across the sections.",
     "- The first section should introduce the topic and the last section should conclude.",
     "- All text must be in English."
-  ].join("\n");
+  );
+
+  return lines.join("\n");
 }

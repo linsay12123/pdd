@@ -27,6 +27,21 @@ type CancelRouteDependencies = {
   requireUser?: () => Promise<SessionUser>;
 };
 
+/**
+ * Statuses where the task can be cancelled.
+ * Before outline approval: no quota was frozen, so just mark as failed.
+ * After outline approval (quota_frozen): release frozen quota, then mark as failed.
+ */
+const CANCELLABLE_STATUSES = new Set([
+  "created",
+  "quota_frozen",
+  "extracting_files",
+  "awaiting_primary_file_confirmation",
+  "building_rule_card",
+  "outline_ready",
+  "awaiting_outline_approval"
+]);
+
 export async function handleCancelRequest(
   _request: Request,
   context: RouteContext,
@@ -59,35 +74,43 @@ function cancelLocally(taskId: string, user: SessionUser) {
     );
   }
 
-  if (task.status !== "quota_frozen") {
+  if (!CANCELLABLE_STATUSES.has(task.status)) {
     return NextResponse.json(
-      { ok: false, taskId, message: "只能取消处于 quota_frozen 状态的任务。" },
+      { ok: false, taskId, message: "当前任务状态不允许取消。" },
       { status: 400 }
     );
   }
 
   const reservation = task.quotaReservation;
 
-  if (!reservation) {
+  // If quota was frozen (post-outline-approval), release it
+  if (reservation && reservation.totalAmount > 0) {
+    const wallet = getUserWallet(user.id);
+    const released = releaseQuota({ wallet, reservation });
+    setUserWallet(user.id, released.wallet);
+    appendPaymentLedgerEntry(user.id, released.entry);
+    updateTaskStatus(taskId, "failed");
+
     return NextResponse.json(
-      { ok: false, taskId, message: "缺少积分冻结信息，无法自动释放。" },
-      { status: 400 }
+      {
+        ok: true,
+        taskId,
+        releasedQuota: reservation.totalAmount,
+        message: "任务已取消，积分已返还。"
+      },
+      { status: 200 }
     );
   }
 
-  const wallet = getUserWallet(user.id);
-  const released = releaseQuota({ wallet, reservation });
-
-  setUserWallet(user.id, released.wallet);
-  appendPaymentLedgerEntry(user.id, released.entry);
+  // No quota was frozen (pre-outline-approval), just mark as failed
   updateTaskStatus(taskId, "failed");
 
   return NextResponse.json(
     {
       ok: true,
       taskId,
-      releasedQuota: reservation.totalAmount,
-      message: "任务已取消，积分已返还。"
+      releasedQuota: 0,
+      message: "任务已取消。"
     },
     { status: 200 }
   );
@@ -119,16 +142,16 @@ async function cancelWithSupabase(taskId: string, user: SessionUser) {
     );
   }
 
-  if (taskRow.status !== "quota_frozen") {
+  if (!CANCELLABLE_STATUSES.has(taskRow.status)) {
     return NextResponse.json(
-      { ok: false, taskId, message: "只能取消处于 quota_frozen 状态的任务。" },
+      { ok: false, taskId, message: "当前任务状态不允许取消。" },
       { status: 400 }
     );
   }
 
   let reservation = taskRow.quota_reservation as FrozenQuotaReservation | null;
 
-  // If no reservation stored (column might not exist yet), reconstruct from ledger
+  // If no reservation stored, try to reconstruct from ledger
   if (!reservation || !reservation.totalAmount) {
     const { data: ledgerRow } = await client
       .from("quota_ledger_entries")
@@ -151,75 +174,70 @@ async function cancelWithSupabase(taskId: string, user: SessionUser) {
     }
   }
 
-  if (!reservation || !reservation.totalAmount) {
-    return NextResponse.json(
-      { ok: false, taskId, message: "缺少积分冻结信息，无法自动释放。" },
-      { status: 400 }
-    );
-  }
+  // If there's frozen quota to release, do so
+  if (reservation && reservation.totalAmount > 0) {
+    // 2. Load wallet
+    const { data: walletRow, error: walletError } = await client
+      .from("quota_wallets")
+      .select("recharge_quota,subscription_quota,frozen_quota")
+      .eq("user_id", user.id)
+      .maybeSingle();
 
-  // 2. Load wallet
-  const { data: walletRow, error: walletError } = await client
-    .from("quota_wallets")
-    .select("recharge_quota,subscription_quota,frozen_quota")
-    .eq("user_id", user.id)
-    .maybeSingle();
+    if (walletError) {
+      console.error("[task-cancel] 查询钱包失败:", walletError.message);
+      return NextResponse.json(
+        { ok: false, taskId, message: `查询钱包失败：${walletError.message}` },
+        { status: 500 }
+      );
+    }
 
-  if (walletError) {
-    console.error("[task-cancel] 查询钱包失败:", walletError.message);
-    return NextResponse.json(
-      { ok: false, taskId, message: `查询钱包失败：${walletError.message}` },
-      { status: 500 }
-    );
-  }
+    const wallet = {
+      rechargeQuota: Number(walletRow?.recharge_quota ?? 0),
+      subscriptionQuota: Number(walletRow?.subscription_quota ?? 0),
+      frozenQuota: Number(walletRow?.frozen_quota ?? 0)
+    };
 
-  const wallet = {
-    rechargeQuota: Number(walletRow?.recharge_quota ?? 0),
-    subscriptionQuota: Number(walletRow?.subscription_quota ?? 0),
-    frozenQuota: Number(walletRow?.frozen_quota ?? 0)
-  };
+    // 3. Compute release
+    const released = releaseQuota({ wallet, reservation });
 
-  // 3. Compute release
-  const released = releaseQuota({ wallet, reservation });
+    // 4. Update wallet
+    const { error: walletUpdateError } = await client
+      .from("quota_wallets")
+      .update({
+        recharge_quota: released.wallet.rechargeQuota,
+        subscription_quota: released.wallet.subscriptionQuota,
+        frozen_quota: released.wallet.frozenQuota
+      })
+      .eq("user_id", user.id);
 
-  // 4. Update wallet
-  const { error: walletUpdateError } = await client
-    .from("quota_wallets")
-    .update({
-      recharge_quota: released.wallet.rechargeQuota,
-      subscription_quota: released.wallet.subscriptionQuota,
-      frozen_quota: released.wallet.frozenQuota
-    })
-    .eq("user_id", user.id);
+    if (walletUpdateError) {
+      console.error("[task-cancel] 更新钱包失败:", walletUpdateError.message);
+      return NextResponse.json(
+        { ok: false, taskId, message: `释放积分失败：${walletUpdateError.message}` },
+        { status: 500 }
+      );
+    }
 
-  if (walletUpdateError) {
-    console.error("[task-cancel] 更新钱包失败:", walletUpdateError.message);
-    return NextResponse.json(
-      { ok: false, taskId, message: `释放积分失败：${walletUpdateError.message}` },
-      { status: 500 }
-    );
-  }
+    // 5. Write ledger entry
+    const { error: ledgerError } = await client
+      .from("quota_ledger_entries")
+      .insert({
+        user_id: user.id,
+        task_id: taskId,
+        entry_kind: released.entry.kind,
+        amount: released.entry.amount,
+        balance_recharge_after: released.wallet.rechargeQuota,
+        balance_subscription_after: released.wallet.subscriptionQuota,
+        balance_frozen_after: released.wallet.frozenQuota,
+        unique_event_key: released.entry.ledgerKey,
+        metadata: {
+          note: released.entry.note
+        }
+      });
 
-  // 5. Write ledger entry
-  const { error: ledgerError } = await client
-    .from("quota_ledger_entries")
-    .insert({
-      user_id: user.id,
-      task_id: taskId,
-      entry_kind: released.entry.kind,
-      amount: released.entry.amount,
-      balance_recharge_after: released.wallet.rechargeQuota,
-      balance_subscription_after: released.wallet.subscriptionQuota,
-      balance_frozen_after: released.wallet.frozenQuota,
-      unique_event_key: released.entry.ledgerKey,
-      metadata: {
-        note: released.entry.note
-      }
-    });
-
-  if (ledgerError) {
-    console.error("[task-cancel] 写入流水失败:", ledgerError.message);
-    // Non-fatal: wallet already updated, just log
+    if (ledgerError) {
+      console.error("[task-cancel] 写入流水失败:", ledgerError.message);
+    }
   }
 
   // 6. Mark task as failed
@@ -237,8 +255,10 @@ async function cancelWithSupabase(taskId: string, user: SessionUser) {
     {
       ok: true,
       taskId,
-      releasedQuota: reservation.totalAmount,
-      message: "任务已取消，积分已返还。"
+      releasedQuota: reservation?.totalAmount ?? 0,
+      message: reservation?.totalAmount
+        ? "任务已取消，积分已返还。"
+        : "任务已取消。"
     },
     { status: 200 }
   );

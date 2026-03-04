@@ -1,7 +1,13 @@
 import type { TaskStatus } from "@/src/types/tasks";
 
 export const allowedTransitions: Record<TaskStatus, TaskStatus[]> = {
-  created: ["quota_frozen", "failed"],
+  created: [
+    "quota_frozen",
+    "extracting_files",
+    "awaiting_primary_file_confirmation",
+    "building_rule_card",
+    "failed"
+  ],
   quota_frozen: ["extracting_files", "failed"],
   extracting_files: [
     "awaiting_primary_file_confirmation",
@@ -11,7 +17,7 @@ export const allowedTransitions: Record<TaskStatus, TaskStatus[]> = {
   awaiting_primary_file_confirmation: ["building_rule_card", "failed"],
   building_rule_card: ["outline_ready", "failed"],
   outline_ready: ["awaiting_outline_approval", "failed"],
-  awaiting_outline_approval: ["drafting", "failed"],
+  awaiting_outline_approval: ["quota_frozen", "drafting", "failed"],
   drafting: ["adjusting_word_count", "failed"],
   adjusting_word_count: ["verifying_references", "failed"],
   verifying_references: ["exporting", "failed"],

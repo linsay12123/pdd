@@ -9,13 +9,13 @@ describe("task create client", () => {
         ok: true,
         task: {
           id: "task-1",
-          status: "quota_frozen",
+          status: "created",
           targetWordCount: 2000,
           citationStyle: "APA 7",
           specialRequirements: "Focus on finance."
         },
-        frozenQuota: 460,
-        message: "任务已创建，460 积分已冻结。"
+        frozenQuota: 0,
+        message: "任务已创建。"
       })
     });
 

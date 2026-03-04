@@ -24,7 +24,7 @@ describe("task file routes", () => {
     saveTaskSummary({
       id: "task-1",
       userId: "user-1",
-      status: "quota_frozen",
+      status: "created",
       targetWordCount: 2000,
       citationStyle: "APA 7",
       specialRequirements: ""
@@ -93,7 +93,7 @@ describe("task file routes", () => {
     saveTaskSummary({
       id: "task-2",
       userId: "user-1",
-      status: "quota_frozen",
+      status: "created",
       targetWordCount: 2000,
       citationStyle: "APA 7",
       specialRequirements: ""

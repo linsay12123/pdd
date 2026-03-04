@@ -184,7 +184,8 @@ async function reviseOutlineVersionLocally({
     citationStyle: task.citationStyle,
     chapterCountOverride: task.requestedChapterCount ?? null,
     shorterOutline: shouldShortenOutline(feedback),
-    specialRequirements: task.specialRequirements
+    specialRequirements: task.specialRequirements,
+    feedback
   });
   const nextTask = patchTaskSummary(taskId, {
     outlineRevisionCount: (task.outlineRevisionCount ?? 0) + 1,
@@ -225,7 +226,8 @@ async function reviseOutlineVersionWithSupabase({
     citationStyle: task.citationStyle,
     chapterCountOverride: task.requestedChapterCount ?? null,
     shorterOutline: shouldShortenOutline(feedback),
-    specialRequirements: task.specialRequirements
+    specialRequirements: task.specialRequirements,
+    feedback
   });
   const updatedTask = {
     ...task,

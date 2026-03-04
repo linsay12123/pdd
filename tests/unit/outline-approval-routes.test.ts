@@ -9,6 +9,10 @@ import {
   resetTaskOutlineStore,
   resetTaskStore
 } from "../../src/lib/tasks/repository";
+import {
+  resetPaymentState,
+  seedUserWallet
+} from "../../src/lib/payments/repository";
 import { saveOutlineVersion } from "../../src/lib/tasks/save-outline-version";
 
 describe("outline approval routes", () => {
@@ -17,6 +21,13 @@ describe("outline approval routes", () => {
     process.env.SUPABASE_SERVICE_ROLE_KEY = "";
     resetTaskStore();
     resetTaskOutlineStore();
+    resetPaymentState();
+    // Seed wallet so quota freeze succeeds during approval
+    seedUserWallet("user-1", {
+      rechargeQuota: 5000,
+      subscriptionQuota: 0,
+      frozenQuota: 0
+    });
   });
 
   it("creates a new outline version from user feedback and increases the revision count", async () => {

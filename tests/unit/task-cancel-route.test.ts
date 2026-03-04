@@ -55,7 +55,7 @@ describe("task cancel route", () => {
     expect(payload.message).toContain("登录");
   });
 
-  it("rejects tasks not in quota_frozen status with 400", async () => {
+  it("rejects tasks in non-cancellable status with 400", async () => {
     saveTaskSummary({
       id: "task-1",
       userId: "user-1",
@@ -80,22 +80,22 @@ describe("task cancel route", () => {
     expect(response.status).toBe(400);
     const payload = await response.json();
     expect(payload.ok).toBe(false);
-    expect(payload.message).toContain("quota_frozen");
+    expect(payload.message).toContain("不允许取消");
   });
 
-  it("rejects tasks without a reservation with 400", async () => {
+  it("cancels pre-approval task without releasing quota", async () => {
     saveTaskSummary({
       id: "task-1",
       userId: "user-1",
-      status: "quota_frozen",
+      status: "created",
       targetWordCount: 2000,
       citationStyle: "APA 7"
     });
 
     seedUserWallet("user-1", {
-      rechargeQuota: 0,
+      rechargeQuota: 1000,
       subscriptionQuota: 0,
-      frozenQuota: 460
+      frozenQuota: 0
     });
 
     const response = await handleCancelRequest(
@@ -110,13 +110,24 @@ describe("task cancel route", () => {
       }
     );
 
-    expect(response.status).toBe(400);
+    expect(response.status).toBe(200);
     const payload = await response.json();
-    expect(payload.ok).toBe(false);
-    expect(payload.message).toContain("冻结信息");
+    expect(payload.ok).toBe(true);
+    expect(payload.releasedQuota).toBe(0);
+
+    const task = getTaskSummary("task-1");
+    expect(task?.status).toBe("failed");
+
+    // Wallet unchanged — no quota was frozen
+    const wallet = getUserWallet("user-1");
+    expect(wallet).toEqual({
+      rechargeQuota: 1000,
+      subscriptionQuota: 0,
+      frozenQuota: 0
+    });
   });
 
-  it("releases quota and marks task as failed on successful cancel", async () => {
+  it("releases quota and marks task as failed when quota was frozen", async () => {
     saveTaskSummary({
       id: "task-1",
       userId: "user-1",
@@ -158,5 +169,38 @@ describe("task cancel route", () => {
       subscriptionQuota: 0,
       frozenQuota: 0
     });
+  });
+
+  it("allows cancelling awaiting_outline_approval tasks", async () => {
+    saveTaskSummary({
+      id: "task-1",
+      userId: "user-1",
+      status: "awaiting_outline_approval",
+      targetWordCount: 2000,
+      citationStyle: "APA 7"
+    });
+
+    seedUserWallet("user-1", {
+      rechargeQuota: 1000,
+      subscriptionQuota: 0,
+      frozenQuota: 0
+    });
+
+    const response = await handleCancelRequest(
+      makeRequest(),
+      makeContext("task-1"),
+      {
+        requireUser: async () => ({
+          id: "user-1",
+          email: "user@example.com",
+          role: "user"
+        })
+      }
+    );
+
+    expect(response.status).toBe(200);
+    const payload = await response.json();
+    expect(payload.ok).toBe(true);
+    expect(payload.releasedQuota).toBe(0);
   });
 });

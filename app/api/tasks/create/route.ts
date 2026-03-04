@@ -41,7 +41,7 @@ export async function handleTaskCreateRequest(
         ok: true,
         task: toSessionTaskPayload(result.task),
         frozenQuota: result.frozenQuota,
-        message: `任务已创建，${result.frozenQuota} 积分已冻结。`
+        message: "任务已创建。"
       },
       { status: 201 }
     );
