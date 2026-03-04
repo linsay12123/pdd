@@ -64,3 +64,16 @@ export async function requestOpenAITextResponse({
     output_text: data.output_text ?? ""
   };
 }
+
+export function safeParseJSON<T>(text: string): T | null {
+  try {
+    const cleaned = text
+      .replace(/^```json\s*/i, "")
+      .replace(/^```\s*/i, "")
+      .replace(/```\s*$/i, "")
+      .trim();
+    return JSON.parse(cleaned) as T;
+  } catch {
+    return null;
+  }
+}

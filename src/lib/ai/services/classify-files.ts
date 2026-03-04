@@ -1,5 +1,11 @@
-import { buildClassifyFilesPrompt } from "@/src/lib/ai/prompts/classify-files";
-import { requestOpenAITextResponse } from "@/src/lib/ai/openai-client";
+import {
+  buildClassifyFilesPrompt,
+  buildExtractRequirementsPrompt
+} from "@/src/lib/ai/prompts/classify-files";
+import {
+  requestOpenAITextResponse,
+  safeParseJSON
+} from "@/src/lib/ai/openai-client";
 
 export type TaskFileCandidate = {
   id: string;
@@ -200,4 +206,43 @@ export function extractPrimaryTaskHints(text: string): PrimaryTaskHints {
     mustAnswer: extractListAfterLabel(text, /must answer[:\s]+([^\n]+)/i),
     gradingPriorities: extractListAfterLabel(text, /grading priorities?[:\s]+([^\n]+)/i)
   };
+}
+
+export async function extractRequirementsWithGPT(
+  primaryFileText: string
+): Promise<PrimaryTaskHints> {
+  try {
+    const prompt = buildExtractRequirementsPrompt(primaryFileText);
+    const response = await requestOpenAITextResponse({
+      input: prompt,
+      reasoningEffort: "low"
+    });
+    const parsed = safeParseJSON<{
+      explicitWordCount?: number | null;
+      explicitCitationStyle?: string | null;
+      topic?: string | null;
+      chapterCountOverride?: number | null;
+      mustAnswer?: string[];
+      gradingPriorities?: string[];
+    }>(response.output_text);
+
+    if (!parsed) {
+      return extractPrimaryTaskHints(primaryFileText);
+    }
+
+    return {
+      explicitWordCount:
+        typeof parsed.explicitWordCount === "number" ? parsed.explicitWordCount : undefined,
+      explicitCitationStyle: parsed.explicitCitationStyle ?? undefined,
+      topic: parsed.topic ?? undefined,
+      chapterCountOverride:
+        typeof parsed.chapterCountOverride === "number" ? parsed.chapterCountOverride : undefined,
+      mustAnswer: Array.isArray(parsed.mustAnswer) ? parsed.mustAnswer.filter(Boolean) : [],
+      gradingPriorities: Array.isArray(parsed.gradingPriorities)
+        ? parsed.gradingPriorities.filter(Boolean)
+        : []
+    };
+  } catch {
+    return extractPrimaryTaskHints(primaryFileText);
+  }
 }

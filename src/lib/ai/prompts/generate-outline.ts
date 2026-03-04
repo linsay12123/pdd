@@ -20,6 +20,10 @@ export type OutlineScaffold = {
   citationStyle: string;
   sections: OutlineSection[];
   chineseMirrorPending: boolean;
+  chineseMirror?: {
+    articleTitle: string;
+    sections: OutlineSection[];
+  } | null;
 };
 
 type OutlineScaffoldInput = {
@@ -28,6 +32,12 @@ type OutlineScaffoldInput = {
   citationStyle: string;
   chapterCountOverride?: number | null;
   shorterOutline?: boolean;
+};
+
+export type GenerateOutlineInput = OutlineScaffoldInput & {
+  mustAnswer?: string[];
+  gradingPriorities?: string[];
+  specialRequirements?: string;
 };
 
 export function calculateDefaultChapterCount(targetWordCount: number) {
@@ -95,20 +105,46 @@ export function buildOutlineScaffold({
   };
 }
 
-export function buildGenerateOutlinePrompt(
-  input: OutlineScaffoldInput & { specialRequirements?: string }
-) {
-  const scaffold = buildOutlineScaffold(input);
+export function buildGenerateOutlinePrompt(input: GenerateOutlineInput) {
+  const sectionCount =
+    input.chapterCountOverride || calculateDefaultChapterCount(input.targetWordCount);
+  const bulletCount = determineOutlineBulletCount(
+    input.targetWordCount,
+    input.shorterOutline
+  );
 
   return [
-    "Generate an English outline for a full academic article.",
-    "Return a clear article title, short section titles, a one-line summary per section, and 3 to 5 bullets per section.",
-    "Also produce a Chinese mirror version when possible, but the English outline must remain the primary output.",
+    "Generate an academic article outline. Return ONLY valid JSON (no markdown fences, no explanation).",
     "",
-    `TOPIC: ${input.topic}`,
-    `TARGET_WORD_COUNT: ${input.targetWordCount}`,
-    `CITATION_STYLE: ${input.citationStyle}`,
-    `SECTION_COUNT: ${scaffold.sections.length}`,
-    `SPECIAL_REQUIREMENTS: ${input.specialRequirements || "(none)"}`
+    "Required JSON structure:",
+    "{",
+    '  "articleTitle": "<a specific, meaningful title for the article>",',
+    '  "sections": [',
+    "    {",
+    '      "title": "<short section title, 2-6 words>",',
+    '      "summary": "<one sentence describing what this section will cover>",',
+    '      "bulletPoints": ["<specific point 1>", "<specific point 2>", ...]',
+    "    }",
+    "  ]",
+    "}",
+    "",
+    "Requirements:",
+    `- TOPIC: ${input.topic}`,
+    `- TARGET_WORD_COUNT: ${input.targetWordCount}`,
+    `- CITATION_STYLE: ${input.citationStyle}`,
+    `- SECTION_COUNT: exactly ${sectionCount} sections`,
+    `- BULLET_POINTS_PER_SECTION: ${bulletCount}`,
+    `- MUST_ANSWER: ${input.mustAnswer?.length ? input.mustAnswer.join("; ") : "(none)"}`,
+    `- GRADING_PRIORITIES: ${input.gradingPriorities?.length ? input.gradingPriorities.join("; ") : "(none)"}`,
+    `- SPECIAL_REQUIREMENTS: ${input.specialRequirements || "(none)"}`,
+    "",
+    "Rules:",
+    "- The articleTitle must be specific to the topic, not generic.",
+    "- Each section title must be a short heading (2-6 words), NOT a full sentence.",
+    "- Each summary must be a real sentence describing what will be argued or analyzed.",
+    "- Each bullet point must be a specific content guidance point, not a placeholder.",
+    "- The outline must address all MUST_ANSWER items across the sections.",
+    "- The first section should introduce the topic and the last section should conclude.",
+    "- All text must be in English."
   ].join("\n");
 }

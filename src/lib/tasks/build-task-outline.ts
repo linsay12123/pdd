@@ -3,7 +3,11 @@ import {
   type BackgroundRuleHints,
   type WritingRuleCard
 } from "@/src/lib/ai/services/build-rule-card";
-import { extractPrimaryTaskHints } from "@/src/lib/ai/services/classify-files";
+import {
+  extractPrimaryTaskHints,
+  extractRequirementsWithGPT,
+  type PrimaryTaskHints
+} from "@/src/lib/ai/services/classify-files";
 import type { OutlineScaffold } from "@/src/lib/ai/prompts/generate-outline";
 import { generateOutlineForTask } from "@/trigger/jobs/generate-outline";
 import type { TaskFileRecord, TaskSummary } from "@/src/types/tasks";
@@ -32,8 +36,12 @@ export async function buildTaskOutlineBundle({
     (file) => file.id !== primaryRequirementFileId && file.role === "background"
   );
 
+  const regexHints = extractPrimaryTaskHints(primaryFile.extractedText);
+  const gptHints = await extractRequirementsWithGPT(primaryFile.extractedText);
+  const mergedHints = mergeHints(regexHints, gptHints);
+
   const ruleCard = buildInitialRuleCard({
-    primaryTaskHints: extractPrimaryTaskHints(primaryFile.extractedText),
+    primaryTaskHints: mergedHints,
     backgroundHints: buildBackgroundHints(backgroundFiles),
     userSpecialRequirements: task.specialRequirements ?? ""
   });
@@ -41,12 +49,33 @@ export async function buildTaskOutlineBundle({
     topic: ruleCard.topic,
     targetWordCount: ruleCard.targetWordCount,
     citationStyle: ruleCard.citationStyle,
-    chapterCountOverride: ruleCard.chapterCountOverride
+    chapterCountOverride: ruleCard.chapterCountOverride,
+    mustAnswer: ruleCard.mustAnswer,
+    gradingPriorities: ruleCard.gradingPriorities,
+    specialRequirements: ruleCard.specialRequirements
   });
 
   return {
     ruleCard,
     outline
+  };
+}
+
+function mergeHints(
+  regexHints: PrimaryTaskHints,
+  gptHints: PrimaryTaskHints
+): PrimaryTaskHints {
+  return {
+    explicitWordCount: gptHints.explicitWordCount ?? regexHints.explicitWordCount,
+    explicitCitationStyle: gptHints.explicitCitationStyle ?? regexHints.explicitCitationStyle,
+    topic: gptHints.topic ?? regexHints.topic,
+    chapterCountOverride: gptHints.chapterCountOverride ?? regexHints.chapterCountOverride,
+    mustAnswer: [
+      ...new Set([...(gptHints.mustAnswer ?? []), ...(regexHints.mustAnswer ?? [])])
+    ],
+    gradingPriorities: [
+      ...new Set([...(gptHints.gradingPriorities ?? []), ...(regexHints.gradingPriorities ?? [])])
+    ]
   };
 }
 

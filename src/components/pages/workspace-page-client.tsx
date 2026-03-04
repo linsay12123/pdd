@@ -586,6 +586,26 @@ export function WorkspacePageClient({ initialQuota }: WorkspacePageClientProps) 
                           </ul>
                         </div>
                       ))}
+
+                      {activeTask?.outline?.chineseMirror && (
+                        <div className="mt-8 pt-6 border-t border-white/10">
+                          <h3 className="text-sm font-bold text-gold-400 uppercase tracking-wider mb-6">中文大纲参考</h3>
+                          <p className="text-cream-50 font-medium mb-4">{activeTask.outline.chineseMirror.articleTitle}</p>
+                          {activeTask.outline.chineseMirror.sections.map((section, i) => (
+                            <div key={i} className="mb-4">
+                              <h4 className="text-cream-50 font-medium mb-2">
+                                {`${i + 1}. ${section.title}`}
+                              </h4>
+                              <p className="mb-2 text-sm text-brand-700">{section.summary}</p>
+                              <ul className="list-disc list-inside text-sm text-brand-700 space-y-1 pl-2">
+                                {section.bulletPoints.map((item, j) => (
+                                  <li key={j}>{item}</li>
+                                ))}
+                              </ul>
+                            </div>
+                          ))}
+                        </div>
+                      )}
                     </div>
                   </div>
 
