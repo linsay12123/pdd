@@ -1,5 +1,7 @@
 import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
+import { createServerClient } from "@supabase/ssr";
+import { env } from "@/src/config/env";
 
 export const protectedPathPrefixes = [
   "/workspace",
@@ -46,14 +48,17 @@ export function hasSupabaseSessionCookie(request: NextRequest) {
     );
 }
 
-export function proxy(request: NextRequest) {
+export async function proxy(request: NextRequest) {
+  const passthroughResponse = NextResponse.next();
+  const authenticated = await resolveSessionState(request, passthroughResponse);
+
   if (isApiPath(request.nextUrl.pathname)) {
     if (request.method === "OPTIONS" || isAnonymousApiPath(request.nextUrl.pathname)) {
-      return NextResponse.next();
+      return passthroughResponse;
     }
 
-    if (hasSupabaseSessionCookie(request)) {
-      return NextResponse.next();
+    if (authenticated) {
+      return passthroughResponse;
     }
 
     return NextResponse.json(
@@ -66,17 +71,47 @@ export function proxy(request: NextRequest) {
   }
 
   if (!isProtectedPath(request.nextUrl.pathname)) {
-    return NextResponse.next();
+    return passthroughResponse;
   }
 
-  if (hasSupabaseSessionCookie(request)) {
-    return NextResponse.next();
+  if (authenticated) {
+    return passthroughResponse;
   }
 
   const loginUrl = new URL("/login", request.url);
   loginUrl.searchParams.set("redirect", request.nextUrl.pathname);
 
   return NextResponse.redirect(loginUrl);
+}
+
+async function resolveSessionState(request: NextRequest, response: NextResponse) {
+  if (!env.NEXT_PUBLIC_SUPABASE_URL || !env.NEXT_PUBLIC_SUPABASE_ANON_KEY) {
+    return hasSupabaseSessionCookie(request);
+  }
+
+  try {
+    const client = createServerClient(
+      env.NEXT_PUBLIC_SUPABASE_URL,
+      env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
+      {
+        cookies: {
+          getAll() {
+            return request.cookies.getAll();
+          },
+          setAll(cookieValues) {
+            cookieValues.forEach(({ name, value, options }) => {
+              response.cookies.set(name, value, options);
+            });
+          }
+        }
+      }
+    );
+
+    const authResult = await client.auth.getUser();
+    return Boolean(authResult.data.user);
+  } catch {
+    return hasSupabaseSessionCookie(request);
+  }
 }
 
 export const config = {

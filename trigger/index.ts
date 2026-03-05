@@ -1,4 +1,5 @@
 import { analyzeUploadedTaskJob } from "./jobs/analyze-uploaded-task";
+import { cleanupTaskArtifactsJob } from "./jobs/cleanup-task-artifacts";
 import { cleanupStaleQuotaReservationsJob } from "./jobs/cleanup-stale-quota-reservations";
 import { expireTaskAssets } from "./jobs/expire-task-assets";
 import { generateOutlineForTask } from "./jobs/generate-outline";
@@ -7,6 +8,7 @@ import { verifyReferencesForDraft } from "./jobs/verify-references";
 
 export const registeredTriggerJobs = {
   analyzeUploadedTaskJob,
+  cleanupTaskArtifactsJob,
   cleanupStaleQuotaReservationsJob,
   expireTaskAssets,
   generateOutlineForTask,

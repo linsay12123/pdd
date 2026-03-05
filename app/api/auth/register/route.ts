@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import type { User } from "@supabase/supabase-js";
 import { validateRegisterInput } from "@/src/lib/auth/auth-form";
 import { createSupabaseAdminClient } from "@/src/lib/supabase/admin";
+import { ensureSessionUserBootstrap } from "@/src/lib/auth/session-bootstrap";
 
 type RegisterRequestBody = {
   displayName?: string;
@@ -124,34 +125,16 @@ async function ensureUserBootstrap(input: {
   email: string;
   displayName: string;
 }) {
-  const { error: profileError } = await input.client.from("profiles").upsert(
+  await ensureSessionUserBootstrap(
     {
-      id: input.userId,
+      authUserId: input.userId,
       email: input.email,
-      display_name: input.displayName,
-      role: "user",
-      is_frozen: false
+      displayName: input.displayName
     },
-    { onConflict: "id" }
-  );
-
-  if (profileError) {
-    throw new Error(`写入用户资料失败：${profileError.message}`);
-  }
-
-  const { error: walletError } = await input.client.from("quota_wallets").upsert(
     {
-      user_id: input.userId,
-      recharge_quota: 0,
-      subscription_quota: 0,
-      frozen_quota: 0
-    },
-    { onConflict: "user_id" }
+      createAdminClient: () => input.client
+    }
   );
-
-  if (walletError) {
-    throw new Error(`写入积分钱包失败：${walletError.message}`);
-  }
 }
 
 export async function handleRegisterRequest(

@@ -3,13 +3,19 @@ import { createSupabaseAdminClient } from "@/src/lib/supabase/admin";
 type EnsureSessionUserBootstrapInput = {
   authUserId: string;
   email: string;
+  displayName?: string;
 };
 
 type EnsureSessionUserBootstrapDependencies = {
   createAdminClient?: typeof createSupabaseAdminClient;
 };
 
-function deriveDisplayName(email: string) {
+function deriveDisplayName(email: string, explicitDisplayName?: string) {
+  const normalized = explicitDisplayName?.trim();
+  if (normalized) {
+    return normalized.slice(0, 40);
+  }
+
   const localPart = email.trim().split("@")[0]?.trim();
 
   if (!localPart) {
@@ -25,7 +31,7 @@ export async function ensureSessionUserBootstrap(
 ) {
   const client =
     dependencies.createAdminClient?.() ?? createSupabaseAdminClient();
-  const displayName = deriveDisplayName(input.email);
+  const displayName = deriveDisplayName(input.email, input.displayName);
 
   const { error: profileError } = await client.from("profiles").upsert(
     {
@@ -35,7 +41,7 @@ export async function ensureSessionUserBootstrap(
       role: "user",
       is_frozen: false
     },
-    { onConflict: "id" }
+    { onConflict: "id", ignoreDuplicates: true }
   );
 
   if (profileError) {
@@ -49,7 +55,7 @@ export async function ensureSessionUserBootstrap(
       subscription_quota: 0,
       frozen_quota: 0
     },
-    { onConflict: "user_id" }
+    { onConflict: "user_id", ignoreDuplicates: true }
   );
 
   if (walletError) {

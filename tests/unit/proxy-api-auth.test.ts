@@ -21,8 +21,8 @@ function makeRequest(input: {
 }
 
 describe("proxy api auth gate", () => {
-  it("allows anonymous access to health route", () => {
-    const response = proxy(
+  it("allows anonymous access to health route", async () => {
+    const response = await proxy(
       makeRequest({
         pathname: "/api/health"
       })
@@ -32,7 +32,7 @@ describe("proxy api auth gate", () => {
   });
 
   it("rejects protected api request when not signed in", async () => {
-    const response = proxy(
+    const response = await proxy(
       makeRequest({
         pathname: "/api/tasks/create"
       })
@@ -44,8 +44,8 @@ describe("proxy api auth gate", () => {
     expect(payload.message).toContain("请先登录");
   });
 
-  it("allows protected api request when supabase cookie exists", () => {
-    const response = proxy(
+  it("allows protected api request when supabase cookie exists", async () => {
+    const response = await proxy(
       makeRequest({
         pathname: "/api/tasks/create",
         cookies: [
