@@ -27,6 +27,7 @@ function makeContext(taskId: string) {
 }
 
 const testReservation: FrozenQuotaReservation = {
+  reservationId: "resv-cancel-task-1",
   taskId: "task-1",
   chargePath: "generation",
   totalAmount: 460,

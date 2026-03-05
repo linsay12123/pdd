@@ -1,7 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  composeHumanizeDraftMarkdown,
   handleHumanizeStatusRequest,
-  handleHumanizeRequest
+  handleHumanizeRequest,
+  pickPreferredHumanizedOutputId
 } from "../../app/api/tasks/[taskId]/humanize/route";
 
 function makeContext(taskId: string) {
@@ -71,6 +73,7 @@ describe("humanize route", () => {
         chargeQuota: async () => ({
           amount: 250,
           reservation: {
+            reservationId: "resv-humanize-2",
             taskId: "task-humanize-2",
             chargePath: "humanize",
             totalAmount: 250,
@@ -161,5 +164,40 @@ describe("humanize route", () => {
     expect(payload.ok).toBe(true);
     expect(payload.humanizeStatus).toBe("completed");
     expect(payload.downloads.humanizedDocxOutputId).toBe("out-humanized-4");
+  });
+
+  it("keeps the original draft title instead of forcing task topic when composing markdown", () => {
+    const draftMarkdown = composeHumanizeDraftMarkdown({
+      draftBodyMarkdown: "# Real Draft Title\n\n## Body\n\nParagraph.",
+      draftReferencesMarkdown: "Ref A"
+    });
+
+    expect(draftMarkdown.startsWith("# Real Draft Title")).toBe(true);
+    expect(draftMarkdown).toContain("## References\nRef A");
+  });
+
+  it("prefers the latest active humanized output id", () => {
+    const outputId = pickPreferredHumanizedOutputId([
+      {
+        id: "out-old-active",
+        outputKind: "humanized_docx",
+        isActive: true,
+        createdAt: "2026-03-01T00:00:00.000Z"
+      },
+      {
+        id: "out-new-active",
+        outputKind: "humanized_docx",
+        isActive: true,
+        createdAt: "2026-03-02T00:00:00.000Z"
+      },
+      {
+        id: "out-new-inactive",
+        outputKind: "humanized_docx",
+        isActive: false,
+        createdAt: "2026-03-03T00:00:00.000Z"
+      }
+    ]);
+
+    expect(outputId).toBe("out-new-active");
   });
 });

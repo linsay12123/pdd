@@ -18,6 +18,7 @@ export type WalletSnapshot = {
 export type TaskChargePath = "generation" | "humanize";
 
 export type FrozenQuotaReservation = {
+  reservationId: string;
   taskId: string;
   chargePath: TaskChargePath;
   totalAmount: number;

@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import type {
   QuotaLedgerEntry,
   QuotaLedgerKind,
@@ -11,15 +12,19 @@ export function createLedgerEntry({
   kind,
   amount,
   taskId,
-  note
+  note,
+  eventKey
 }: {
   kind: QuotaLedgerKind;
   amount: number;
   taskId: string;
   note: string;
+  eventKey?: string;
 }): QuotaLedgerEntry {
+  const suffix = eventKey?.trim() || randomUUID();
+
   return {
-    ledgerKey: `${taskId}:${kind}:${amount}`,
+    ledgerKey: `${taskId}:${kind}:${suffix}`,
     kind,
     amount,
     taskId,

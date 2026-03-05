@@ -21,7 +21,8 @@ export function releaseQuota({ wallet, reservation }: ReleaseQuotaInput) {
       kind: resolveLedgerKind(reservation.chargePath, "release"),
       amount: reservation.totalAmount,
       taskId: reservation.taskId,
-      note: `Released ${reservation.totalAmount} quota for ${reservation.chargePath}`
+      note: `Released ${reservation.totalAmount} quota for ${reservation.chargePath}`,
+      eventKey: reservation.reservationId
     })
   };
 }

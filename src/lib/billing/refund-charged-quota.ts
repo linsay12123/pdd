@@ -20,7 +20,8 @@ export function refundChargedQuota({
       kind: resolveLedgerKind(reservation.chargePath, "release"),
       amount: reservation.totalAmount,
       taskId: reservation.taskId,
-      note: `Refunded ${reservation.totalAmount} quota for ${reservation.chargePath}`
+      note: `Refunded ${reservation.totalAmount} quota for ${reservation.chargePath}`,
+      eventKey: reservation.reservationId
     })
   };
 }

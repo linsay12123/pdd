@@ -168,4 +168,26 @@ describe("billing rules", () => {
     });
     expect(refunded.entry.kind).toBe("task_release");
   });
+
+  it("creates different ledger keys for repeated humanize attempts on the same task", () => {
+    const first = freezeQuota({
+      wallet: {
+        rechargeQuota: 20,
+        subscriptionQuota: 0,
+        frozenQuota: 0
+      },
+      amount: 5,
+      taskId: "task-humanize-retry",
+      chargePath: "humanize"
+    });
+
+    const second = freezeQuota({
+      wallet: first.wallet,
+      amount: 5,
+      taskId: "task-humanize-retry",
+      chargePath: "humanize"
+    });
+
+    expect(first.entry.ledgerKey).not.toBe(second.entry.ledgerKey);
+  });
 });

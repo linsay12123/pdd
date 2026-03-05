@@ -20,7 +20,8 @@ export function settleQuota({ wallet, reservation }: SettleQuotaInput) {
       kind: resolveLedgerKind(reservation.chargePath, "settle"),
       amount: reservation.totalAmount,
       taskId: reservation.taskId,
-      note: `Settled ${reservation.totalAmount} quota for ${reservation.chargePath}`
+      note: `Settled ${reservation.totalAmount} quota for ${reservation.chargePath}`,
+      eventKey: reservation.reservationId
     })
   };
 }

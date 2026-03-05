@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import type {
   FrozenQuotaReservation,
   TaskChargePath,
@@ -31,6 +32,7 @@ export function freezeQuota({
   const fromSubscription = Math.min(wallet.subscriptionQuota, amount);
   const fromRecharge = amount - fromSubscription;
   const reservation: FrozenQuotaReservation = {
+    reservationId: randomUUID(),
     taskId,
     chargePath,
     totalAmount: amount,
@@ -49,7 +51,8 @@ export function freezeQuota({
       kind: resolveLedgerKind(chargePath, "freeze"),
       amount,
       taskId,
-      note: `Froze ${amount} quota for ${chargePath}`
+      note: `Froze ${amount} quota for ${chargePath}`,
+      eventKey: reservation.reservationId
     })
   };
 }

@@ -50,6 +50,13 @@ type HumanizeStateSnapshot = {
   completedAt?: string | null;
 };
 
+type HumanizedOutputCandidate = {
+  id: string;
+  outputKind: string;
+  isActive: boolean;
+  createdAt: string;
+};
+
 type HumanizeRouteDependencies = {
   requireUser?: () => Promise<SessionUser>;
   isPersistenceReady?: () => boolean;
@@ -83,6 +90,40 @@ type HumanizeRouteDependencies = {
     citationStyle: string;
   }) => Promise<void>;
 };
+
+export function composeHumanizeDraftMarkdown(input: {
+  draftBodyMarkdown: string;
+  draftReferencesMarkdown?: string | null;
+}) {
+  const bodyMarkdown = input.draftBodyMarkdown.trim();
+  const referencesMarkdown = input.draftReferencesMarkdown?.trim() ?? "";
+  const hasReferencesHeading = /^##\s+references\s*$/im.test(bodyMarkdown);
+
+  if (!referencesMarkdown || hasReferencesHeading) {
+    return bodyMarkdown;
+  }
+
+  return `${bodyMarkdown}\n\n## References\n${referencesMarkdown}`;
+}
+
+export function pickPreferredHumanizedOutputId(
+  outputs: HumanizedOutputCandidate[]
+) {
+  const humanizedOutputs = outputs.filter(
+    (output) => output.outputKind === "humanized_docx"
+  );
+
+  if (humanizedOutputs.length === 0) {
+    return null;
+  }
+
+  const sortedNewestFirst = [...humanizedOutputs].sort((left, right) =>
+    right.createdAt.localeCompare(left.createdAt)
+  );
+  const newestActive = sortedNewestFirst.find((output) => output.isActive);
+
+  return newestActive?.id ?? sortedNewestFirst[0]?.id ?? null;
+}
 
 export async function handleHumanizeRequest(
   _request: Request,
@@ -324,13 +365,10 @@ async function loadTaskContextWithSupabase(
     throw new Error("TASK_CITATION_STYLE_NOT_READY");
   }
 
-  const draftMarkdown = [
-    task.topic ? `# ${task.topic}` : "",
-    draft.bodyMarkdown,
-    draft.referencesMarkdown ? `## References\n${draft.referencesMarkdown}` : ""
-  ]
-    .filter(Boolean)
-    .join("\n\n");
+  const draftMarkdown = composeHumanizeDraftMarkdown({
+    draftBodyMarkdown: draft.bodyMarkdown,
+    draftReferencesMarkdown: draft.referencesMarkdown
+  });
 
   return {
     task: {
@@ -363,7 +401,14 @@ async function loadHumanizeStateWithSupabase(
   return {
     status: task.humanizeStatus ?? "idle",
     provider: task.humanizeProvider ?? "undetectable",
-    outputId: outputs.find((output) => output.outputKind === "humanized_docx")?.id ?? null,
+    outputId: pickPreferredHumanizedOutputId(
+      outputs.map((output) => ({
+        id: output.id,
+        outputKind: output.outputKind,
+        isActive: output.isActive,
+        createdAt: output.createdAt
+      }))
+    ),
     errorMessage: task.humanizeErrorMessage ?? null,
     requestedAt: task.humanizeRequestedAt ?? null,
     completedAt: task.humanizeCompletedAt ?? null
