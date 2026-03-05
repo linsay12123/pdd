@@ -202,7 +202,7 @@ function mapAnalysisFailureMessage(analysis: TaskAnalysisSnapshot | null) {
   }
 
   if (code === "MODEL_ANALYSIS_TIMEOUT") {
-    return "系统已经开始分析你上传的文件，但本次处理超过等待上限。请再点一次上传重试。";
+    return "系统已经开始分析你上传的文件，但本次处理超过等待上限。请直接点“一键重试分析”，不用重新上传。";
   }
 
   if (
@@ -211,7 +211,7 @@ function mapAnalysisFailureMessage(analysis: TaskAnalysisSnapshot | null) {
     code === "MODEL_RETURNED_EMPTY_OUTLINE" ||
     code === "MODEL_RETURNED_EMPTY_OUTLINE_AFTER_RETRY"
   ) {
-    return "系统已经读到你上传的文件，但模型这次返回内容不完整。请再点一次上传重试。";
+    return "系统已经读到你上传的文件，但模型这次返回内容不完整。请直接点“一键重试分析”，不用重新上传。";
   }
 
   if (code.startsWith("OpenAI request failed with status")) {

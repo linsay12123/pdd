@@ -78,6 +78,53 @@ describe("analysis retry route", () => {
     expect(getTaskSummary("task-timeout")?.analysisStatus).toBe("pending");
   });
 
+  it("does not enqueue another run when previous analysis run is still active", async () => {
+    saveTaskSummary({
+      id: "task-active-run",
+      userId: "user-1",
+      status: "created",
+      targetWordCount: null,
+      citationStyle: null,
+      specialRequirements: "",
+      analysisStatus: "pending",
+      analysisRequestedAt: new Date(Date.now() - 11 * 60 * 1000).toISOString(),
+      analysisTriggerRunId: "run-active-1"
+    });
+
+    saveTaskFileRecords([
+      {
+        id: "file-1",
+        taskId: "task-active-run",
+        userId: "user-1",
+        originalFilename: "brief.txt",
+        storagePath: "tmp/brief.txt",
+        extractedText: "brief",
+        role: "unknown",
+        isPrimary: false
+      }
+    ]);
+
+    const enqueueTaskAnalysis = vi.fn(async () => "run-should-not-be-used");
+    const response = await handleTaskAnalysisRetryRequest(
+      new Request("http://localhost/api/tasks/task-active-run/analysis/retry", {
+        method: "POST"
+      }),
+      { taskId: "task-active-run" },
+      {
+        isPersistenceReady: () => true,
+        requireUser: async () => makeUser(),
+        getTriggerRunState: async () => "active",
+        enqueueTaskAnalysis
+      }
+    );
+    const payload = await response.json();
+
+    expect(response.status).toBe(202);
+    expect(payload.analysisStatus).toBe("pending");
+    expect(String(payload.message)).toContain("避免重复排队");
+    expect(enqueueTaskAnalysis).not.toHaveBeenCalled();
+  });
+
   it("rejects retry when pending analysis has not timed out", async () => {
     saveTaskSummary({
       id: "task-pending",

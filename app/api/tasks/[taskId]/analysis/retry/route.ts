@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { NextResponse } from "next/server";
-import { tasks } from "@trigger.dev/sdk/v3";
+import { runs, tasks } from "@trigger.dev/sdk/v3";
 import { requireCurrentSessionUser } from "@/src/lib/auth/current-user";
 import {
   buildAnalysisProgressPayload,
@@ -31,9 +31,12 @@ type EnqueueAnalyzeTaskInput = {
   forcedPrimaryFileId?: string | null;
 };
 
+type TriggerRunState = "active" | "terminal" | "missing" | "unknown";
+
 type TaskAnalysisRetryRouteDependencies = {
   requireUser?: () => Promise<SessionUser>;
   isPersistenceReady?: () => boolean;
+  getTriggerRunState?: (runId: string) => Promise<TriggerRunState>;
   enqueueTaskAnalysis?: (input: EnqueueAnalyzeTaskInput) => Promise<string | null>;
 };
 
@@ -122,6 +125,42 @@ export async function handleTaskAnalysisRetryRequest(
         },
         { status: 409 }
       );
+    }
+
+    const currentRunId = task.analysisTriggerRunId?.trim();
+    if (currentRunId) {
+      const runState = await (dependencies.getTriggerRunState ?? getTriggerRunState)(currentRunId);
+      if (runState === "active") {
+        const activeProgress = buildAnalysisProgressPayload({
+          status: "pending",
+          requestedAt: task.analysisRequestedAt ?? null,
+          startedAt: task.analysisStartedAt ?? null,
+          completedAt: task.analysisCompletedAt ?? null
+        });
+
+        return NextResponse.json(
+          {
+            ok: true,
+            task: toSessionTaskPayload(task),
+            files,
+            classification: {
+              primaryRequirementFileId: task.primaryRequirementFileId ?? null,
+              backgroundFileIds: [],
+              irrelevantFileIds: [],
+              needsUserConfirmation: false,
+              reasoning: "后台正在执行上一轮分析。"
+            },
+            analysisStatus: "pending",
+            analysisProgress: activeProgress,
+            analysis: task.analysisSnapshot ?? null,
+            ruleCard: null,
+            outline: null,
+            humanize: toSessionTaskHumanizePayload(task),
+            message: "上一轮分析还在后台运行，系统已避免重复排队。请稍后再看进度。"
+          },
+          { status: 202 }
+        );
+      }
     }
 
     const triggerRunId = await (dependencies.enqueueTaskAnalysis ?? enqueueAnalyzeTaskWithTrigger)({
@@ -225,3 +264,24 @@ async function enqueueAnalyzeTaskWithTrigger(input: EnqueueAnalyzeTaskInput) {
   return typeof run?.id === "string" ? run.id : null;
 }
 
+async function getTriggerRunState(runId: string): Promise<TriggerRunState> {
+  try {
+    const run = await runs.retrieve(runId);
+    const status = typeof run?.status === "string" ? run.status : "";
+    const activeStatuses = new Set([
+      "PENDING_VERSION",
+      "QUEUED",
+      "DEQUEUED",
+      "EXECUTING",
+      "WAITING",
+      "DELAYED"
+    ]);
+    return activeStatuses.has(status) ? "active" : "terminal";
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (message.toLowerCase().includes("not found")) {
+      return "missing";
+    }
+    return "unknown";
+  }
+}

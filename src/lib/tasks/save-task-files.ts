@@ -693,23 +693,7 @@ async function markTaskAnalysisFailedWithSupabase(input: {
         ...existingSnapshot,
         warnings: [...existingWarnings, `analysis_failed:${input.reason}`]
       }
-    : {
-        chosenTaskFileId: ownedTask?.primaryRequirementFileId ?? null,
-        supportingFileIds: [],
-        ignoredFileIds: [],
-        needsUserConfirmation: false,
-        reasoning: "Model analysis did not complete.",
-        targetWordCount: 2000,
-        citationStyle: "APA 7",
-        topic: null,
-        chapterCount: null,
-        mustCover: [],
-        gradingFocus: [],
-        appliedSpecialRequirements: ownedTask?.specialRequirements ?? "",
-        usedDefaultWordCount: true,
-        usedDefaultCitationStyle: true,
-        warnings: [`analysis_failed:${input.reason}`]
-      } satisfies TaskAnalysisSnapshot;
+    : null;
   const now = new Date().toISOString();
   const { error } = await client
     .from("writing_tasks")
