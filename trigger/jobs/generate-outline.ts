@@ -18,7 +18,7 @@ export async function generateOutlineForTask(
   const prompt = buildGenerateOutlinePrompt(input);
   const response = await requestOpenAITextResponse({
     input: prompt,
-    reasoningEffort: "low"
+    reasoningEffort: "medium"
   });
   const parsed =
     parseOutlineResponse(response.output_text) ??
@@ -91,7 +91,7 @@ async function repairOutlineResponse(rawText: string) {
 
     const repaired = await requestOpenAITextResponse({
       input: repairPrompt,
-      reasoningEffort: "low"
+      reasoningEffort: "medium"
     });
 
     return parseOutlineResponse(repaired.output_text);
@@ -125,7 +125,7 @@ async function generateChineseMirror(
 
     const response = await requestOpenAITextResponse({
       input: prompt,
-      reasoningEffort: "low"
+      reasoningEffort: "medium"
     });
     const parsed = safeParseJSON<{
       articleTitle?: string;

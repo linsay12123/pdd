@@ -99,6 +99,12 @@ describe("model analysis guardrails", () => {
     expect(result.analysis.targetWordCount).toBe(2750);
     expect(result.analysis.citationStyle).toBe("Harvard");
     expect(requestOpenAITextResponseMock).toHaveBeenCalledTimes(2);
+    expect(requestOpenAITextResponseMock.mock.calls[0]?.[0]).toMatchObject({
+      reasoningEffort: "medium"
+    });
+    expect(requestOpenAITextResponseMock.mock.calls[1]?.[0]).toMatchObject({
+      reasoningEffort: "medium"
+    });
   });
 
   it("uses the model's outline title when the response omits a separate topic field", async () => {

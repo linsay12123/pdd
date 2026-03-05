@@ -88,7 +88,7 @@ export async function handleConfirmPrimaryFileRequest(
         {
           ok: false,
           message:
-            "当前是生产环境，但后台任务密钥还是开发版（tr_dev_）。请先换成 tr_live_ 密钥再重试。"
+            "当前是生产环境，但后台任务密钥还是开发版（tr_dev_）。请先换成生产密钥（通常是 tr_prod_）再重试。"
         },
         { status: 503 }
       );
@@ -142,6 +142,13 @@ export async function handleConfirmPrimaryFileRequest(
         classification: buildPendingClassification(fileId, refreshedFiles),
         analysisStatus: "pending",
         analysisProgress,
+        analysisRuntime: {
+          state: "active",
+          status: "QUEUED",
+          detail: "后台重分析任务已受理，正在排队或准备执行。",
+          autoRecovered: false,
+          runId: triggerRunId
+        },
         analysis: refreshedTask?.analysisSnapshot ?? task.analysisSnapshot ?? null,
         ruleCard: null,
         outline: null,

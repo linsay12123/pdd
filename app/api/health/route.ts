@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { runs } from "@trigger.dev/sdk/v3";
 import { env } from "@/src/config/env";
 import { createSupabaseAdminClient } from "@/src/lib/supabase/admin";
 import { getInvalidTriggerKeyReason } from "@/src/lib/trigger/key-guard";
@@ -19,6 +20,7 @@ type SchemaHealthPayload = {
 type HealthRouteDependencies = {
   runtimeEnv?: typeof env;
   createClient?: typeof createSupabaseAdminClient;
+  checkTriggerRuntime?: () => Promise<{ ok: boolean; detail: string }>;
 };
 
 function normalizeSchemaHealth(data: unknown): SchemaHealthPayload | null {
@@ -87,8 +89,13 @@ export async function handleHealthRequest(
     triggerKeyInvalidReason === "missing"
       ? { ok: false, detail: "未配置（后台任务不可用）" }
       : triggerKeyInvalidReason === "dev_key_in_production"
-        ? { ok: false, detail: "生产环境不能使用 tr_dev_，请改成 tr_live_。" }
+        ? { ok: false, detail: "生产环境不能使用 tr_dev_，请改成生产密钥（通常是 tr_prod_）。" }
         : { ok: true, detail: `已配置 (${runtimeEnv.TRIGGER_SECRET_KEY.length} 字符)` };
+
+  checks.TRIGGER_RUNTIME =
+    checks.TRIGGER_SECRET_KEY.ok
+      ? await (dependencies.checkTriggerRuntime ?? checkTriggerRuntime)()
+      : { ok: false, detail: "跳过 — TRIGGER_SECRET_KEY 未就绪" };
 
   // 7. Try Supabase connection
   if (runtimeEnv.NEXT_PUBLIC_SUPABASE_URL && runtimeEnv.SUPABASE_SERVICE_ROLE_KEY) {
@@ -231,6 +238,7 @@ export async function handleHealthRequest(
   const requiredKeys = [
     "SUPABASE_URL", "SUPABASE_ANON_KEY", "SUPABASE_SERVICE_ROLE_KEY",
     "OPENAI_API_KEY", "UNDETECTABLE_API_KEY", "TRIGGER_SECRET_KEY",
+    "TRIGGER_RUNTIME",
     "SUPABASE_DB_CONNECTION", "DB_TABLES",
     "DB_SCHEMA_COMPAT", "DB_LEGACY_STRUCTURES"
   ];
@@ -248,4 +256,21 @@ export async function handleHealthRequest(
 
 export async function GET() {
   return handleHealthRequest();
+}
+
+async function checkTriggerRuntime() {
+  try {
+    await runs.list({ limit: 1 });
+    return {
+      ok: true,
+      detail: "Trigger Runtime API 可访问，后台任务入口可用。"
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      detail: `Trigger Runtime API 检查失败：${
+        error instanceof Error ? error.message : String(error)
+      }`
+    };
+  }
 }

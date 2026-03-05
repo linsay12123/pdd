@@ -68,6 +68,7 @@ describe("task analysis status route", () => {
     expect(payload.analysisStatus).toBe("pending");
     expect(payload.outline).toBeNull();
     expect(String(payload.message)).toContain("后台分析");
+    expect(payload.analysisRuntime.state).toBe("missing");
     expect(payload.analysisProgress.maxWaitSeconds).toBe(600);
     expect(payload.analysisProgress.elapsedSeconds).toBeGreaterThanOrEqual(60);
     expect(payload.analysisProgress.canRetry).toBe(false);
@@ -99,6 +100,7 @@ describe("task analysis status route", () => {
     expect(payload.analysisStatus).toBe("pending");
     expect(payload.analysisProgress.canRetry).toBe(true);
     expect(String(payload.message)).toContain("超时");
+    expect(payload.analysisRuntime.state).toBe("missing");
   });
 
   it("returns succeeded payload with outline and rule card", async () => {
@@ -179,6 +181,7 @@ describe("task analysis status route", () => {
 
     expect(response.status).toBe(200);
     expect(payload.analysisStatus).toBe("succeeded");
+    expect(payload.analysisRuntime.state).toBe("not_applicable");
     expect(payload.outline.articleTitle).toBe("ASEAN Governance Risk");
     expect(payload.ruleCard.targetWordCount).toBe(2500);
     expect(payload.classification.primaryRequirementFileId).toBe("file-1");
@@ -225,6 +228,7 @@ describe("task analysis status route", () => {
 
     expect(response.status).toBe(200);
     expect(payload.analysisStatus).toBe("failed");
+    expect(payload.analysisRuntime.state).toBe("not_applicable");
     expect(String(payload.message)).toContain("返回内容不完整");
     expect(String(payload.message)).not.toContain("MODEL_ANALYSIS_INCOMPLETE");
     expect(payload.analysisProgress.canRetry).toBe(true);
@@ -256,5 +260,78 @@ describe("task analysis status route", () => {
     expect(payload.analysisStatus).toBe("failed");
     expect(String(payload.message)).toContain("一键重试分析");
     expect(String(payload.message)).not.toContain("重试一次上传");
+  });
+
+  it("reports pending_version clearly when trigger run is blocked by missing deployed version", async () => {
+    saveTaskSummary({
+      id: "task-pending-version",
+      userId: "user-1",
+      status: "created",
+      targetWordCount: null,
+      citationStyle: null,
+      specialRequirements: "",
+      analysisStatus: "pending",
+      analysisRequestedAt: new Date(Date.now() - 3 * 60 * 1000).toISOString(),
+      analysisTriggerRunId: "run-pending-version"
+    });
+
+    const response = await handleTaskAnalysisStatusRequest(
+      new Request("http://localhost/api/tasks/task-pending-version/analysis"),
+      { taskId: "task-pending-version" },
+      {
+        isPersistenceReady: () => true,
+        requireUser: async () => makeUser(),
+        getTriggerRunState: async () => ({
+          state: "pending_version",
+          status: "PENDING_VERSION"
+        })
+      }
+    );
+    const payload = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(payload.analysisStatus).toBe("pending");
+    expect(payload.analysisRuntime.state).toBe("pending_version");
+    expect(String(payload.message)).toContain("还没部署");
+  });
+
+  it("auto-recovers once when run ended early but task never started", async () => {
+    process.env.TRIGGER_SECRET_KEY = "tr_prod_example";
+    process.env.VERCEL_ENV = "production";
+
+    saveTaskSummary({
+      id: "task-auto-recover",
+      userId: "user-1",
+      status: "created",
+      targetWordCount: null,
+      citationStyle: null,
+      specialRequirements: "",
+      analysisStatus: "pending",
+      analysisRequestedAt: new Date(Date.now() - 3 * 60 * 1000).toISOString(),
+      analysisTriggerRunId: "run-terminal-before-start"
+    });
+
+    const enqueueTaskAnalysis = vi.fn(async () => "run-auto-recovered");
+
+    const response = await handleTaskAnalysisStatusRequest(
+      new Request("http://localhost/api/tasks/task-auto-recover/analysis"),
+      { taskId: "task-auto-recover" },
+      {
+        isPersistenceReady: () => true,
+        requireUser: async () => makeUser(),
+        getTriggerRunState: async () => ({
+          state: "terminal",
+          status: "FAILED"
+        }),
+        enqueueTaskAnalysis
+      }
+    );
+    const payload = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(payload.analysisStatus).toBe("pending");
+    expect(payload.analysisRuntime.autoRecovered).toBe(true);
+    expect(payload.analysisRuntime.runId).toBe("run-auto-recovered");
+    expect(enqueueTaskAnalysis).toHaveBeenCalledTimes(1);
   });
 });

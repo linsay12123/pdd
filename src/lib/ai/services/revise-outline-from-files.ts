@@ -138,7 +138,7 @@ async function repairOutline(rawText: string) {
         "RAW_RESPONSE:",
         rawText
       ].join("\n"),
-      reasoningEffort: "low"
+      reasoningEffort: "medium"
     });
 
     return parseOutline(repaired.output_text);

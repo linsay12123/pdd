@@ -65,7 +65,7 @@ describe("task file async analysis routes", () => {
 
     expect(response.status).toBe(503);
     expect(String(payload.message)).toContain("生产环境");
-    expect(String(payload.message)).toContain("tr_live");
+    expect(String(payload.message)).toContain("tr_prod");
   });
 
   it("accepts upload with 202 and queues background analysis instead of blocking synchronously", async () => {

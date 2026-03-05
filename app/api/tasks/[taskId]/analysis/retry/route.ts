@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { runs, tasks } from "@trigger.dev/sdk/v3";
+import { tasks } from "@trigger.dev/sdk/v3";
 import { requireCurrentSessionUser } from "@/src/lib/auth/current-user";
 import {
   buildAnalysisProgressPayload,
@@ -16,6 +16,10 @@ import {
   toSessionTaskPayload
 } from "@/src/lib/tasks/session-task";
 import { getInvalidTriggerKeyReason } from "@/src/lib/trigger/key-guard";
+import {
+  resolveTriggerRunState,
+  type TriggerRunRuntimeState
+} from "@/src/lib/trigger/run-state";
 import type { SessionUser } from "@/src/types/auth";
 
 type RouteContext = {
@@ -31,12 +35,12 @@ type EnqueueAnalyzeTaskInput = {
   idempotencyKey: string;
 };
 
-type TriggerRunState = "active" | "terminal" | "missing" | "unknown";
-
 type TaskAnalysisRetryRouteDependencies = {
   requireUser?: () => Promise<SessionUser>;
   isPersistenceReady?: () => boolean;
-  getTriggerRunState?: (runId: string) => Promise<TriggerRunState>;
+  getTriggerRunState?: (
+    runId: string
+  ) => Promise<{ state: TriggerRunRuntimeState; status: string | null }>;
   enqueueTaskAnalysis?: (input: EnqueueAnalyzeTaskInput) => Promise<string | null>;
 };
 
@@ -78,7 +82,7 @@ export async function handleTaskAnalysisRetryRequest(
         {
           ok: false,
           message:
-            "当前是生产环境，但后台任务密钥还是开发版（tr_dev_）。请先换成 tr_live_ 密钥再重试。"
+            "当前是生产环境，但后台任务密钥还是开发版（tr_dev_）。请先换成生产密钥（通常是 tr_prod_）再重试。"
         },
         { status: 503 }
       );
@@ -129,8 +133,19 @@ export async function handleTaskAnalysisRetryRequest(
 
     const currentRunId = task.analysisTriggerRunId?.trim();
     if (currentRunId) {
-      const runState = await (dependencies.getTriggerRunState ?? getTriggerRunState)(currentRunId);
-      if (runState === "active" || runState === "unknown") {
+      const runtime = await (dependencies.getTriggerRunState ?? getTriggerRunState)(currentRunId);
+      if (runtime.state === "pending_version") {
+        return NextResponse.json(
+          {
+            ok: false,
+            message:
+              "后台任务版本还没部署到生产环境，这次重试不会真正执行。请先部署 Trigger 任务版本后再重试。"
+          },
+          { status: 503 }
+        );
+      }
+
+      if (runtime.state === "active" || runtime.state === "unknown") {
         const activeProgress = buildAnalysisProgressPayload({
           status: "pending",
           requestedAt: task.analysisRequestedAt ?? null,
@@ -155,12 +170,22 @@ export async function handleTaskAnalysisRetryRequest(
               ...activeProgress,
               canRetry: false
             },
+            analysisRuntime: {
+              state: runtime.state,
+              status: runtime.status,
+              detail:
+                runtime.state === "active"
+                  ? "上一轮后台分析任务还在运行中。"
+                  : "系统正在确认上一轮后台分析任务状态。",
+              autoRecovered: false,
+              runId: currentRunId
+            },
             analysis: task.analysisSnapshot ?? null,
             ruleCard: null,
             outline: null,
             humanize: toSessionTaskHumanizePayload(task),
             message:
-              runState === "active"
+              runtime.state === "active"
                 ? "上一轮分析还在后台运行，系统已避免重复排队。请稍后再看进度。"
                 : "系统正在确认上一轮分析任务状态。为避免重复排队，暂不重复提交。请稍后再试。"
           },
@@ -212,6 +237,13 @@ export async function handleTaskAnalysisRetryRequest(
         },
         analysisStatus: "pending",
         analysisProgress,
+        analysisRuntime: {
+          state: "active",
+          status: "QUEUED",
+          detail: "后台重试任务已受理，正在排队或准备执行。",
+          autoRecovered: false,
+          runId: triggerRunId
+        },
         analysis: refreshedTask?.analysisSnapshot ?? null,
         ruleCard: null,
         outline: null,
@@ -292,24 +324,8 @@ function buildRetryIdempotencyKey(
   return `task-analysis-retry-${taskId}-${userId}-${stableSeed}`;
 }
 
-async function getTriggerRunState(runId: string): Promise<TriggerRunState> {
-  try {
-    const run = await runs.retrieve(runId);
-    const status = typeof run?.status === "string" ? run.status : "";
-    const activeStatuses = new Set([
-      "PENDING_VERSION",
-      "QUEUED",
-      "DEQUEUED",
-      "EXECUTING",
-      "WAITING",
-      "DELAYED"
-    ]);
-    return activeStatuses.has(status) ? "active" : "terminal";
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    if (message.toLowerCase().includes("not found")) {
-      return "missing";
-    }
-    return "unknown";
-  }
+async function getTriggerRunState(
+  runId: string
+): Promise<{ state: TriggerRunRuntimeState; status: string | null }> {
+  return resolveTriggerRunState(runId);
 }

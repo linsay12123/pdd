@@ -204,6 +204,7 @@ export async function markTaskAnalysisPending(input: {
   userId: string;
   primaryRequirementFileId?: string | null;
   triggerRunId?: string | null;
+  analysisModel?: string | null;
 }) {
   return shouldUseSupabasePersistence()
     ? markTaskAnalysisPendingWithSupabase(input)
@@ -717,6 +718,7 @@ async function markTaskAnalysisPendingLocally(input: {
   userId: string;
   primaryRequirementFileId?: string | null;
   triggerRunId?: string | null;
+  analysisModel?: string | null;
 }) {
   const task = getTaskSummary(input.taskId);
   if (!task || task.userId !== input.userId) {
@@ -725,12 +727,12 @@ async function markTaskAnalysisPendingLocally(input: {
 
   return patchTaskSummary(input.taskId, {
     analysisStatus: "pending",
+    analysisModel: input.analysisModel ?? null,
     analysisTriggerRunId: input.triggerRunId ?? null,
     analysisRequestedAt: new Date().toISOString(),
     analysisStartedAt: null,
     analysisCompletedAt: null,
     analysisSnapshot: null,
-    analysisModel: null,
     ...(input.primaryRequirementFileId !== undefined
       ? {
           primaryRequirementFileId: input.primaryRequirementFileId
@@ -744,16 +746,17 @@ async function markTaskAnalysisPendingWithSupabase(input: {
   userId: string;
   primaryRequirementFileId?: string | null;
   triggerRunId?: string | null;
+  analysisModel?: string | null;
 }) {
   const client = createSupabaseAdminClient();
   const patch: Record<string, unknown> = {
     analysis_status: "pending",
+    analysis_model: input.analysisModel ?? null,
     analysis_trigger_run_id: input.triggerRunId ?? null,
     analysis_requested_at: new Date().toISOString(),
     analysis_started_at: null,
     analysis_completed_at: null,
-    analysis_snapshot: null,
-    analysis_model: null
+    analysis_snapshot: null
   };
 
   if (input.primaryRequirementFileId !== undefined) {

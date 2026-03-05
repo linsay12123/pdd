@@ -46,12 +46,27 @@ export type TaskWorkflowHumanizePayload = {
   errorMessage: string | null;
 };
 
+export type TaskWorkflowAnalysisRuntimePayload = {
+  state:
+    | "not_applicable"
+    | "active"
+    | "pending_version"
+    | "terminal"
+    | "missing"
+    | "unknown";
+  status: string | null;
+  detail: string;
+  autoRecovered: boolean;
+  runId: string | null;
+};
+
 export type TaskWorkflowPayload = {
   task: TaskWorkflowTaskPayload;
   files: TaskWorkflowFilePayload[];
   classification: TaskWorkflowClassificationPayload;
   analysisStatus: "pending" | "succeeded" | "failed";
   analysisProgress: AnalysisProgressPayload;
+  analysisRuntime?: TaskWorkflowAnalysisRuntimePayload | null;
   analysis: TaskWorkflowAnalysisPayload | null;
   ruleCard: TaskWorkflowRuleCardPayload | null;
   outline: OutlineScaffold | null;

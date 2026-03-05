@@ -282,7 +282,7 @@ async function requestAdjustedDraft({
   const response = await requestOpenAITextResponse({
     input: prompt,
     model: defaultOpenAIModel,
-    reasoningEffort: "high",
+    reasoningEffort: "medium",
     safetyIdentifier
   });
 

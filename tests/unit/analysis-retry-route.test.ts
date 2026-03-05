@@ -115,7 +115,7 @@ describe("analysis retry route", () => {
       {
         isPersistenceReady: () => true,
         requireUser: async () => makeUser(),
-        getTriggerRunState: async () => "active",
+        getTriggerRunState: async () => ({ state: "active", status: "EXECUTING" }),
         enqueueTaskAnalysis
       }
     );
@@ -163,7 +163,7 @@ describe("analysis retry route", () => {
       {
         isPersistenceReady: () => true,
         requireUser: async () => makeUser(),
-        getTriggerRunState: async () => "unknown",
+        getTriggerRunState: async () => ({ state: "unknown", status: null }),
         enqueueTaskAnalysis
       }
     );
@@ -174,6 +174,50 @@ describe("analysis retry route", () => {
     expect(payload.analysisProgress.canRetry).toBe(false);
     expect(String(payload.message)).toContain("暂不重复提交");
     expect(enqueueTaskAnalysis).not.toHaveBeenCalled();
+  });
+
+  it("returns 503 when previous run is pending_version and cannot be retried", async () => {
+    saveTaskSummary({
+      id: "task-pending-version",
+      userId: "user-1",
+      status: "created",
+      targetWordCount: null,
+      citationStyle: null,
+      specialRequirements: "",
+      analysisStatus: "pending",
+      analysisRequestedAt: new Date(Date.now() - 11 * 60 * 1000).toISOString(),
+      analysisTriggerRunId: "run-pending-version-1"
+    });
+
+    saveTaskFileRecords([
+      {
+        id: "file-1",
+        taskId: "task-pending-version",
+        userId: "user-1",
+        originalFilename: "brief.txt",
+        storagePath: "tmp/brief.txt",
+        extractedText: "brief",
+        role: "unknown",
+        isPrimary: false
+      }
+    ]);
+
+    const response = await handleTaskAnalysisRetryRequest(
+      new Request("http://localhost/api/tasks/task-pending-version/analysis/retry", {
+        method: "POST"
+      }),
+      { taskId: "task-pending-version" },
+      {
+        isPersistenceReady: () => true,
+        requireUser: async () => makeUser(),
+        getTriggerRunState: async () => ({ state: "pending_version", status: "PENDING_VERSION" }),
+        enqueueTaskAnalysis: async () => "run-should-not-be-used"
+      }
+    );
+    const payload = await response.json();
+
+    expect(response.status).toBe(503);
+    expect(String(payload.message)).toContain("还没部署");
   });
 
   it("rejects retry when pending analysis has not timed out", async () => {

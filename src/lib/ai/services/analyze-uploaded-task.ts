@@ -358,7 +358,7 @@ async function repairAnalyzeUploadedTaskResult(rawText: string) {
 
     const repaired = await requestOpenAITextResponse({
       input: repairPrompt,
-      reasoningEffort: "low",
+      reasoningEffort: "medium",
       textFormat: ANALYZE_TASK_TEXT_FORMAT as unknown as Record<string, unknown>
     });
 

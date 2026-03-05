@@ -68,5 +68,9 @@ describe("generate outline guardrails", () => {
         citationStyle: "APA 7"
       })
     ).rejects.toThrow("MODEL_RETURNED_INVALID_OUTLINE");
+
+    expect(requestOpenAITextResponseMock.mock.calls[0]?.[0]).toMatchObject({
+      reasoningEffort: "medium"
+    });
   });
 });

@@ -587,6 +587,13 @@ export function WorkspacePageClient({ initialQuota }: WorkspacePageClientProps) 
     maxWaitSeconds: 600,
     canRetry: false
   };
+  const analysisRuntime = activeTask?.analysisRuntime ?? {
+    state: "unknown",
+    status: null,
+    detail: "系统正在确认后台分析任务状态。",
+    autoRecovered: false,
+    runId: null
+  };
   const hasOutline = outlineSections.length > 0;
   const needsPrimaryFileConfirmation = Boolean(
     analysisStatus === "succeeded" &&
@@ -796,7 +803,15 @@ export function WorkspacePageClient({ initialQuota }: WorkspacePageClientProps) 
                     <p className="text-xs text-brand-700 mt-3">
                       当前已等待：{formatElapsedMinutes(analysisProgress.elapsedSeconds)}（每 30 秒查一次状态，不会反复重跑大模型）
                     </p>
-                    {analysisProgress.canRetry && (
+                    <p className="text-xs text-brand-700 mt-2">
+                      后台运行态：{analysisRuntime.detail}
+                    </p>
+                    {analysisRuntime.state === "pending_version" && (
+                      <p className="text-xs text-red-200 mt-3">
+                        当前是环境配置问题：后台任务版本还没部署到生产环境，这时点重试不会生效。
+                      </p>
+                    )}
+                    {analysisProgress.canRetry && analysisRuntime.state !== "pending_version" && (
                       <div className="mt-4 flex items-center gap-3">
                         <Button
                           variant="outline"
@@ -1064,7 +1079,7 @@ export function WorkspacePageClient({ initialQuota }: WorkspacePageClientProps) 
                     </div>
 
                     <p className="text-sm text-brand-700">
-                      系统还没有返回一份完整可展示的大纲。通常是模型还没稳定读完材料，或者这次返回格式坏了。你可以重新上传、重试，或者先检查文件是否完整。
+                      系统还没有返回一份完整可展示的大纲。通常是模型还没稳定读完材料，或者这次返回格式坏了。你可以直接点“一键重试分析”，不用重新上传文件。
                     </p>
                   </div>
                 )}

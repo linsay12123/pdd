@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const fromMock = vi.fn();
 const rpcMock = vi.fn();
+const runsListMock = vi.fn();
 
 vi.mock("../../src/lib/supabase/admin", () => ({
   createSupabaseAdminClient: () => ({
@@ -10,11 +11,22 @@ vi.mock("../../src/lib/supabase/admin", () => ({
   })
 }));
 
+vi.mock("@trigger.dev/sdk/v3", () => ({
+  runs: {
+    list: runsListMock
+  }
+}));
+
 describe("health route", () => {
   beforeEach(() => {
     vi.resetModules();
     fromMock.mockReset();
     rpcMock.mockReset();
+    runsListMock.mockReset();
+    runsListMock.mockResolvedValue({
+      data: [],
+      nextCursor: undefined
+    });
 
     process.env.NEXT_PUBLIC_SUPABASE_URL = "https://example.supabase.co";
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY = "anon-key";
@@ -201,6 +213,6 @@ describe("health route", () => {
     expect(response.status).toBe(503);
     expect(payload.status).toBe("unhealthy");
     expect(payload.checks.TRIGGER_SECRET_KEY.ok).toBe(false);
-    expect(payload.checks.TRIGGER_SECRET_KEY.detail).toContain("tr_live");
+    expect(payload.checks.TRIGGER_SECRET_KEY.detail).toContain("tr_prod");
   });
 });
