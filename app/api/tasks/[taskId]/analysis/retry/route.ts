@@ -145,7 +145,7 @@ export async function handleTaskAnalysisRetryRequest(
         );
       }
 
-      if (runtime.state === "active" || runtime.state === "unknown") {
+      if (runtime.state === "active") {
         const activeProgress = buildAnalysisProgressPayload({
           status: "pending",
           requestedAt: task.analysisRequestedAt ?? null,
@@ -173,10 +173,7 @@ export async function handleTaskAnalysisRetryRequest(
             analysisRuntime: {
               state: runtime.state,
               status: runtime.status,
-              detail:
-                runtime.state === "active"
-                  ? "上一轮后台分析任务还在运行中。"
-                  : "系统正在确认上一轮后台分析任务状态。",
+              detail: "上一轮后台分析任务还在运行中。",
               autoRecovered: false,
               runId: currentRunId
             },
@@ -184,10 +181,7 @@ export async function handleTaskAnalysisRetryRequest(
             ruleCard: null,
             outline: null,
             humanize: toSessionTaskHumanizePayload(task),
-            message:
-              runtime.state === "active"
-                ? "上一轮分析还在后台运行，系统已避免重复排队。请稍后再看进度。"
-                : "系统正在确认上一轮分析任务状态。为避免重复排队，暂不重复提交。请稍后再试。"
+            message: "上一轮分析还在后台运行，系统已避免重复排队。请稍后再看进度。"
           },
           { status: 202 }
         );

@@ -128,7 +128,7 @@ describe("analysis retry route", () => {
     expect(enqueueTaskAnalysis).not.toHaveBeenCalled();
   });
 
-  it("does not enqueue another run when previous run state is unknown", async () => {
+  it("allows retry enqueue when previous run state is unknown", async () => {
     saveTaskSummary({
       id: "task-unknown-run-state",
       userId: "user-1",
@@ -154,7 +154,7 @@ describe("analysis retry route", () => {
       }
     ]);
 
-    const enqueueTaskAnalysis = vi.fn(async () => "run-should-not-be-used");
+    const enqueueTaskAnalysis = vi.fn(async () => "run-unknown-retry-1");
     const response = await handleTaskAnalysisRetryRequest(
       new Request("http://localhost/api/tasks/task-unknown-run-state/analysis/retry", {
         method: "POST"
@@ -171,9 +171,14 @@ describe("analysis retry route", () => {
 
     expect(response.status).toBe(202);
     expect(payload.analysisStatus).toBe("pending");
-    expect(payload.analysisProgress.canRetry).toBe(false);
-    expect(String(payload.message)).toContain("暂不重复提交");
-    expect(enqueueTaskAnalysis).not.toHaveBeenCalled();
+    expect(payload.analysisRuntime.runId).toBe("run-unknown-retry-1");
+    expect(String(payload.message)).toContain("已重新提交后台分析");
+    expect(enqueueTaskAnalysis).toHaveBeenCalledWith(
+      expect.objectContaining({
+        taskId: "task-unknown-run-state",
+        userId: "user-1"
+      })
+    );
   });
 
   it("returns 503 when previous run is pending_version and cannot be retried", async () => {
