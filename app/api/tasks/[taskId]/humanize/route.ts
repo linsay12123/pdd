@@ -14,6 +14,7 @@ import {
 import {
   getLatestOwnedDraftFromSupabase,
   getOwnedTaskFromSupabase,
+  setOwnedTaskQuotaReservationInSupabase,
   updateOwnedTaskHumanizeStateInSupabase
 } from "@/src/lib/tasks/supabase-task-records";
 import { listOwnedTaskOutputs } from "@/src/lib/tasks/task-output-store";
@@ -75,6 +76,7 @@ type HumanizeRouteDependencies = {
   saveQueuedState?: (input: {
     taskId: string;
     userId: string;
+    reservation: FrozenQuotaReservation;
   }) => Promise<void>;
   saveFailedState?: (input: {
     taskId: string;
@@ -210,7 +212,8 @@ export async function handleHumanizeRequest(
 
     await (dependencies.saveQueuedState ?? saveQueuedHumanizeStateWithSupabase)({
       taskId,
-      userId: user.id
+      userId: user.id,
+      reservation: charged.reservation
     });
 
     try {
@@ -494,7 +497,14 @@ async function releaseQueuedHumanizeQuotaWithSupabase(input: {
 async function saveQueuedHumanizeStateWithSupabase(input: {
   taskId: string;
   userId: string;
+  reservation: FrozenQuotaReservation;
 }) {
+  await setOwnedTaskQuotaReservationInSupabase(
+    input.taskId,
+    input.userId,
+    input.reservation
+  );
+
   await updateOwnedTaskHumanizeStateInSupabase(input.taskId, input.userId, {
     status: "queued",
     provider: "undetectable",
@@ -517,6 +527,8 @@ async function saveFailedHumanizeStateWithSupabase(input: {
     errorMessage: input.message,
     completedAt: null
   });
+
+  await setOwnedTaskQuotaReservationInSupabase(input.taskId, input.userId, null);
 }
 
 async function enqueueHumanizeWithTrigger(input: {

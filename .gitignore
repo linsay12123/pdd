@@ -15,3 +15,4 @@ tmp/docs/*
 !tmp/docs/.gitkeep
 tmp/pdfs/*
 !tmp/pdfs/.gitkeep
+.vercel

@@ -1,4 +1,5 @@
 import { createSupabaseAdminClient } from "@/src/lib/supabase/admin";
+import { assertStatusTransition } from "@/src/lib/tasks/status-machine";
 import type {
   TaskHumanizeStatus,
   TaskAnalysisSnapshot,
@@ -113,14 +114,26 @@ export async function getLatestOwnedDraftFromSupabase(taskId: string, userId: st
 export async function setOwnedTaskStatusInSupabase(
   taskId: string,
   userId: string,
-  status: TaskStatus
+  status: TaskStatus,
+  options: {
+    fromStatuses?: TaskStatus[];
+  } = {}
 ) {
+  const currentStatus = await readOwnedTaskStatus(taskId, userId);
+
+  if (options.fromStatuses && !options.fromStatuses.includes(currentStatus)) {
+    throw new Error("TASK_STATUS_CONFLICT");
+  }
+
+  assertStatusTransition(currentStatus, status);
+
   const client = createSupabaseAdminClient();
   const { data, error } = await client
     .from("writing_tasks")
     .update({ status })
     .eq("id", taskId)
     .eq("user_id", userId)
+    .eq("status", currentStatus)
     .select(
       "id,user_id,status,target_word_count,citation_style,special_requirements,topic,requested_chapter_count,outline_revision_count,primary_requirement_file_id,analysis_snapshot,analysis_status,analysis_model,analysis_completed_at,latest_outline_version_id,latest_draft_version_id,current_candidate_draft_id,quota_reservation"
       + ",humanize_status,humanize_provider,humanize_profile_snapshot,humanize_document_id,humanize_retry_document_id,humanize_error_message,humanize_requested_at,humanize_completed_at"
@@ -132,7 +145,7 @@ export async function setOwnedTaskStatusInSupabase(
   }
 
   if (!data) {
-    throw new Error("TASK_NOT_FOUND");
+    throw new Error("TASK_STATUS_CONFLICT");
   }
 
   return mapTaskRow(data as unknown as TaskRow);
@@ -262,6 +275,26 @@ function mapTaskRow(row: TaskRow) {
       : null,
     quotaReservation: row.quota_reservation ?? undefined
   } satisfies TaskSummary;
+}
+
+async function readOwnedTaskStatus(taskId: string, userId: string): Promise<TaskStatus> {
+  const client = createSupabaseAdminClient();
+  const { data, error } = await client
+    .from("writing_tasks")
+    .select("status")
+    .eq("id", taskId)
+    .eq("user_id", userId)
+    .maybeSingle();
+
+  if (error) {
+    throw new Error(`读取任务状态失败：${error.message}`);
+  }
+
+  if (!data) {
+    throw new Error("TASK_NOT_FOUND");
+  }
+
+  return data.status as TaskStatus;
 }
 
 function mapDraftRow(row: DraftRow) {

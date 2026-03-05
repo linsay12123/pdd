@@ -13,11 +13,19 @@ export const allowedTransitions: Record<TaskStatus, TaskStatus[]> = {
   verifying_references: ["exporting", "failed"],
   exporting: ["deliverable_ready", "failed"],
   deliverable_ready: ["expired"],
-  failed: [],
+  failed: [
+    "drafting",
+    "adjusting_word_count",
+    "verifying_references",
+    "exporting"
+  ],
   expired: []
 };
 
 export function canTransition(from: TaskStatus, to: TaskStatus) {
+  if (from === to) {
+    return true;
+  }
   return allowedTransitions[from].includes(to);
 }
 

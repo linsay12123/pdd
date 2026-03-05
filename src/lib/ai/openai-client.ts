@@ -12,6 +12,10 @@ type OpenAITextResponseRequest = {
   tools?: Array<Record<string, unknown>>;
   apiKey?: string;
   fetchImpl?: typeof fetch;
+  timeoutMs?: number;
+  maxAttempts?: number;
+  retryBaseDelayMs?: number;
+  sleepImpl?: (ms: number) => Promise<void>;
 };
 
 type OpenAITextResponse = {
@@ -27,56 +31,104 @@ export async function requestOpenAITextResponse({
   textFormat,
   tools,
   apiKey = env.OPENAI_API_KEY,
-  fetchImpl = fetch
+  fetchImpl = fetch,
+  timeoutMs = 120_000,
+  maxAttempts = 3,
+  retryBaseDelayMs = 600,
+  sleepImpl = sleep
 }: OpenAITextResponseRequest): Promise<OpenAITextResponse> {
   if (!apiKey) {
     throw new Error("OPENAI_API_KEY is not configured");
   }
 
-  const response = await fetchImpl("https://api.openai.com/v1/responses", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${apiKey}`
-    },
-    body: JSON.stringify({
-      model,
-      input,
-      ...(textFormat
-        ? {
-            text: {
-              format: textFormat
-            }
+  const requestBody = {
+    model,
+    input,
+    ...(textFormat
+      ? {
+          text: {
+            format: textFormat
           }
-        : {}),
-      ...(tools?.length ? { tools } : {}),
-      ...(reasoningEffort
-        ? {
-            reasoning: {
-              effort: reasoningEffort
-            }
+        }
+      : {}),
+    ...(tools?.length ? { tools } : {}),
+    ...(reasoningEffort
+      ? {
+          reasoning: {
+            effort: reasoningEffort
           }
-        : {}),
-      ...(safetyIdentifier
-        ? {
-            safety_identifier: safetyIdentifier
-          }
-        : {})
-    })
-  });
+        }
+      : {}),
+    ...(safetyIdentifier
+      ? {
+          safety_identifier: safetyIdentifier
+        }
+      : {})
+  };
 
-  if (!response.ok) {
-    throw new Error(`OpenAI request failed with status ${response.status}`);
+  let lastError: Error | null = null;
+
+  for (let attempt = 1; attempt <= Math.max(1, maxAttempts); attempt += 1) {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+
+    try {
+      const response = await fetchImpl("https://api.openai.com/v1/responses", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${apiKey}`
+        },
+        body: JSON.stringify(requestBody),
+        signal: controller.signal
+      });
+
+      if (!response.ok) {
+        const bodyText = await safeReadResponseBody(response);
+        const error = new Error(
+          bodyText
+            ? `OpenAI request failed with status ${response.status}: ${bodyText}`
+            : `OpenAI request failed with status ${response.status}`
+        );
+
+        if (!isRetryableStatus(response.status) || attempt >= Math.max(1, maxAttempts)) {
+          throw error;
+        }
+
+        lastError = error;
+        await sleepImpl(resolveRetryDelayMs({
+          attempt,
+          baseDelayMs: retryBaseDelayMs,
+          retryAfterHeader: response.headers.get("retry-after")
+        }));
+        continue;
+      }
+
+      const data = (await response.json()) as {
+        output_text?: string;
+      } & Record<string, unknown>;
+
+      return {
+        output_text: data.output_text ?? "",
+        raw: data
+      };
+    } catch (error) {
+      const normalized = normalizeOpenAIError(error);
+      if (attempt >= Math.max(1, maxAttempts) || !isRetryableRuntimeError(normalized)) {
+        throw normalized;
+      }
+
+      lastError = normalized;
+      await sleepImpl(resolveRetryDelayMs({
+        attempt,
+        baseDelayMs: retryBaseDelayMs
+      }));
+    } finally {
+      clearTimeout(timeoutId);
+    }
   }
 
-  const data = (await response.json()) as {
-    output_text?: string;
-  } & Record<string, unknown>;
-
-  return {
-    output_text: data.output_text ?? "",
-    raw: data
-  };
+  throw lastError ?? new Error("OpenAI request failed");
 }
 
 export function safeParseJSON<T>(text: string): T | null {
@@ -90,4 +142,78 @@ export function safeParseJSON<T>(text: string): T | null {
   } catch {
     return null;
   }
+}
+
+async function safeReadResponseBody(response: Response) {
+  try {
+    const text = await response.text();
+    const normalized = text.trim();
+    if (!normalized) {
+      return "";
+    }
+    return normalized.slice(0, 500);
+  } catch {
+    return "";
+  }
+}
+
+function isRetryableStatus(status: number) {
+  return status === 408 || status === 409 || status === 425 || status === 429 || status >= 500;
+}
+
+function isRetryableRuntimeError(error: Error) {
+  return (
+    error.message === "OpenAI request timed out" ||
+    error.message.includes("fetch failed") ||
+    error.message.includes("network")
+  );
+}
+
+function normalizeOpenAIError(error: unknown) {
+  if (error instanceof Error) {
+    if (error.name === "AbortError") {
+      return new Error("OpenAI request timed out");
+    }
+    return error;
+  }
+  return new Error(String(error));
+}
+
+function resolveRetryDelayMs(input: {
+  attempt: number;
+  baseDelayMs: number;
+  retryAfterHeader?: string | null;
+}) {
+  const retryAfter = parseRetryAfterMs(input.retryAfterHeader);
+  if (retryAfter !== null) {
+    return retryAfter;
+  }
+
+  const cappedAttempt = Math.min(input.attempt, 5);
+  return input.baseDelayMs * 2 ** (cappedAttempt - 1);
+}
+
+function parseRetryAfterMs(value: string | null | undefined) {
+  if (!value) {
+    return null;
+  }
+
+  const seconds = Number(value);
+  if (Number.isFinite(seconds) && seconds > 0) {
+    return Math.floor(seconds * 1000);
+  }
+
+  const dateMs = Date.parse(value);
+  if (!Number.isFinite(dateMs)) {
+    return null;
+  }
+
+  const delta = dateMs - Date.now();
+  return delta > 0 ? delta : null;
+}
+
+function sleep(ms: number) {
+  return new Promise<void>((resolve) => {
+    setTimeout(resolve, Math.max(0, ms));
+  });
 }

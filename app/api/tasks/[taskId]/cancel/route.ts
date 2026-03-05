@@ -7,6 +7,7 @@ import {
   getUserWalletFromSupabase,
 } from "@/src/lib/payments/supabase-wallet";
 import { createSupabaseAdminClient } from "@/src/lib/supabase/admin";
+import { setOwnedTaskStatusInSupabase } from "@/src/lib/tasks/supabase-task-records";
 import type { SessionUser } from "@/src/types/auth";
 import type { FrozenQuotaReservation } from "@/src/types/billing";
 
@@ -192,11 +193,12 @@ async function markTaskFailedWithSupabase(taskId: string, userId: string) {
     throw new Error("REAL_PERSISTENCE_REQUIRED");
   }
 
+  await setOwnedTaskStatusInSupabase(taskId, userId, "failed");
+
   const client = createSupabaseAdminClient();
   const { error } = await client
     .from("writing_tasks")
     .update({
-      status: "failed",
       quota_reservation: null
     })
     .eq("id", taskId)

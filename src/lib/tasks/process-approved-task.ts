@@ -15,6 +15,7 @@ import {
   getTaskSummary,
   updateTaskStatus
 } from "@/src/lib/tasks/repository";
+import { setOwnedTaskStatusInSupabase } from "@/src/lib/tasks/supabase-task-records";
 import { saveDraftVersion } from "@/src/lib/tasks/save-draft-version";
 import { saveReferenceChecks } from "@/src/lib/tasks/save-reference-checks";
 import { listOwnedTaskOutputs } from "@/src/lib/tasks/task-output-store";
@@ -451,53 +452,7 @@ async function setTaskStatusWithSupabase(
   userId: string,
   status: TaskSummary["status"]
 ) {
-  const client = createSupabaseAdminClient();
-  const { data, error } = await client
-    .from("writing_tasks")
-    .update({
-      status
-    })
-    .eq("id", taskId)
-    .eq("user_id", userId)
-    .select(
-      "id,user_id,status,target_word_count,citation_style,special_requirements,topic,requested_chapter_count,outline_revision_count,primary_requirement_file_id,latest_outline_version_id,latest_draft_version_id,current_candidate_draft_id"
-    )
-    .maybeSingle();
-
-  if (error) {
-    throw new Error(`更新任务状态失败：${error.message}`);
-  }
-
-  if (!data) {
-    throw new Error("TASK_NOT_FOUND");
-  }
-
-  return {
-    id: String(data.id),
-    userId: String(data.user_id),
-    status: data.status,
-    targetWordCount: Number(data.target_word_count),
-    citationStyle: String(data.citation_style),
-    specialRequirements: String(data.special_requirements ?? ""),
-    topic: data.topic ? String(data.topic) : undefined,
-    requestedChapterCount:
-      typeof data.requested_chapter_count === "number"
-        ? Number(data.requested_chapter_count)
-        : null,
-    outlineRevisionCount: Number(data.outline_revision_count ?? 0),
-    primaryRequirementFileId: data.primary_requirement_file_id
-      ? String(data.primary_requirement_file_id)
-      : null,
-    latestOutlineVersionId: data.latest_outline_version_id
-      ? String(data.latest_outline_version_id)
-      : null,
-    latestDraftVersionId: data.latest_draft_version_id
-      ? String(data.latest_draft_version_id)
-      : null,
-    currentCandidateDraftId: data.current_candidate_draft_id
-      ? String(data.current_candidate_draft_id)
-      : null
-  } satisfies TaskSummary;
+  return setOwnedTaskStatusInSupabase(taskId, userId, status);
 }
 
 function buildReferenceClosingSummary(referenceCount: number) {

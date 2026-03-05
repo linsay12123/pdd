@@ -38,8 +38,9 @@ import {
   seedUserWallet,
   setUserWallet
 } from "../../src/lib/payments/repository";
-import { chargeQuota } from "../../src/lib/billing/charge-quota";
-import { refundChargedQuota } from "../../src/lib/billing/refund-charged-quota";
+import { freezeQuota } from "../../src/lib/billing/freeze-quota";
+import { releaseQuota } from "../../src/lib/billing/release-quota";
+import { settleQuota } from "../../src/lib/billing/settle-quota";
 import { TaskProcessingStageError } from "../../src/lib/tasks/process-approved-task";
 import { saveOutlineVersion } from "../../src/lib/tasks/save-outline-version";
 
@@ -70,7 +71,6 @@ describe("outline approval routes", () => {
       isPersistenceReady: () => true,
       approveOutline: async () => {
         patchTaskSummary(taskId, {
-          status: "drafting",
           latestOutlineVersionId: outlineVersionId
         });
 
@@ -82,29 +82,38 @@ describe("outline approval routes", () => {
           }
         };
       },
-      chargeQuotaForTask: async () => {
-        const task = getTaskSummary(taskId)!;
+      reserveQuotaForTask: async () => {
         const wallet = getUserWallet(userId);
-        const charged = chargeQuota({
+        const frozen = freezeQuota({
           wallet,
           amount: 690,
           taskId,
           chargePath: "generation"
         });
 
-        setUserWallet(userId, charged.wallet);
-        appendPaymentLedgerEntry(userId, charged.entry);
+        setUserWallet(userId, frozen.wallet);
+        appendPaymentLedgerEntry(userId, frozen.entry);
         patchTaskSummary(taskId, {
-          quotaReservation: charged.reservation
+          status: "drafting",
+          quotaReservation: frozen.reservation
         });
 
-        return charged.reservation;
+        return frozen.reservation;
       },
-      refundQuotaForTask: async (_taskId: string, refundUserId: string, reservation: any) => {
-        const wallet = getUserWallet(refundUserId);
-        const refunded = refundChargedQuota({ wallet, reservation });
-        setUserWallet(refundUserId, refunded.wallet);
-        appendPaymentLedgerEntry(refundUserId, refunded.entry);
+      settleQuotaForTask: async (_taskId: string, settleUserId: string, reservation: any) => {
+        const wallet = getUserWallet(settleUserId);
+        const settled = settleQuota({ wallet, reservation });
+        setUserWallet(settleUserId, settled.wallet);
+        appendPaymentLedgerEntry(settleUserId, settled.entry);
+        patchTaskSummary(taskId, {
+          quotaReservation: undefined
+        });
+      },
+      releaseQuotaForTask: async (_taskId: string, releaseUserId: string, reservation: any) => {
+        const wallet = getUserWallet(releaseUserId);
+        const released = releaseQuota({ wallet, reservation });
+        setUserWallet(releaseUserId, released.wallet);
+        appendPaymentLedgerEntry(releaseUserId, released.entry);
         patchTaskSummary(taskId, {
           quotaReservation: undefined
         });
@@ -510,10 +519,10 @@ describe("outline approval routes", () => {
     });
     expect(
       [...getPaymentLedgerEntries("user-1").map((entry) => entry.kind)].sort()
-    ).toEqual(["task_release", "task_settle"]);
+    ).toEqual(["task_freeze", "task_release"]);
   });
 
-  it("does not refund the charged quota after the task has already moved past word adjustment", async () => {
+  it("refunds the frozen quota even when the task fails in later stages", async () => {
     const initialVersion = await saveOutlineVersion({
       task: {
         id: "task-outline-6",
@@ -551,8 +560,10 @@ describe("outline approval routes", () => {
       {
         ...makeApprovedOutlineDeps("task-outline-6", initialVersion.id),
         processTask: async () => {
-          updateTaskStatus("task-outline-6", "verifying_references");
-          throw new Error("verification exploded");
+          throw new TaskProcessingStageError(
+            "verifying_references",
+            new Error("verification exploded")
+          );
         }
       }
     );
@@ -561,13 +572,65 @@ describe("outline approval routes", () => {
     expect(response.status).toBe(500);
     expect(payload.message).toContain("verification exploded");
     expect(getUserWallet("user-1")).toEqual({
-      rechargeQuota: 4310,
+      rechargeQuota: 5000,
       subscriptionQuota: 0,
       frozenQuota: 0
     });
-    expect(getPaymentLedgerEntries("user-1").map((entry) => entry.kind)).toEqual([
-      "task_settle"
+    expect(
+      [...getPaymentLedgerEntries("user-1").map((entry) => entry.kind)].sort()
+    ).toEqual([
+      "task_freeze",
+      "task_release"
     ]);
-    expect(getTaskSummary("task-outline-6")?.status).toBe("verifying_references");
+    expect(getTaskSummary("task-outline-6")?.status).toBe("failed");
+  });
+
+  it("returns 409 when the same task is already being processed", async () => {
+    const initialVersion = await saveOutlineVersion({
+      task: {
+        id: "task-outline-7",
+        userId: "user-1",
+        status: "awaiting_outline_approval",
+        targetWordCount: 2200,
+        citationStyle: "APA 7",
+        specialRequirements: "",
+        topic: "Corporate Governance",
+        outlineRevisionCount: 0
+      },
+      userId: "user-1",
+      outline: {
+        articleTitle: "Corporate Governance: A Structured Analysis",
+        targetWordCount: 2200,
+        citationStyle: "APA 7",
+        chineseMirrorPending: true,
+        sections: []
+      }
+    });
+
+    const response = await handleOutlineApprovalRequest(
+      new Request("http://localhost/api/tasks/task-outline-7/outline/approve", {
+        method: "POST",
+        body: JSON.stringify({
+          outlineVersionId: initialVersion.id
+        }),
+        headers: {
+          "content-type": "application/json"
+        }
+      }),
+      {
+        taskId: "task-outline-7"
+      },
+      {
+        ...makeApprovedOutlineDeps("task-outline-7", initialVersion.id),
+        reserveQuotaForTask: async () => {
+          throw new Error("TASK_ALREADY_PROCESSING");
+        }
+      }
+    );
+    const payload = await response.json();
+
+    expect(response.status).toBe(409);
+    expect(payload.ok).toBe(false);
+    expect(payload.message).toContain("处理中");
   });
 });

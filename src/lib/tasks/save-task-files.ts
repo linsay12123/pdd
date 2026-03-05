@@ -4,6 +4,7 @@ import { shouldUseSupabasePersistence } from "@/src/lib/persistence/runtime-mode
 import { createTaskStoragePath } from "@/src/lib/storage/upload";
 import { readTaskArtifact, saveTaskArtifact } from "@/src/lib/storage/task-artifacts";
 import { createSupabaseAdminClient } from "@/src/lib/supabase/admin";
+import { assertStatusTransition } from "@/src/lib/tasks/status-machine";
 import { saveOutlineVersion } from "@/src/lib/tasks/save-outline-version";
 import {
   getTaskSummary,
@@ -390,6 +391,7 @@ async function persistTaskModelAnalysisLocally(input: {
   const nextStatus: TaskStatus = input.analysis.needsUserConfirmation
     ? "awaiting_primary_file_confirmation"
     : "awaiting_outline_approval";
+  assertStatusTransition(task.status, nextStatus);
   const nextFiles = currentFiles.map((file) => {
     const role = resolveRoleFromAnalysis(file.id, input.analysis);
     return {
@@ -487,6 +489,7 @@ async function persistTaskModelAnalysisWithSupabase(input: {
   const nextStatus: TaskStatus = input.analysis.needsUserConfirmation
     ? "awaiting_primary_file_confirmation"
     : "awaiting_outline_approval";
+  assertStatusTransition(ownedTask.status, nextStatus);
 
   let latestOutlineVersionId = ownedTask.latestOutlineVersionId ?? null;
   if (!input.analysis.needsUserConfirmation && input.outline) {

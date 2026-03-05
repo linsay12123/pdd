@@ -1,5 +1,6 @@
 import { incrementMetric } from "@/src/lib/observability/metrics";
 import { logTaskTransition } from "@/src/lib/observability/logger";
+import { assertStatusTransition } from "@/src/lib/tasks/status-machine";
 import type {
   TaskDraftVersion,
   TaskDraftVersionInput,
@@ -42,6 +43,10 @@ export function patchTaskSummary(taskId: string, patch: Partial<TaskSummary>) {
     return null;
   }
 
+  if (patch.status) {
+    assertStatusTransition(existing.status, patch.status);
+  }
+
   const nextTask = {
     ...existing,
     ...patch
@@ -57,6 +62,8 @@ export function updateTaskStatus(taskId: string, status: TaskStatus) {
   if (!existing) {
     return null;
   }
+
+  assertStatusTransition(existing.status, status);
 
   const nextTask = {
     ...existing,
@@ -77,10 +84,10 @@ export function updateTaskStatus(taskId: string, status: TaskStatus) {
 export function saveTaskFileRecord(record: TaskFileRecordInput) {
   const existing = taskFileStore.get(record.taskId) ?? [];
   const normalizedRecord: TaskFileRecord = {
+    ...record,
     id: record.id || `file_${record.taskId}_${existing.length + 1}`,
     createdAt: record.createdAt || new Date().toISOString(),
-    updatedAt: record.updatedAt || new Date().toISOString(),
-    ...record
+    updatedAt: record.updatedAt || new Date().toISOString()
   };
   const nextFiles = [...existing, normalizedRecord];
 
@@ -112,9 +119,9 @@ export function resetTaskFileStore() {
 export function saveTaskOutlineVersion(record: TaskOutlineVersionInput) {
   const existing = taskOutlineStore.get(record.taskId) ?? [];
   const normalizedRecord: TaskOutlineVersion = {
+    ...record,
     id: record.id || `outline_${record.taskId}_${existing.length + 1}`,
-    createdAt: record.createdAt || new Date().toISOString(),
-    ...record
+    createdAt: record.createdAt || new Date().toISOString()
   };
   const nextVersions = [...existing, normalizedRecord];
 
@@ -142,9 +149,9 @@ export function resetTaskOutlineStore() {
 export function saveTaskDraftVersion(record: TaskDraftVersionInput) {
   const existing = taskDraftStore.get(record.taskId) ?? [];
   const normalizedRecord: TaskDraftVersion = {
+    ...record,
     id: record.id || `draft_${record.taskId}_${existing.length + 1}`,
-    createdAt: record.createdAt || new Date().toISOString(),
-    ...record
+    createdAt: record.createdAt || new Date().toISOString()
   };
   const nextVersions = [...existing, normalizedRecord];
 
@@ -172,9 +179,9 @@ export function resetTaskDraftStore() {
 export function saveTaskReferenceCheck(record: TaskReferenceCheckInput) {
   const existing = taskReferenceCheckStore.get(record.taskId) ?? [];
   const normalizedRecord: TaskReferenceCheck = {
+    ...record,
     id: record.id || `ref_${record.taskId}_${existing.length + 1}`,
-    createdAt: record.createdAt || new Date().toISOString(),
-    ...record
+    createdAt: record.createdAt || new Date().toISOString()
   };
   const nextChecks = [...existing, normalizedRecord];
 
@@ -197,14 +204,14 @@ export function resetTaskReferenceCheckStore() {
 export function saveTaskOutputRecord(record: TaskOutputRecordInput) {
   const existing = taskOutputStore.get(record.taskId) ?? [];
   const normalizedRecord: TaskOutputRecord = {
+    ...record,
     id: record.id || `out_${record.taskId}_${existing.length + 1}`,
     createdAt: record.createdAt || new Date().toISOString(),
     isActive: record.isActive ?? true,
     expiresAt:
       record.expiresAt ||
       new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toISOString(),
-    expired: record.expired ?? false,
-    ...record
+    expired: record.expired ?? false
   };
   const nextOutputs = [...existing, normalizedRecord];
 

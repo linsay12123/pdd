@@ -1,8 +1,9 @@
 import { NextResponse } from "next/server";
 import { requireCurrentSessionUser } from "@/src/lib/auth/current-user";
 import { buildSafetyIdentifier } from "@/src/lib/ai/safety-identifier";
-import { chargeQuota } from "@/src/lib/billing/charge-quota";
-import { refundChargedQuota } from "@/src/lib/billing/refund-charged-quota";
+import { freezeQuota } from "@/src/lib/billing/freeze-quota";
+import { releaseQuota } from "@/src/lib/billing/release-quota";
+import { settleQuota } from "@/src/lib/billing/settle-quota";
 import { countBodyWords } from "@/src/lib/drafts/word-count";
 import { shouldUseSupabasePersistence } from "@/src/lib/persistence/runtime-mode";
 import {
@@ -15,6 +16,7 @@ import {
   TaskProcessingStageError
 } from "@/src/lib/tasks/process-approved-task";
 import { approveOutlineVersion } from "@/src/lib/tasks/save-outline-version";
+import { setOwnedTaskStatusInSupabase } from "@/src/lib/tasks/supabase-task-records";
 import {
   toSessionTaskHumanizePayload,
   toSessionTaskPayload
@@ -39,11 +41,16 @@ type OutlineApproveDependencies = {
   requireUser?: () => Promise<SessionUser>;
   isPersistenceReady?: () => boolean;
   approveOutline?: typeof approveOutlineVersion;
-  chargeQuotaForTask?: (
+  reserveQuotaForTask?: (
     taskId: string,
     userId: string
   ) => Promise<FrozenQuotaReservation>;
-  refundQuotaForTask?: (
+  settleQuotaForTask?: (
+    taskId: string,
+    userId: string,
+    reservation: FrozenQuotaReservation
+  ) => Promise<void>;
+  releaseQuotaForTask?: (
     taskId: string,
     userId: string,
     reservation: FrozenQuotaReservation
@@ -81,13 +88,12 @@ export async function handleOutlineApprovalRequest(
       outlineVersionId: body?.outlineVersionId?.trim() || undefined
     });
 
-    // 2. Charge quota NOW (right before writing starts)
-    const reservation = await (dependencies.chargeQuotaForTask ?? chargeQuotaForTask)(
-      params.taskId,
-      user.id
-    );
+    // 2. Freeze quota NOW (right before writing starts), and claim single execution lock
+    const reservation = await (
+      dependencies.reserveQuotaForTask ?? reserveQuotaForTask
+    )(params.taskId, user.id);
 
-    // 3. Process the task (writing pipeline) — refund quota only for early-stage failures
+    // 3. Process the task (writing pipeline) and settle quota only after success
     let processed;
     try {
       processed = await (dependencies.processTask ?? processApprovedTask)({
@@ -95,27 +101,33 @@ export async function handleOutlineApprovalRequest(
         userId: user.id,
         safetyIdentifier: buildSafetyIdentifier(user.id)
       });
-    } catch (writingError) {
-      const shouldRefund =
-        writingError instanceof TaskProcessingStageError &&
-        (writingError.stage === "drafting" ||
-          writingError.stage === "adjusting_word_count");
-
-      console.error(
-        "[outline-approve] Writing pipeline failed:",
-        writingError instanceof Error ? writingError.message : writingError
+      await (dependencies.settleQuotaForTask ?? settleQuotaForTask)(
+        params.taskId,
+        user.id,
+        reservation
       );
-
-      if (shouldRefund) {
-        await (dependencies.refundQuotaForTask ?? refundQuotaForTask)(
-          params.taskId,
-          user.id,
-          reservation
+    } catch (pipelineError) {
+      if (pipelineError instanceof TaskProcessingStageError) {
+        console.error(
+          "[outline-approve] Writing pipeline failed at stage:",
+          pipelineError.stage,
+          pipelineError.message
         );
-        await (dependencies.markTaskFailed ?? markTaskFailed)(params.taskId, user.id);
+      } else {
+        console.error(
+          "[outline-approve] Writing pipeline failed:",
+          pipelineError instanceof Error ? pipelineError.message : pipelineError
+        );
       }
 
-      throw writingError;
+      await (dependencies.releaseQuotaForTask ?? releaseQuotaForTask)(
+        params.taskId,
+        user.id,
+        reservation
+      );
+      await (dependencies.markTaskFailed ?? markTaskFailed)(params.taskId, user.id);
+
+      throw pipelineError;
     }
 
     return NextResponse.json({
@@ -151,6 +163,26 @@ export async function handleOutlineApprovalRequest(
       );
     }
 
+    if (error instanceof Error && error.message === "TASK_ALREADY_PROCESSING") {
+      return NextResponse.json(
+        {
+          ok: false,
+          message: "这份任务已经在处理中，请不要重复点击确认。"
+        },
+        { status: 409 }
+      );
+    }
+
+    if (error instanceof Error && error.message === "TASK_REQUIREMENTS_NOT_READY") {
+      return NextResponse.json(
+        {
+          ok: false,
+          message: "任务要求还没准备好（字数或引用格式缺失），请先完成分析。"
+        },
+        { status: 400 }
+      );
+    }
+
     if (error instanceof Error && error.message === "INSUFFICIENT_QUOTA") {
       return NextResponse.json(
         {
@@ -182,10 +214,10 @@ export async function handleOutlineApprovalRequest(
 }
 
 /**
- * Charge quota when outline is approved (right before writing starts).
+ * Freeze quota when outline is approved (right before writing starts).
  * Uses the task's current targetWordCount (which may have been updated during file analysis).
  */
-async function chargeQuotaForTask(
+async function reserveQuotaForTask(
   taskId: string,
   userId: string
 ): Promise<FrozenQuotaReservation> {
@@ -193,44 +225,67 @@ async function chargeQuotaForTask(
     throw new Error("REAL_PERSISTENCE_REQUIRED");
   }
 
-  return chargeQuotaForTaskWithSupabase(taskId, userId);
+  return reserveQuotaForTaskWithSupabase(taskId, userId);
 }
 
-async function chargeQuotaForTaskWithSupabase(
+async function reserveQuotaForTaskWithSupabase(
   taskId: string,
   userId: string
 ): Promise<FrozenQuotaReservation> {
   const client = createSupabaseAdminClient();
 
-  // Read current task to get targetWordCount
-  const { data: taskRow, error: taskError } = await client
+  const { data: lockedTask, error: lockError } = await client
     .from("writing_tasks")
-    .select("id,target_word_count")
+    .update({ status: "drafting" })
     .eq("id", taskId)
     .eq("user_id", userId)
+    .eq("status", "awaiting_outline_approval")
+    .select("id,target_word_count")
     .maybeSingle();
 
-  if (taskError || !taskRow) {
-    throw new Error("TASK_NOT_FOUND");
+  if (lockError) {
+    throw new Error(`锁定任务失败：${lockError.message}`);
   }
 
-  if (typeof taskRow.target_word_count !== "number") {
+  if (!lockedTask) {
+    const { data: taskExists, error: taskReadError } = await client
+      .from("writing_tasks")
+      .select("id,status")
+      .eq("id", taskId)
+      .eq("user_id", userId)
+      .maybeSingle();
+
+    if (taskReadError) {
+      throw new Error(`读取任务失败：${taskReadError.message}`);
+    }
+
+    if (!taskExists) {
+      throw new Error("TASK_NOT_FOUND");
+    }
+
+    throw new Error("TASK_ALREADY_PROCESSING");
+  }
+
+  if (typeof lockedTask.target_word_count !== "number") {
+    await revertTaskToAwaitingOutlineApproval(taskId, userId);
     throw new Error("TASK_REQUIREMENTS_NOT_READY");
   }
 
-  const quotaCost = resolveGenerationTaskQuotaCost(Number(taskRow.target_word_count));
-  let charged: ReturnType<typeof chargeQuota> | null = null;
+  const quotaCost = resolveGenerationTaskQuotaCost(Number(lockedTask.target_word_count));
+  let frozenResult: ReturnType<typeof freezeQuota> | null = null;
   let applied = false;
+
   for (let attempt = 0; attempt < 3; attempt += 1) {
     const wallet = await getUserWalletFromSupabase(userId);
     try {
-      charged = chargeQuota({
+      frozenResult = freezeQuota({
         wallet,
         amount: quotaCost,
         taskId,
         chargePath: "generation"
       });
     } catch {
+      await revertTaskToAwaitingOutlineApproval(taskId, userId);
       throw new Error("INSUFFICIENT_QUOTA");
     }
 
@@ -239,10 +294,69 @@ async function chargeQuotaForTaskWithSupabase(
         userId,
         taskId,
         expectedWallet: wallet,
-        nextWallet: charged.wallet,
-        entry: charged.entry
+        nextWallet: frozenResult.wallet,
+        entry: frozenResult.entry
       });
       applied = true;
+      break;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (message === "WALLET_CONFLICT" || message === "WALLET_NEGATIVE_NOT_ALLOWED") {
+        continue;
+      }
+      await revertTaskToAwaitingOutlineApproval(taskId, userId);
+      throw error;
+    }
+  }
+
+  if (!applied || !frozenResult) {
+    await revertTaskToAwaitingOutlineApproval(taskId, userId);
+    throw new Error("INSUFFICIENT_QUOTA");
+  }
+
+  const { error: reservationError } = await client
+    .from("writing_tasks")
+    .update({ quota_reservation: frozenResult.reservation })
+    .eq("id", taskId)
+    .eq("user_id", userId);
+
+  if (reservationError) {
+    await releaseQuotaForTaskWithSupabase(taskId, userId, frozenResult.reservation, {
+      clearReservation: false
+    });
+    await revertTaskToAwaitingOutlineApproval(taskId, userId);
+    throw new Error(`写入冻结积分凭证失败：${reservationError.message}`);
+  }
+
+  return frozenResult.reservation;
+}
+
+/**
+ * Settle frozen quota after the full writing pipeline succeeds.
+ */
+async function settleQuotaForTask(
+  taskId: string,
+  userId: string,
+  reservation: FrozenQuotaReservation
+) {
+  if (!shouldUseSupabasePersistence()) {
+    throw new Error("REAL_PERSISTENCE_REQUIRED");
+  }
+
+  let settled = false;
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const wallet = await getUserWalletFromSupabase(userId);
+    const next = settleQuota({ wallet, reservation });
+
+    try {
+      await applyWalletMutationWithLedgerInSupabase({
+        userId,
+        taskId,
+        expectedWallet: wallet,
+        nextWallet: next.wallet,
+        entry: next.entry
+      });
+      settled = true;
       break;
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -253,73 +367,92 @@ async function chargeQuotaForTaskWithSupabase(
     }
   }
 
-  if (!applied || !charged) {
-    throw new Error("INSUFFICIENT_QUOTA");
+  if (!settled) {
+    throw new Error("SETTLE_WALLET_CONFLICT");
   }
 
-  // Store reservation on task for later refund if needed
-  await client
+  const client = createSupabaseAdminClient();
+  const { error } = await client
     .from("writing_tasks")
-    .update({ quota_reservation: charged.reservation })
+    .update({ quota_reservation: null })
     .eq("id", taskId)
     .eq("user_id", userId);
 
-  return charged.reservation;
+  if (error) {
+    console.warn(
+      "[outline-approve] quota settled but reservation cleanup failed:",
+      error.message
+    );
+  }
 }
 
 /**
- * Refund charged quota when early-stage writing fails after outline approval.
+ * Release frozen quota when writing fails at any stage.
  */
-async function refundQuotaForTask(
+async function releaseQuotaForTask(
   taskId: string,
   userId: string,
   reservation: FrozenQuotaReservation
 ) {
-  try {
-    if (!shouldUseSupabasePersistence()) {
-      throw new Error("REAL_PERSISTENCE_REQUIRED");
-    }
+  if (!shouldUseSupabasePersistence()) {
+    throw new Error("REAL_PERSISTENCE_REQUIRED");
+  }
 
-    const client = createSupabaseAdminClient();
+  await releaseQuotaForTaskWithSupabase(taskId, userId, reservation, {
+    clearReservation: true
+  });
+}
 
-    let cleared = false;
-    for (let attempt = 0; attempt < 3; attempt += 1) {
-      const wallet = await getUserWalletFromSupabase(userId);
-      const refunded = refundChargedQuota({ wallet, reservation });
+async function releaseQuotaForTaskWithSupabase(
+  taskId: string,
+  userId: string,
+  reservation: FrozenQuotaReservation,
+  options: {
+    clearReservation: boolean;
+  }
+) {
+  let released = false;
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const wallet = await getUserWalletFromSupabase(userId);
+    const next = releaseQuota({ wallet, reservation });
 
-      try {
-        await applyWalletMutationWithLedgerInSupabase({
-          userId,
-          taskId,
-          expectedWallet: wallet,
-          nextWallet: refunded.wallet,
-          entry: refunded.entry
-        });
-        cleared = true;
-        break;
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        if (message === "WALLET_CONFLICT" || message === "WALLET_NEGATIVE_NOT_ALLOWED") {
-          continue;
-        }
-        throw error;
+    try {
+      await applyWalletMutationWithLedgerInSupabase({
+        userId,
+        taskId,
+        expectedWallet: wallet,
+        nextWallet: next.wallet,
+        entry: next.entry
+      });
+      released = true;
+      break;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (message === "WALLET_CONFLICT" || message === "WALLET_NEGATIVE_NOT_ALLOWED") {
+        continue;
       }
+      throw error;
     }
+  }
 
-    if (!cleared) {
-      throw new Error("REFUND_WALLET_CONFLICT");
-    }
+  if (!released) {
+    throw new Error("RELEASE_WALLET_CONFLICT");
+  }
 
-    await client
+  if (options.clearReservation) {
+    const client = createSupabaseAdminClient();
+    const { error } = await client
       .from("writing_tasks")
       .update({ quota_reservation: null })
       .eq("id", taskId)
       .eq("user_id", userId);
-  } catch (releaseError) {
-    console.error(
-      "[outline-approve] Failed to refund quota after writing failure:",
-      releaseError instanceof Error ? releaseError.message : releaseError
-    );
+
+    if (error) {
+      console.warn(
+        "[outline-approve] quota released but reservation cleanup failed:",
+        error.message
+      );
+    }
   }
 }
 
@@ -328,15 +461,36 @@ async function markTaskFailed(taskId: string, userId: string) {
     throw new Error("REAL_PERSISTENCE_REQUIRED");
   }
 
+  await setOwnedTaskStatusInSupabase(taskId, userId, "failed");
   const client = createSupabaseAdminClient();
-  await client
+  const { error } = await client
     .from("writing_tasks")
-    .update({
-      status: "failed",
-      quota_reservation: null
-    })
+    .update({ quota_reservation: null })
     .eq("id", taskId)
     .eq("user_id", userId);
+
+  if (error) {
+    throw new Error(`更新任务失败状态失败：${error.message}`);
+  }
+}
+
+async function revertTaskToAwaitingOutlineApproval(taskId: string, userId: string) {
+  const client = createSupabaseAdminClient();
+  const { error } = await client
+    .from("writing_tasks")
+    .update({
+      status: "awaiting_outline_approval"
+    })
+    .eq("id", taskId)
+    .eq("user_id", userId)
+    .eq("status", "drafting");
+
+  if (error) {
+    console.warn(
+      "[outline-approve] failed to revert task status after reservation error:",
+      error.message
+    );
+  }
 }
 
 export async function POST(request: Request, context: RouteContext) {

@@ -3,6 +3,7 @@ import type { OutlineScaffold } from "@/src/lib/ai/prompts/generate-outline";
 import { reviseOutlineFromFilesWithOpenAI } from "@/src/lib/ai/services/revise-outline-from-files";
 import { shouldUseSupabasePersistence } from "@/src/lib/persistence/runtime-mode";
 import { createSupabaseAdminClient } from "@/src/lib/supabase/admin";
+import { assertStatusTransition } from "@/src/lib/tasks/status-machine";
 import {
   getTaskOutlineVersion,
   getTaskSummary,
@@ -244,6 +245,7 @@ async function reviseOutlineVersionWithSupabase({
     ...task,
     outlineRevisionCount: (task.outlineRevisionCount ?? 0) + 1
   };
+  assertStatusTransition(task.status, "awaiting_outline_approval");
   const version = await saveOutlineVersion({
     task: updatedTask,
     userId,
@@ -304,7 +306,6 @@ async function approveOutlineVersionLocally({
 
   const approvedVersion = getTaskOutlineVersion(taskId, targetVersionId);
   const nextTask = patchTaskSummary(taskId, {
-    status: "drafting",
     latestOutlineVersionId: targetVersionId
   });
 
@@ -367,7 +368,6 @@ async function approveOutlineVersionWithSupabase({
   const { error: taskError } = await client
     .from("writing_tasks")
     .update({
-      status: "drafting",
       latest_outline_version_id: targetVersionId
     })
     .eq("id", taskId)
@@ -380,7 +380,6 @@ async function approveOutlineVersionWithSupabase({
   return {
     task: {
       ...task,
-      status: "drafting",
       latestOutlineVersionId: targetVersionId
     },
     outlineVersion: mapOutlineVersionRow(data)

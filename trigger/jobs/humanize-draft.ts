@@ -18,7 +18,10 @@ import {
 } from "@/src/lib/payments/supabase-wallet";
 import { releaseQuota } from "@/src/lib/billing/release-quota";
 import { settleQuota } from "@/src/lib/billing/settle-quota";
-import { updateOwnedTaskHumanizeStateInSupabase } from "@/src/lib/tasks/supabase-task-records";
+import {
+  setOwnedTaskQuotaReservationInSupabase,
+  updateOwnedTaskHumanizeStateInSupabase
+} from "@/src/lib/tasks/supabase-task-records";
 import type { FrozenQuotaReservation } from "@/src/types/billing";
 
 export type HumanizeDraftJobInput = {
@@ -39,6 +42,10 @@ const humanizePollLimit = 24;
 
 export const humanizeDraftTask = task({
   id: "humanize-draft",
+  retry: {
+    maxAttempts: 1
+  },
+  maxDuration: 1800,
   run: async (payload: HumanizeDraftJobInput) => {
     return runHumanizeDraftPipeline(payload);
   }
@@ -138,6 +145,7 @@ export async function runHumanizeDraftPipeline(
     });
 
     await settleHumanizeQuotaAtomically(input);
+    await setOwnedTaskQuotaReservationInSupabase(input.taskId, input.userId, null);
 
     await updateOwnedTaskHumanizeStateInSupabase(input.taskId, input.userId, {
       status: "completed",
@@ -153,8 +161,10 @@ export async function runHumanizeDraftPipeline(
       outputPath: exportResult.outputPath
     };
   } catch (error) {
+    let released = false;
     try {
       await releaseHumanizeQuotaAtomically(input);
+      released = true;
     } catch (releaseError) {
       console.error(
         "[humanize-draft] refund failed:",
@@ -172,6 +182,17 @@ export async function runHumanizeDraftPipeline(
         "[humanize-draft] failed to update humanize state:",
         statusError instanceof Error ? statusError.message : statusError
       );
+    }
+
+    if (released) {
+      try {
+        await setOwnedTaskQuotaReservationInSupabase(input.taskId, input.userId, null);
+      } catch (cleanupError) {
+        console.error(
+          "[humanize-draft] failed to clear quota reservation:",
+          cleanupError instanceof Error ? cleanupError.message : cleanupError
+        );
+      }
     }
 
     throw error;

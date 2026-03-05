@@ -60,4 +60,85 @@ describe("openai client", () => {
     expect(body.safety_identifier).toBe("pdd_user_hash_123");
     expect(String(init?.headers?.Authorization ?? "")).not.toContain("undefined");
   });
+
+  it("retries when OpenAI returns 429", async () => {
+    const fetchSpy = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 429,
+        headers: {
+          get: () => "1"
+        },
+        text: async () => '{"error":"rate_limited"}'
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          output_text: "retried-success"
+        })
+      });
+
+    const sleepSpy = vi.fn().mockResolvedValue(undefined);
+
+    const response = await requestOpenAITextResponse({
+      input: "retry me",
+      apiKey: "test-key",
+      fetchImpl: fetchSpy as typeof fetch,
+      sleepImpl: sleepSpy,
+      maxAttempts: 2
+    });
+
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+    expect(sleepSpy).toHaveBeenCalledTimes(1);
+    expect(response.output_text).toBe("retried-success");
+  });
+
+  it("surfaces response body for non-retryable errors", async () => {
+    const fetchSpy = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 400,
+      headers: {
+        get: () => null
+      },
+      text: async () => '{"error":{"message":"bad input"}}'
+    });
+
+    await expect(
+      requestOpenAITextResponse({
+        input: "bad",
+        apiKey: "test-key",
+        fetchImpl: fetchSpy as typeof fetch,
+        maxAttempts: 1
+      })
+    ).rejects.toThrow("bad input");
+  });
+
+  it("times out and retries according to maxAttempts", async () => {
+    const fetchSpy = vi.fn().mockImplementation(
+      (_url: string, init?: RequestInit) =>
+        new Promise((_, reject) => {
+          init?.signal?.addEventListener("abort", () => {
+            const timeoutError = new Error("aborted");
+            timeoutError.name = "AbortError";
+            reject(timeoutError);
+          });
+        })
+    );
+    const sleepSpy = vi.fn().mockResolvedValue(undefined);
+
+    await expect(
+      requestOpenAITextResponse({
+        input: "timeout",
+        apiKey: "test-key",
+        fetchImpl: fetchSpy as typeof fetch,
+        timeoutMs: 10,
+        maxAttempts: 2,
+        sleepImpl: sleepSpy
+      })
+    ).rejects.toThrow("OpenAI request timed out");
+
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+    expect(sleepSpy).toHaveBeenCalledTimes(1);
+  });
 });

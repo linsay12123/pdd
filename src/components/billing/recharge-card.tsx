@@ -8,12 +8,6 @@ type RechargeCardProps = {
   currentQuota: number;
 };
 
-const recordRows = [
-  "兑换记录：10000 积分激活码，今天 14:20 到账",
-  "消耗记录：生成文章，按字数扣除积分",
-  "消耗记录：自动降AI，按字数扣除积分"
-];
-
 export function RechargeCard({ currentQuota }: RechargeCardProps) {
   const [quota, setQuota] = useState(currentQuota);
 
@@ -85,12 +79,8 @@ export function RechargeCard({ currentQuota }: RechargeCardProps) {
 
         <section className="pdd-card" style={{ padding: "18px" }}>
           <h2 style={{ marginTop: 0, marginBottom: "8px" }}>最近记录</h2>
-          <div className="pdd-list">
-            {recordRows.map((item) => (
-              <div key={item} className="pdd-card-plain" style={{ padding: "10px 12px" }}>
-                {item}
-              </div>
-            ))}
+          <div className="pdd-card-plain" style={{ padding: "10px 12px" }}>
+            这里不再展示演示数据。真实积分流水请在账单页面查看。
           </div>
         </section>
       </div>

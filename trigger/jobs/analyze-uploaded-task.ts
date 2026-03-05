@@ -20,6 +20,10 @@ const ANALYZE_JOB_MAX_RUNTIME_MS = 45 * 60 * 1000;
 
 export const analyzeUploadedTaskJob = task({
   id: "analyze-uploaded-task",
+  retry: {
+    maxAttempts: 1
+  },
+  maxDuration: 2700,
   run: async (payload: AnalyzeUploadedTaskJobInput) => {
     return runAnalyzeUploadedTaskPipeline(payload);
   }

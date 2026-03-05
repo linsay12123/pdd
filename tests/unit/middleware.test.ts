@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { isAdminPath, isProtectedPath } from "../../proxy";
+import {
+  isAdminPath,
+  isAnonymousApiPath,
+  isApiPath,
+  isProtectedPath
+} from "../../proxy";
 
 describe("isProtectedPath", () => {
   it("marks app routes as protected", () => {
@@ -20,5 +25,14 @@ describe("isProtectedPath", () => {
     expect(isAdminPath("/admin")).toBe(true);
     expect(isAdminPath("/admin/users")).toBe(true);
     expect(isAdminPath("/workspace")).toBe(false);
+  });
+
+  it("marks api paths and anonymous whitelist correctly", () => {
+    expect(isApiPath("/api/tasks/create")).toBe(true);
+    expect(isApiPath("/workspace")).toBe(false);
+
+    expect(isAnonymousApiPath("/api/health")).toBe(true);
+    expect(isAnonymousApiPath("/api/auth/register")).toBe(true);
+    expect(isAnonymousApiPath("/api/tasks/create")).toBe(false);
   });
 });

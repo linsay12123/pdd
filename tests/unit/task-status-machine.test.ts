@@ -11,7 +11,9 @@ describe("task status machine", () => {
     expect(canTransition("created", "awaiting_outline_approval")).toBe(true);
     expect(canTransition("awaiting_primary_file_confirmation", "awaiting_outline_approval")).toBe(true);
     expect(canTransition("awaiting_outline_approval", "drafting")).toBe(true);
+    expect(canTransition("failed", "drafting")).toBe(true);
     expect(canTransition("deliverable_ready", "expired")).toBe(true);
+    expect(canTransition("drafting", "drafting")).toBe(true);
   });
 
   it("rejects invalid transitions", () => {
@@ -24,7 +26,7 @@ describe("task status machine", () => {
   });
 
   it("treats failed and expired as terminal states", () => {
-    expect(isTerminalTaskStatus("failed")).toBe(true);
+    expect(isTerminalTaskStatus("failed")).toBe(false);
     expect(isTerminalTaskStatus("expired")).toBe(true);
     expect(isTerminalTaskStatus("drafting")).toBe(false);
   });
