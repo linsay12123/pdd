@@ -24,7 +24,12 @@ describe("health route", () => {
     rpcMock.mockReset();
     runsListMock.mockReset();
     runsListMock.mockResolvedValue({
-      data: [],
+      data: [
+        {
+          id: "run-1",
+          status: "COMPLETED"
+        }
+      ],
       nextCursor: undefined
     });
 
@@ -214,5 +219,49 @@ describe("health route", () => {
     expect(payload.status).toBe("unhealthy");
     expect(payload.checks.TRIGGER_SECRET_KEY.ok).toBe(false);
     expect(payload.checks.TRIGGER_SECRET_KEY.detail).toContain("tr_prod");
+  });
+
+  it("reports unhealthy when analyze-uploaded-task runtime is still pending version", async () => {
+    runsListMock.mockResolvedValue({
+      data: [
+        {
+          id: "run-pending-version",
+          status: "PENDING_VERSION"
+        }
+      ],
+      nextCursor: undefined
+    });
+
+    fromMock.mockImplementation((table: string) => ({
+      select: () => ({
+        limit: async () => ({
+          data: table === "profiles" ? [{ id: "profile-1" }] : [],
+          error: null
+        })
+      })
+    }));
+
+    rpcMock.mockResolvedValue({
+      data: {
+        targetWordCountNullable: true,
+        citationStyleNullable: true,
+        analysisFieldsReady: true,
+        taskFileFieldsReady: true,
+        humanizeFieldsReady: true,
+        legacyPaymentTablesRemaining: [],
+        legacyPaymentTypesRemaining: [],
+        legacyTaskStatusesRemaining: []
+      },
+      error: null
+    });
+
+    const { GET } = await import("../../app/api/health/route");
+    const response = await GET();
+    const payload = await response.json();
+
+    expect(response.status).toBe(503);
+    expect(payload.status).toBe("unhealthy");
+    expect(payload.checks.TRIGGER_RUNTIME.ok).toBe(false);
+    expect(payload.checks.TRIGGER_RUNTIME.detail).toContain("PENDING_VERSION");
   });
 });
