@@ -474,4 +474,47 @@ describe("task file routes", () => {
     expect(response.status).toBe(503);
     expect(String(payload.message)).toContain("正式任务数据库");
   });
+
+  it("returns 502 with readable message when model analysis is incomplete after retry", async () => {
+    saveTaskSummary({
+      id: "task-7",
+      userId: "user-1",
+      status: "created",
+      targetWordCount: null,
+      citationStyle: null,
+      specialRequirements: ""
+    });
+
+    const formData = new FormData();
+    formData.append(
+      "files",
+      new File(["Assignment brief text."], "assignment.txt", {
+        type: "text/plain"
+      })
+    );
+
+    const response = await handleTaskFileUploadRequest(
+      new Request("http://localhost/api/tasks/task-7/files", {
+        method: "POST",
+        body: formData
+      }),
+      {
+        taskId: "task-7"
+      },
+      {
+        isPersistenceReady: () => true,
+        requireUser: async () => makeUser(),
+        analyzeTask: async () => {
+          throw new Error("MODEL_ANALYSIS_INCOMPLETE_AFTER_RETRY");
+        }
+      }
+    );
+    const payload = await response.json();
+
+    expect(response.status).toBe(502);
+    expect(String(payload.message)).toContain("模型");
+    expect(String(payload.message)).toContain("重试");
+    expect(String(payload.message)).not.toContain("MODEL_ANALYSIS_INCOMPLETE");
+    expect(getTaskSummary("task-7")?.analysisStatus).toBe("failed");
+  });
 });

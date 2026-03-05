@@ -24,6 +24,98 @@ type AnalyzeUploadedTaskResult = {
   outline: OutlineScaffold | null;
 };
 
+type AnalyzeAttemptDiagnostics = {
+  attempt: 1 | 2;
+  responseLength: number;
+  repairedResponseLength: number | null;
+  parseSource: "direct" | "repair" | "none";
+};
+
+type AnalyzeServiceError = Error & {
+  code?: string;
+  missingFields?: string[];
+  diagnostics?: AnalyzeAttemptDiagnostics[];
+};
+
+const ANALYZE_TASK_TEXT_FORMAT = {
+  type: "json_schema",
+  name: "task_analysis_result",
+  strict: true,
+  schema: {
+    type: "object",
+    additionalProperties: false,
+    required: ["analysis", "outline"],
+    properties: {
+      analysis: {
+        type: "object",
+        additionalProperties: false,
+        required: [
+          "chosenTaskFileId",
+          "supportingFileIds",
+          "ignoredFileIds",
+          "needsUserConfirmation",
+          "reasoning",
+          "targetWordCount",
+          "citationStyle",
+          "topic",
+          "chapterCount",
+          "mustCover",
+          "gradingFocus",
+          "appliedSpecialRequirements",
+          "usedDefaultWordCount",
+          "usedDefaultCitationStyle",
+          "warnings"
+        ],
+        properties: {
+          chosenTaskFileId: { type: ["string", "null"] },
+          supportingFileIds: { type: "array", items: { type: "string" } },
+          ignoredFileIds: { type: "array", items: { type: "string" } },
+          needsUserConfirmation: { type: "boolean" },
+          reasoning: { type: "string" },
+          targetWordCount: { type: "number" },
+          citationStyle: { type: "string" },
+          topic: { type: ["string", "null"] },
+          chapterCount: { type: ["number", "null"] },
+          mustCover: { type: "array", items: { type: "string" } },
+          gradingFocus: { type: "array", items: { type: "string" } },
+          appliedSpecialRequirements: { type: "string" },
+          usedDefaultWordCount: { type: "boolean" },
+          usedDefaultCitationStyle: { type: "boolean" },
+          warnings: { type: "array", items: { type: "string" } }
+        }
+      },
+      outline: {
+        anyOf: [
+          {
+            type: "null"
+          },
+          {
+            type: "object",
+            additionalProperties: false,
+            required: ["articleTitle", "sections"],
+            properties: {
+              articleTitle: { type: "string" },
+              sections: {
+                type: "array",
+                items: {
+                  type: "object",
+                  additionalProperties: false,
+                  required: ["title", "summary", "bulletPoints"],
+                  properties: {
+                    title: { type: "string" },
+                    summary: { type: "string" },
+                    bulletPoints: { type: "array", items: { type: "string" } }
+                  }
+                }
+              }
+            }
+          }
+        ]
+      }
+    }
+  }
+} as const;
+
 type ParsedResult = {
   analysis?: Partial<TaskAnalysisSnapshot> | null;
   outline?: {
@@ -35,25 +127,42 @@ type ParsedResult = {
 export async function analyzeUploadedTaskWithOpenAI(
   input: AnalyzeUploadedTaskInput
 ): Promise<AnalyzeUploadedTaskResult> {
-  const response = await requestOpenAITextResponse({
-    input: [
-      {
-        role: "user",
-        content: buildAnalysisContent(input)
+  const firstAttempt = await runAnalysisAttempt(input, 1);
+
+  try {
+    return normalizeAnalyzeUploadedTaskResult(input, firstAttempt.parsed);
+  } catch (error) {
+    if (!isRetryableModelAnalysisError(error)) {
+      throw error;
+    }
+
+    const secondAttempt = await runAnalysisAttempt(input, 2, firstAttempt.rawText);
+
+    try {
+      return normalizeAnalyzeUploadedTaskResult(input, secondAttempt.parsed);
+    } catch (secondError) {
+      if (!isRetryableModelAnalysisError(secondError)) {
+        throw secondError;
       }
-    ],
-    reasoningEffort: "medium"
-  });
 
-  const parsed =
-    parseAnalyzeUploadedTaskResult(response.output_text) ??
-    (await repairAnalyzeUploadedTaskResult(response.output_text));
+      throw createModelAnalysisError(
+        mapAfterRetryCode(secondError.message),
+        secondError.missingFields,
+        [firstAttempt.diagnostics, secondAttempt.diagnostics]
+      );
+    }
+  }
+}
 
+function normalizeAnalyzeUploadedTaskResult(
+  input: AnalyzeUploadedTaskInput,
+  parsed: ParsedResult | null
+) {
   const analysis = normalizeAnalysis(parsed?.analysis, input, parsed?.outline?.articleTitle);
   const outline = normalizeOutline(parsed?.outline, analysis);
 
   if (!analysis.needsUserConfirmation && !outline) {
-    throw new Error("MODEL_RETURNED_EMPTY_OUTLINE");
+    throw createModelAnalysisError("MODEL_RETURNED_EMPTY_OUTLINE");
   }
 
   return {
@@ -62,7 +171,72 @@ export async function analyzeUploadedTaskWithOpenAI(
   };
 }
 
-function buildAnalysisContent(input: AnalyzeUploadedTaskInput) {
+async function runAnalysisAttempt(
+  input: AnalyzeUploadedTaskInput,
+  attempt: 1 | 2,
+  previousRawText?: string
+) {
+  const response = await requestAnalysisResponse(
+    buildAnalysisContent(input, {
+      retry: attempt === 2,
+      previousRawText
+    })
+  );
+  const directParsed = parseAnalyzeUploadedTaskResult(response.output_text);
+  const repaired = directParsed
+    ? { parsed: directParsed, repairedText: null }
+    : await repairAnalyzeUploadedTaskResult(response.output_text);
+  const parsed = directParsed ?? repaired.parsed;
+
+  return {
+    rawText: response.output_text,
+    parsed,
+    diagnostics: {
+      attempt,
+      responseLength: response.output_text.length,
+      repairedResponseLength: repaired.repairedText?.length ?? null,
+      parseSource: directParsed ? "direct" : parsed ? "repair" : "none"
+    } satisfies AnalyzeAttemptDiagnostics
+  };
+}
+
+async function requestAnalysisResponse(inputContent: Array<Record<string, unknown>>) {
+  try {
+    return await requestOpenAITextResponse({
+      input: [
+        {
+          role: "user",
+          content: inputContent
+        }
+      ],
+      reasoningEffort: "medium",
+      textFormat: ANALYZE_TASK_TEXT_FORMAT as unknown as Record<string, unknown>
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (!message.includes("status 400")) {
+      throw error;
+    }
+
+    return requestOpenAITextResponse({
+      input: [
+        {
+          role: "user",
+          content: inputContent
+        }
+      ],
+      reasoningEffort: "medium"
+    });
+  }
+}
+
+function buildAnalysisContent(
+  input: AnalyzeUploadedTaskInput,
+  options?: {
+    retry?: boolean;
+    previousRawText?: string;
+  }
+) {
   const content: Array<Record<string, unknown>> = [
     {
       type: "input_text",
@@ -74,16 +248,31 @@ function buildAnalysisContent(input: AnalyzeUploadedTaskInput) {
   ];
 
   for (const file of input.files) {
-    content.push({
-      type: "input_text",
-      text: [
-        `FILE_ID: ${file.id}`,
-        `FILE_NAME: ${file.originalFilename}`,
-        "RAW_EXTRACTED_TEXT_START",
-        file.extractedText || "(no extracted text available)",
-        "RAW_EXTRACTED_TEXT_END"
-      ].join("\n")
-    });
+    const shouldUsePdfFileInput = Boolean(file.openaiFileId && isPdfFile(file));
+    const fileContextHeader = [
+      `FILE_ID: ${file.id}`,
+      `FILE_NAME: ${file.originalFilename}`
+    ];
+
+    if (shouldUsePdfFileInput) {
+      content.push({
+        type: "input_text",
+        text: [
+          ...fileContextHeader,
+          "RAW_EXTRACTED_TEXT_OMITTED: Original PDF file is attached below. Read the PDF directly."
+        ].join("\n")
+      });
+    } else {
+      content.push({
+        type: "input_text",
+        text: [
+          ...fileContextHeader,
+          "RAW_EXTRACTED_TEXT_START",
+          file.extractedText || "(no extracted text available)",
+          "RAW_EXTRACTED_TEXT_END"
+        ].join("\n")
+      });
+    }
 
     if (file.rawBody && isImageFile(file)) {
       content.push({
@@ -94,7 +283,7 @@ function buildAnalysisContent(input: AnalyzeUploadedTaskInput) {
         type: "input_image",
         image_url: `data:${file.contentType || "image/png"};base64,${file.rawBody.toString("base64")}`
       });
-    } else if (file.openaiFileId && isPdfFile(file)) {
+    } else if (shouldUsePdfFileInput) {
       content.push({
         type: "input_text",
         text: `PDF_FILE_CONTEXT: This PDF belongs to FILE_ID ${file.id} (${file.originalFilename}).`
@@ -104,6 +293,23 @@ function buildAnalysisContent(input: AnalyzeUploadedTaskInput) {
         file_id: file.openaiFileId
       });
     }
+  }
+
+  if (options?.retry) {
+    content.push({
+      type: "input_text",
+      text: [
+        "RETRY_INSTRUCTION:",
+        "- Your previous response was incomplete or invalid for this workflow.",
+        "- Return complete JSON with all required fields.",
+        "- Do not omit any required analysis fields.",
+        "- If you cannot determine a value, explicitly apply the instructed defaults.",
+        "",
+        "PREVIOUS_RESPONSE_SNIPPET_START",
+        (options.previousRawText ?? "(empty)").slice(0, 2400),
+        "PREVIOUS_RESPONSE_SNIPPET_END"
+      ].join("\n")
+    });
   }
 
   return content;
@@ -152,12 +358,19 @@ async function repairAnalyzeUploadedTaskResult(rawText: string) {
 
     const repaired = await requestOpenAITextResponse({
       input: repairPrompt,
-      reasoningEffort: "low"
+      reasoningEffort: "low",
+      textFormat: ANALYZE_TASK_TEXT_FORMAT as unknown as Record<string, unknown>
     });
 
-    return parseAnalyzeUploadedTaskResult(repaired.output_text);
+    return {
+      parsed: parseAnalyzeUploadedTaskResult(repaired.output_text),
+      repairedText: repaired.output_text
+    };
   } catch {
-    return null;
+    return {
+      parsed: null,
+      repairedText: null
+    };
   }
 }
 
@@ -167,7 +380,7 @@ function normalizeAnalysis(
   outlineTitle?: string
 ): TaskAnalysisSnapshot {
   if (!raw) {
-    throw new Error("MODEL_ANALYSIS_INCOMPLETE");
+    throw createModelAnalysisError("MODEL_ANALYSIS_INCOMPLETE", ["analysis"]);
   }
 
   const validIds = new Set(input.files.map((file) => file.id));
@@ -197,14 +410,20 @@ function normalizeAnalysis(
   const usedDefaultCitationStyle =
     typeof raw?.usedDefaultCitationStyle === "boolean" ? raw.usedDefaultCitationStyle : null;
 
-  if (
-    explicitWordCount === null ||
-    explicitCitationStyle === null ||
-    usedDefaultWordCount === null ||
-    usedDefaultCitationStyle === null
-  ) {
-    throw new Error("MODEL_ANALYSIS_INCOMPLETE");
+  const missingFields: string[] = [];
+  if (explicitWordCount === null) missingFields.push("targetWordCount");
+  if (explicitCitationStyle === null) missingFields.push("citationStyle");
+  if (usedDefaultWordCount === null) missingFields.push("usedDefaultWordCount");
+  if (usedDefaultCitationStyle === null) missingFields.push("usedDefaultCitationStyle");
+
+  if (missingFields.length > 0) {
+    throw createModelAnalysisError("MODEL_ANALYSIS_INCOMPLETE", missingFields);
   }
+
+  const normalizedWordCount = explicitWordCount as number;
+  const normalizedCitationStyle = explicitCitationStyle as string;
+  const normalizedUsedDefaultWordCount = usedDefaultWordCount as boolean;
+  const normalizedUsedDefaultCitationStyle = usedDefaultCitationStyle as boolean;
 
   return {
     chosenTaskFileId,
@@ -215,8 +434,8 @@ function normalizeAnalysis(
       typeof raw?.reasoning === "string" && raw.reasoning.trim()
         ? raw.reasoning.trim()
         : "The model analyzed the uploaded materials.",
-    targetWordCount: explicitWordCount,
-    citationStyle: explicitCitationStyle,
+    targetWordCount: normalizedWordCount,
+    citationStyle: normalizedCitationStyle,
     topic:
       typeof raw?.topic === "string" && raw.topic.trim()
         ? raw.topic.trim()
@@ -231,8 +450,8 @@ function normalizeAnalysis(
       typeof raw?.appliedSpecialRequirements === "string"
         ? raw.appliedSpecialRequirements
         : input.specialRequirements,
-    usedDefaultWordCount,
-    usedDefaultCitationStyle,
+    usedDefaultWordCount: normalizedUsedDefaultWordCount,
+    usedDefaultCitationStyle: normalizedUsedDefaultCitationStyle,
     warnings: normalizeStrings(raw?.warnings)
   };
 }
@@ -282,6 +501,41 @@ function normalizeOutline(
   };
 
   return isMeaningfulOutline(outline) ? outline : null;
+}
+
+function isRetryableModelAnalysisError(error: unknown): error is AnalyzeServiceError {
+  const message = error instanceof Error ? error.message : String(error);
+  return (
+    message === "MODEL_ANALYSIS_INCOMPLETE" ||
+    message === "MODEL_RETURNED_EMPTY_OUTLINE"
+  );
+}
+
+function mapAfterRetryCode(code: string) {
+  switch (code) {
+    case "MODEL_ANALYSIS_INCOMPLETE":
+      return "MODEL_ANALYSIS_INCOMPLETE_AFTER_RETRY";
+    case "MODEL_RETURNED_EMPTY_OUTLINE":
+      return "MODEL_RETURNED_EMPTY_OUTLINE_AFTER_RETRY";
+    default:
+      return code;
+  }
+}
+
+function createModelAnalysisError(
+  code: string,
+  missingFields?: string[],
+  diagnostics?: AnalyzeAttemptDiagnostics[]
+) {
+  const error = new Error(code) as AnalyzeServiceError;
+  error.code = code;
+  if (missingFields?.length) {
+    error.missingFields = missingFields;
+  }
+  if (diagnostics?.length) {
+    error.diagnostics = diagnostics;
+  }
+  return error;
 }
 
 function normalizeIds(value: unknown, validIds: Set<string>) {

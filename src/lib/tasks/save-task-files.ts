@@ -171,6 +171,16 @@ export async function persistTaskModelAnalysis(input: {
     : persistTaskModelAnalysisLocally(input);
 }
 
+export async function markTaskAnalysisFailed(input: {
+  taskId: string;
+  userId: string;
+  reason: string;
+}) {
+  return shouldUseSupabasePersistence()
+    ? markTaskAnalysisFailedWithSupabase(input)
+    : markTaskAnalysisFailedLocally(input);
+}
+
 async function saveTaskFilesLocally({
   taskId,
   userId,
@@ -596,4 +606,53 @@ function buildRuleCardFromAnalysis(
     gradingPriorities: analysis.gradingFocus,
     specialRequirements: analysis.appliedSpecialRequirements
   };
+}
+
+async function markTaskAnalysisFailedLocally(input: {
+  taskId: string;
+  userId: string;
+  reason: string;
+}) {
+  const task = getTaskSummary(input.taskId);
+  if (!task || task.userId !== input.userId) {
+    return null;
+  }
+
+  const now = new Date().toISOString();
+  return patchTaskSummary(input.taskId, {
+    analysisStatus: "failed",
+    analysisModel: "gpt-5.2",
+    analysisCompletedAt: now,
+    analysisSnapshot: task.analysisSnapshot
+      ? {
+          ...task.analysisSnapshot,
+          warnings: [
+            ...(task.analysisSnapshot.warnings ?? []),
+            `analysis_failed:${input.reason}`
+          ]
+        }
+      : null
+  });
+}
+
+async function markTaskAnalysisFailedWithSupabase(input: {
+  taskId: string;
+  userId: string;
+  reason: string;
+}) {
+  const client = createSupabaseAdminClient();
+  const now = new Date().toISOString();
+  const { error } = await client
+    .from("writing_tasks")
+    .update({
+      analysis_status: "failed",
+      analysis_model: "gpt-5.2",
+      analysis_completed_at: now
+    })
+    .eq("id", input.taskId)
+    .eq("user_id", input.userId);
+
+  if (error) {
+    throw new Error(`写入分析失败状态失败：${error.message}`);
+  }
 }

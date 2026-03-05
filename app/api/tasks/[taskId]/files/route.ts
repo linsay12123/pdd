@@ -11,6 +11,7 @@ import { extractTextFromUpload } from "@/src/lib/files/extract-text";
 import { shouldUseSupabasePersistence } from "@/src/lib/persistence/runtime-mode";
 import {
   getOwnedTaskSummary,
+  markTaskAnalysisFailed,
   persistTaskModelAnalysis,
   saveTaskFiles,
   updateTaskFileOpenAIMetadata
@@ -53,6 +54,8 @@ export async function handleTaskFileUploadRequest(
   },
   dependencies: TaskFileUploadRouteDependencies = {}
 ) {
+  let resolvedUserId: string | null = null;
+  let taskIdForFailure: string | null = null;
   try {
     if (!(dependencies.isPersistenceReady ?? shouldUseSupabasePersistence)()) {
       return NextResponse.json(
@@ -65,6 +68,8 @@ export async function handleTaskFileUploadRequest(
     }
 
     const user = await (dependencies.requireUser ?? requireCurrentSessionUser)();
+    resolvedUserId = user.id;
+    taskIdForFailure = params.taskId;
     const task = await getOwnedTaskSummary(params.taskId, user.id);
 
     if (!task) {
@@ -151,6 +156,19 @@ export async function handleTaskFileUploadRequest(
       })
     );
 
+    console.info("[file-upload] prepared-files", {
+      taskId: params.taskId,
+      userId: user.id,
+      files: preparedFiles.map((file) => ({
+        filename: file.originalFilename,
+        extractionMethod: file.extractionMethod,
+        extractedTextLength: file.extractedText.length,
+        openaiUploadStatus: file.openaiUploadStatus,
+        hasOpenAIFileId: Boolean(file.openaiFileId),
+        warningCount: file.extractionWarnings.length
+      }))
+    });
+
     const persistedFiles = await saveTaskFiles({
       taskId: params.taskId,
       userId: user.id,
@@ -222,7 +240,19 @@ export async function handleTaskFileUploadRequest(
     );
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error);
-    console.error("[file-upload] 上传文件失败:", errorMessage, error);
+    const diagnostics =
+      typeof error === "object" && error !== null && "diagnostics" in error
+        ? (error as { diagnostics?: unknown }).diagnostics
+        : null;
+    const missingFields =
+      typeof error === "object" && error !== null && "missingFields" in error
+        ? (error as { missingFields?: unknown }).missingFields
+        : null;
+    console.error("[file-upload] 上传文件失败:", {
+      errorMessage,
+      missingFields,
+      diagnostics
+    });
 
     if (errorMessage === "AUTH_REQUIRED") {
       return NextResponse.json(
@@ -244,10 +274,58 @@ export async function handleTaskFileUploadRequest(
       );
     }
 
+    if (resolvedUserId && taskIdForFailure) {
+      try {
+        await markTaskAnalysisFailed({
+          taskId: taskIdForFailure,
+          userId: resolvedUserId,
+          reason: errorMessage
+        });
+      } catch (persistError) {
+        console.error("[file-upload] 记录分析失败状态失败:", persistError);
+      }
+    }
+
+    if (
+      errorMessage === "MODEL_ANALYSIS_INCOMPLETE_AFTER_RETRY" ||
+      errorMessage === "MODEL_RETURNED_EMPTY_OUTLINE_AFTER_RETRY" ||
+      errorMessage === "MODEL_ANALYSIS_INCOMPLETE" ||
+      errorMessage === "MODEL_RETURNED_EMPTY_OUTLINE"
+    ) {
+      return NextResponse.json(
+        {
+          ok: false,
+          message:
+            "系统已经读到你上传的文件，但模型这次返回内容不完整。系统已自动重试一次，仍未成功，请再点一次上传重试。"
+        },
+        { status: 502 }
+      );
+    }
+
+    if (errorMessage.startsWith("OpenAI request failed with status")) {
+      return NextResponse.json(
+        {
+          ok: false,
+          message: "模型服务暂时不稳定，请稍后再试一次。"
+        },
+        { status: 502 }
+      );
+    }
+
+    if (errorMessage.includes("大纲")) {
+      return NextResponse.json(
+        {
+          ok: false,
+          message: errorMessage
+        },
+        { status: 500 }
+      );
+    }
+
     return NextResponse.json(
       {
         ok: false,
-        message: `上传文件失败：${errorMessage}`
+        message: "上传文件失败，请重试一次。如果连续失败，请联系人工支持。"
       },
       { status: 500 }
     );
