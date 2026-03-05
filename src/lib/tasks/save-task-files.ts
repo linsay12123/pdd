@@ -717,6 +717,8 @@ async function markTaskAnalysisPendingLocally(input: {
   return patchTaskSummary(input.taskId, {
     analysisStatus: "pending",
     analysisCompletedAt: null,
+    analysisSnapshot: null,
+    analysisModel: null,
     ...(input.primaryRequirementFileId !== undefined
       ? {
           primaryRequirementFileId: input.primaryRequirementFileId
@@ -733,7 +735,9 @@ async function markTaskAnalysisPendingWithSupabase(input: {
   const client = createSupabaseAdminClient();
   const patch: Record<string, unknown> = {
     analysis_status: "pending",
-    analysis_completed_at: null
+    analysis_completed_at: null,
+    analysis_snapshot: null,
+    analysis_model: null
   };
 
   if (input.primaryRequirementFileId !== undefined) {
