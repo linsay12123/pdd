@@ -7,6 +7,7 @@ import {
 } from "@/src/lib/ai/services/analyze-uploaded-task";
 import { extractTextFromImageWithVision } from "@/src/lib/ai/services/extract-text-from-image";
 import { requireCurrentSessionUser } from "@/src/lib/auth/current-user";
+import { detectSupportedFileKind } from "@/src/lib/files/file-kind";
 import { extractTextFromUpload } from "@/src/lib/files/extract-text";
 import { shouldUseSupabasePersistence } from "@/src/lib/persistence/runtime-mode";
 import {
@@ -35,6 +36,7 @@ type RouteContext = {
 type TaskFileUploadRouteDependencies = {
   requireUser?: () => Promise<SessionUser>;
   isPersistenceReady?: () => boolean;
+  analyzeTimeoutMs?: number;
   analyzeTask?: (input: {
     taskId: string;
     userId: string;
@@ -56,6 +58,7 @@ export async function handleTaskFileUploadRequest(
 ) {
   let resolvedUserId: string | null = null;
   let taskIdForFailure: string | null = null;
+  const requestStartedAt = Date.now();
   try {
     if (!(dependencies.isPersistenceReady ?? shouldUseSupabasePersistence)()) {
       return NextResponse.json(
@@ -99,9 +102,20 @@ export async function handleTaskFileUploadRequest(
 
     const preparedFiles = await Promise.all(
       files.map(async (file) => {
-        let extractedText = await extractTextFromUpload(file);
+        const fileKind = detectSupportedFileKind(file.name);
+        let extractedText = "";
         const extractionWarnings: string[] = [];
         let extractionMethod = "local_text";
+
+        if (fileKind === "pdf") {
+          extractedText = `[pdf transport-only: ${file.name}]`;
+          extractionMethod = "transport_only_pdf";
+          extractionWarnings.push(
+            "PDF 已直接交给模型读取，已跳过本地文字提取以提升稳定性和速度。"
+          );
+        } else {
+          extractedText = await extractTextFromUpload(file);
+        }
 
         if (extractedText.startsWith("[image")) {
           extractionMethod = "image_placeholder";
@@ -159,6 +173,7 @@ export async function handleTaskFileUploadRequest(
     console.info("[file-upload] prepared-files", {
       taskId: params.taskId,
       userId: user.id,
+      elapsedMs: Date.now() - requestStartedAt,
       files: preparedFiles.map((file) => ({
         filename: file.originalFilename,
         extractionMethod: file.extractionMethod,
@@ -195,11 +210,22 @@ export async function handleTaskFileUploadRequest(
       openaiFileId: preparedFiles[index]?.openaiFileId ?? file.openaiFileId ?? null,
       extractedText: preparedFiles[index]?.extractedText ?? file.extractedText
     }));
-    const analyzed = await analyzeTask({
+    const analyzeStartedAt = Date.now();
+    const analyzed = await withTimeout(
+      analyzeTask({
+        taskId: params.taskId,
+        userId: user.id,
+        specialRequirements: task.specialRequirements ?? "",
+        files: modelFiles
+      }),
+      dependencies.analyzeTimeoutMs ?? 45_000,
+      "MODEL_ANALYSIS_TIMEOUT"
+    );
+
+    console.info("[file-upload] analyze-finished", {
       taskId: params.taskId,
       userId: user.id,
-      specialRequirements: task.specialRequirements ?? "",
-      files: modelFiles
+      elapsedMs: Date.now() - analyzeStartedAt
     });
 
     if (
@@ -290,13 +316,16 @@ export async function handleTaskFileUploadRequest(
       errorMessage === "MODEL_ANALYSIS_INCOMPLETE_AFTER_RETRY" ||
       errorMessage === "MODEL_RETURNED_EMPTY_OUTLINE_AFTER_RETRY" ||
       errorMessage === "MODEL_ANALYSIS_INCOMPLETE" ||
-      errorMessage === "MODEL_RETURNED_EMPTY_OUTLINE"
+      errorMessage === "MODEL_RETURNED_EMPTY_OUTLINE" ||
+      errorMessage === "MODEL_ANALYSIS_TIMEOUT"
     ) {
       return NextResponse.json(
         {
           ok: false,
           message:
-            "系统已经读到你上传的文件，但模型这次返回内容不完整。系统已自动重试一次，仍未成功，请再点一次上传重试。"
+            errorMessage === "MODEL_ANALYSIS_TIMEOUT"
+              ? "系统已经开始分析你上传的文件，但这次处理超时了。请再点一次上传重试。"
+              : "系统已经读到你上传的文件，但模型这次返回内容不完整。系统已自动重试一次，仍未成功，请再点一次上传重试。"
         },
         { status: 502 }
       );
@@ -349,4 +378,25 @@ async function analyzeUploadedTaskFromFiles(input: {
 export async function POST(request: Request, context: RouteContext) {
   const params = await context.params;
   return handleTaskFileUploadRequest(request, params);
+}
+
+async function withTimeout<T>(
+  promise: Promise<T>,
+  timeoutMs: number,
+  timeoutCode: string
+) {
+  let timeoutId: ReturnType<typeof setTimeout> | undefined;
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    timeoutId = setTimeout(() => {
+      reject(new Error(timeoutCode));
+    }, timeoutMs);
+  });
+
+  try {
+    return await Promise.race([promise, timeoutPromise]);
+  } finally {
+    if (timeoutId) {
+      clearTimeout(timeoutId);
+    }
+  }
 }

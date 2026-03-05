@@ -517,4 +517,100 @@ describe("task file routes", () => {
     expect(String(payload.message)).not.toContain("MODEL_ANALYSIS_INCOMPLETE");
     expect(getTaskSummary("task-7")?.analysisStatus).toBe("failed");
   });
+
+  it("returns 502 with readable message when model analysis exceeds timeout", async () => {
+    saveTaskSummary({
+      id: "task-8",
+      userId: "user-1",
+      status: "created",
+      targetWordCount: null,
+      citationStyle: null,
+      specialRequirements: ""
+    });
+
+    const formData = new FormData();
+    formData.append(
+      "files",
+      new File(["Assignment brief text."], "assignment.txt", {
+        type: "text/plain"
+      })
+    );
+
+    const response = await handleTaskFileUploadRequest(
+      new Request("http://localhost/api/tasks/task-8/files", {
+        method: "POST",
+        body: formData
+      }),
+      {
+        taskId: "task-8"
+      },
+      {
+        isPersistenceReady: () => true,
+        requireUser: async () => makeUser(),
+        analyzeTimeoutMs: 10,
+        analyzeTask: async () => {
+          await new Promise((resolve) => setTimeout(resolve, 50));
+          return {
+            analysis: makeAnalysis(),
+            outline: makeOutline()
+          };
+        }
+      }
+    );
+    const payload = await response.json();
+
+    expect(response.status).toBe(502);
+    expect(String(payload.message)).toContain("超时");
+    expect(getTaskSummary("task-8")?.analysisStatus).toBe("failed");
+  });
+
+  it("uses transport-only strategy for pdf files instead of local extraction", async () => {
+    saveTaskSummary({
+      id: "task-9",
+      userId: "user-1",
+      status: "created",
+      targetWordCount: null,
+      citationStyle: null,
+      specialRequirements: ""
+    });
+
+    const formData = new FormData();
+    formData.append(
+      "files",
+      new File([new Uint8Array([37, 80, 68, 70])], "assignment.pdf", {
+        type: "application/pdf"
+      })
+    );
+
+    let capturedExtractedText = "";
+
+    const response = await handleTaskFileUploadRequest(
+      new Request("http://localhost/api/tasks/task-9/files", {
+        method: "POST",
+        body: formData
+      }),
+      {
+        taskId: "task-9"
+      },
+      {
+        isPersistenceReady: () => true,
+        requireUser: async () => makeUser(),
+        analyzeTask: async ({ files }) => {
+          capturedExtractedText = files[0]?.extractedText ?? "";
+          return {
+            analysis: makeAnalysis({
+              chosenTaskFileId: files[0]?.id,
+              supportingFileIds: []
+            }),
+            outline: makeOutline()
+          };
+        }
+      }
+    );
+    const payload = await response.json();
+
+    expect(response.status).toBe(201);
+    expect(capturedExtractedText).toContain("pdf transport-only");
+    expect(payload.files[0].extractionMethod).toBe("transport_only_pdf");
+  });
 });
