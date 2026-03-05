@@ -226,6 +226,11 @@ export function WorkspacePageClient({ initialQuota }: WorkspacePageClientProps) 
       return;
     }
 
+    // 超过等待上限后进入“可重试”状态，停止继续自动轮询，避免无意义请求刷屏
+    if (activeTask.analysisProgress.canRetry) {
+      return;
+    }
+
     let cancelled = false;
     const timer = window.setTimeout(() => {
       void requestTaskAnalysisStatus({ taskId: activeTask.task.id })
