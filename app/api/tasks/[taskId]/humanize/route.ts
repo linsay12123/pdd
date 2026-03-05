@@ -8,9 +8,8 @@ import { countBodyWords } from "@/src/lib/drafts/word-count";
 import { defaultHumanizeProfile } from "@/src/lib/humanize/humanize-provider";
 import { shouldUseSupabasePersistence } from "@/src/lib/persistence/runtime-mode";
 import {
-  appendPaymentLedgerEntryToSupabase,
+  applyWalletMutationWithLedgerInSupabase,
   getUserWalletFromSupabase,
-  setUserWalletInSupabase
 } from "@/src/lib/payments/supabase-wallet";
 import {
   getLatestOwnedDraftFromSupabase,
@@ -421,32 +420,43 @@ async function chargeHumanizeQuotaWithSupabase(
   bodyWordCount: number
 ): Promise<HumanizeChargeResult> {
   const amount = quoteHumanizeTaskCost(bodyWordCount);
-  const wallet = await getUserWalletFromSupabase(userId);
-  let frozen;
+  let frozen: ReturnType<typeof freezeQuota> | null = null;
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const wallet = await getUserWalletFromSupabase(userId);
+    try {
+      frozen = freezeQuota({
+        wallet,
+        amount,
+        taskId,
+        chargePath: "humanize"
+      });
+    } catch {
+      throw new Error("INSUFFICIENT_QUOTA");
+    }
 
-  try {
-    frozen = freezeQuota({
-      wallet,
-      amount,
-      taskId,
-      chargePath: "humanize"
-    });
-  } catch {
-    throw new Error("INSUFFICIENT_QUOTA");
+    try {
+      await applyWalletMutationWithLedgerInSupabase({
+        userId,
+        taskId,
+        expectedWallet: wallet,
+        nextWallet: frozen.wallet,
+        entry: frozen.entry
+      });
+
+      return {
+        amount,
+        reservation: frozen.reservation
+      };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (message === "WALLET_CONFLICT" || message === "WALLET_NEGATIVE_NOT_ALLOWED") {
+        continue;
+      }
+      throw error;
+    }
   }
 
-  await setUserWalletInSupabase(userId, frozen.wallet);
-  await appendPaymentLedgerEntryToSupabase({
-    userId,
-    taskId,
-    entry: frozen.entry,
-    walletAfter: frozen.wallet
-  });
-
-  return {
-    amount,
-    reservation: frozen.reservation
-  };
+  throw new Error("INSUFFICIENT_QUOTA");
 }
 
 async function releaseQueuedHumanizeQuotaWithSupabase(input: {
@@ -454,18 +464,31 @@ async function releaseQueuedHumanizeQuotaWithSupabase(input: {
   userId: string;
   reservation: FrozenQuotaReservation;
 }) {
-  const wallet = await getUserWalletFromSupabase(input.userId);
-  const released = releaseQuota({
-    wallet,
-    reservation: input.reservation
-  });
-  await setUserWalletInSupabase(input.userId, released.wallet);
-  await appendPaymentLedgerEntryToSupabase({
-    userId: input.userId,
-    taskId: input.taskId,
-    entry: released.entry,
-    walletAfter: released.wallet
-  });
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const wallet = await getUserWalletFromSupabase(input.userId);
+    const released = releaseQuota({
+      wallet,
+      reservation: input.reservation
+    });
+    try {
+      await applyWalletMutationWithLedgerInSupabase({
+        userId: input.userId,
+        taskId: input.taskId,
+        expectedWallet: wallet,
+        nextWallet: released.wallet,
+        entry: released.entry
+      });
+      return;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (message === "WALLET_CONFLICT" || message === "WALLET_NEGATIVE_NOT_ALLOWED") {
+        continue;
+      }
+      throw error;
+    }
+  }
+
+  throw new Error("RELEASE_WALLET_CONFLICT");
 }
 
 async function saveQueuedHumanizeStateWithSupabase(input: {

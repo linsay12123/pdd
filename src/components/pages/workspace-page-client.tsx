@@ -67,6 +67,10 @@ const defaultHumanizeState: TaskWorkflowHumanizePayload = {
   errorMessage: null
 };
 
+const MAX_UPLOAD_FILE_COUNT = 10;
+const MAX_UPLOAD_FILE_BYTES = 25 * 1024 * 1024;
+const MAX_UPLOAD_FILE_MB = MAX_UPLOAD_FILE_BYTES / (1024 * 1024);
+
 export function WorkspacePageClient({ initialQuota }: WorkspacePageClientProps) {
   const [step, setStep] = useState(1);
   const [files, setFiles] = useState<File[]>([]);
@@ -329,9 +333,39 @@ export function WorkspacePageClient({ initialQuota }: WorkspacePageClientProps) 
   };
 
   const handleUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files) {
-      setFiles(Array.from(e.target.files));
+    if (!e.target.files) {
+      return;
     }
+
+    const selectedFiles = Array.from(e.target.files);
+    if (selectedFiles.length > MAX_UPLOAD_FILE_COUNT) {
+      setNotice({
+        tone: "error",
+        text: `一次最多上传 ${MAX_UPLOAD_FILE_COUNT} 个文件，请删掉一部分再试。`
+      });
+      setFiles([]);
+      e.target.value = "";
+      return;
+    }
+
+    const oversizedFile = selectedFiles.find((file) => file.size > MAX_UPLOAD_FILE_BYTES);
+    if (oversizedFile) {
+      setNotice({
+        tone: "error",
+        text: `文件 ${oversizedFile.name} 超过 ${MAX_UPLOAD_FILE_MB.toFixed(0)}MB 上限，请压缩后再上传。`
+      });
+      setFiles([]);
+      e.target.value = "";
+      return;
+    }
+
+    setFiles(selectedFiles);
+    setNotice((current) => {
+      if (!current || current.tone !== "error") {
+        return current;
+      }
+      return null;
+    });
   };
 
   const handleStartAnalysis = async () => {
@@ -718,7 +752,9 @@ export function WorkspacePageClient({ initialQuota }: WorkspacePageClientProps) 
                   <div>
                     <label className="block text-sm font-medium text-cream-100 mb-3">
                       1. 上传参考材料与要求文档
-                      <span className="text-xs text-brand-700 ml-2 font-normal">支持 txt, md, docx, pdf, ppt, pptx</span>
+                      <span className="text-xs text-brand-700 ml-2 font-normal">
+                        支持 txt, md, docx, pdf, ppt, pptx（最多 {MAX_UPLOAD_FILE_COUNT} 个，每个不超过 {MAX_UPLOAD_FILE_MB.toFixed(0)}MB）
+                      </span>
                     </label>
                     <div className="border-2 border-dashed border-white/10 rounded-xl p-8 text-center hover:border-gold-500/50 transition-colors bg-brand-950/50 relative">
                       <input type="file" multiple onChange={handleUpload} className="absolute inset-0 w-full h-full opacity-0 cursor-pointer" />

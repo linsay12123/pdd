@@ -3,9 +3,8 @@ import { requireCurrentSessionUser } from "@/src/lib/auth/current-user";
 import { releaseQuota } from "@/src/lib/billing/release-quota";
 import { shouldUseSupabasePersistence } from "@/src/lib/persistence/runtime-mode";
 import {
-  appendPaymentLedgerEntryToSupabase,
+  applyWalletMutationWithLedgerInSupabase,
   getUserWalletFromSupabase,
-  setUserWalletInSupabase
 } from "@/src/lib/payments/supabase-wallet";
 import { createSupabaseAdminClient } from "@/src/lib/supabase/admin";
 import type { SessionUser } from "@/src/types/auth";
@@ -163,16 +162,29 @@ async function releaseQuotaReservationWithSupabase(
     throw new Error("REAL_PERSISTENCE_REQUIRED");
   }
 
-  const wallet = await getUserWalletFromSupabase(userId);
-  const released = releaseQuota({ wallet, reservation });
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const wallet = await getUserWalletFromSupabase(userId);
+    const released = releaseQuota({ wallet, reservation });
 
-  await setUserWalletInSupabase(userId, released.wallet);
-  await appendPaymentLedgerEntryToSupabase({
-    userId,
-    taskId,
-    entry: released.entry,
-    walletAfter: released.wallet
-  });
+    try {
+      await applyWalletMutationWithLedgerInSupabase({
+        userId,
+        taskId,
+        expectedWallet: wallet,
+        nextWallet: released.wallet,
+        entry: released.entry
+      });
+      return;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (message === "WALLET_CONFLICT" || message === "WALLET_NEGATIVE_NOT_ALLOWED") {
+        continue;
+      }
+      throw error;
+    }
+  }
+
+  throw new Error("RELEASE_WALLET_CONFLICT");
 }
 
 async function markTaskFailedWithSupabase(taskId: string, userId: string) {

@@ -68,6 +68,74 @@ describe("task file async analysis routes", () => {
     expect(String(payload.message)).toContain("tr_prod");
   });
 
+  it("rejects files that exceed the configured upload size limit", async () => {
+    saveTaskSummary({
+      id: "task-too-large",
+      userId: "user-1",
+      status: "created",
+      targetWordCount: null,
+      citationStyle: null,
+      specialRequirements: ""
+    });
+
+    const formData = new FormData();
+    formData.append(
+      "files",
+      new File(["abcde"], "assignment.txt", { type: "text/plain" })
+    );
+
+    const response = await handleTaskFileUploadRequest(
+      new Request("http://localhost/api/tasks/task-too-large/files", {
+        method: "POST",
+        body: formData
+      }),
+      { taskId: "task-too-large" },
+      {
+        isPersistenceReady: () => true,
+        requireUser: async () => makeUser(),
+        maxFileBytes: 4
+      }
+    );
+    const payload = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(String(payload.message)).toContain("超过");
+    expect(getTaskSummary("task-too-large")?.analysisStatus).not.toBe("pending");
+  });
+
+  it("rejects uploads when file count exceeds the configured limit", async () => {
+    saveTaskSummary({
+      id: "task-too-many",
+      userId: "user-1",
+      status: "created",
+      targetWordCount: null,
+      citationStyle: null,
+      specialRequirements: ""
+    });
+
+    const formData = new FormData();
+    formData.append("files", new File(["a"], "a.txt", { type: "text/plain" }));
+    formData.append("files", new File(["b"], "b.txt", { type: "text/plain" }));
+
+    const response = await handleTaskFileUploadRequest(
+      new Request("http://localhost/api/tasks/task-too-many/files", {
+        method: "POST",
+        body: formData
+      }),
+      { taskId: "task-too-many" },
+      {
+        isPersistenceReady: () => true,
+        requireUser: async () => makeUser(),
+        maxFileCount: 1
+      }
+    );
+    const payload = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(String(payload.message)).toContain("最多");
+    expect(getTaskSummary("task-too-many")?.analysisStatus).not.toBe("pending");
+  });
+
   it("accepts upload with 202 and queues background analysis instead of blocking synchronously", async () => {
     saveTaskSummary({
       id: "task-1",

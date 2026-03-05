@@ -72,3 +72,55 @@ export async function appendPaymentLedgerEntryToSupabase(input: {
     throw new Error(`写入积分流水失败：${error.message}`);
   }
 }
+
+export async function applyWalletMutationWithLedgerInSupabase(input: {
+  userId: string;
+  taskId: string;
+  expectedWallet: WalletSnapshot;
+  nextWallet: WalletSnapshot;
+  entry: QuotaLedgerEntry;
+  metadata?: Record<string, unknown>;
+}) {
+  const client = createSupabaseAdminClient();
+  const { data, error } = await client.rpc("apply_quota_wallet_mutation", {
+    p_user_id: input.userId,
+    p_task_id: input.taskId,
+    p_expected_recharge: input.expectedWallet.rechargeQuota,
+    p_expected_subscription: input.expectedWallet.subscriptionQuota,
+    p_expected_frozen: input.expectedWallet.frozenQuota,
+    p_next_recharge: input.nextWallet.rechargeQuota,
+    p_next_subscription: input.nextWallet.subscriptionQuota,
+    p_next_frozen: input.nextWallet.frozenQuota,
+    p_entry_kind: input.entry.kind,
+    p_amount: input.entry.amount,
+    p_unique_event_key: input.entry.ledgerKey,
+    p_note: input.entry.note,
+    p_metadata: input.metadata ?? {}
+  });
+
+  if (error) {
+    if (error.message.includes("WALLET_NEGATIVE_NOT_ALLOWED")) {
+      throw new Error("WALLET_NEGATIVE_NOT_ALLOWED");
+    }
+    throw new Error(`原子更新积分失败：${error.message}`);
+  }
+
+  const row = Array.isArray(data) ? data[0] : null;
+  if (!row) {
+    throw new Error("WALLET_MUTATION_EMPTY_RESULT");
+  }
+
+  if (row.conflict === true) {
+    throw new Error("WALLET_CONFLICT");
+  }
+
+  if (row.applied !== true) {
+    throw new Error("WALLET_MUTATION_NOT_APPLIED");
+  }
+
+  return {
+    rechargeQuota: Number(row.recharge_quota ?? 0),
+    subscriptionQuota: Number(row.subscription_quota ?? 0),
+    frozenQuota: Number(row.frozen_quota ?? 0)
+  } satisfies WalletSnapshot;
+}

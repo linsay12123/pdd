@@ -42,7 +42,12 @@ type TaskFileUploadRouteDependencies = {
   requireUser?: () => Promise<SessionUser>;
   isPersistenceReady?: () => boolean;
   enqueueTaskAnalysis?: (input: EnqueueAnalyzeTaskInput) => Promise<string | null>;
+  maxFileCount?: number;
+  maxFileBytes?: number;
 };
+
+const DEFAULT_MAX_FILE_COUNT = 10;
+const DEFAULT_MAX_FILE_BYTES = 25 * 1024 * 1024;
 
 export async function handleTaskFileUploadRequest(
   request: Request,
@@ -117,6 +122,34 @@ export async function handleTaskFileUploadRequest(
         {
           ok: false,
           message: "请先选择至少一个文件再继续。"
+        },
+        { status: 400 }
+      );
+    }
+
+    const maxFileCount = Number.isFinite(dependencies.maxFileCount)
+      ? Number(dependencies.maxFileCount)
+      : Number.parseInt(process.env.TASK_UPLOAD_MAX_FILE_COUNT ?? "", 10) || DEFAULT_MAX_FILE_COUNT;
+    if (files.length > maxFileCount) {
+      return NextResponse.json(
+        {
+          ok: false,
+          message: `一次最多上传 ${maxFileCount} 个文件，请删掉一部分再试。`
+        },
+        { status: 400 }
+      );
+    }
+
+    const maxFileBytes = Number.isFinite(dependencies.maxFileBytes)
+      ? Number(dependencies.maxFileBytes)
+      : Number.parseInt(process.env.TASK_UPLOAD_MAX_FILE_BYTES ?? "", 10) || DEFAULT_MAX_FILE_BYTES;
+    const oversizedFile = files.find((file) => file.size > maxFileBytes);
+    if (oversizedFile) {
+      const maxFileMb = (maxFileBytes / (1024 * 1024)).toFixed(0);
+      return NextResponse.json(
+        {
+          ok: false,
+          message: `文件 ${oversizedFile.name} 超过 ${maxFileMb}MB 上限，请压缩后再上传。`
         },
         { status: 400 }
       );

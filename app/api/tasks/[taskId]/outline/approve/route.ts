@@ -6,9 +6,8 @@ import { refundChargedQuota } from "@/src/lib/billing/refund-charged-quota";
 import { countBodyWords } from "@/src/lib/drafts/word-count";
 import { shouldUseSupabasePersistence } from "@/src/lib/persistence/runtime-mode";
 import {
-  appendPaymentLedgerEntryToSupabase,
+  applyWalletMutationWithLedgerInSupabase,
   getUserWalletFromSupabase,
-  setUserWalletInSupabase
 } from "@/src/lib/payments/supabase-wallet";
 import { createSupabaseAdminClient } from "@/src/lib/supabase/admin";
 import {
@@ -220,32 +219,43 @@ async function chargeQuotaForTaskWithSupabase(
   }
 
   const quotaCost = resolveGenerationTaskQuotaCost(Number(taskRow.target_word_count));
+  let charged: ReturnType<typeof chargeQuota> | null = null;
+  let applied = false;
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const wallet = await getUserWalletFromSupabase(userId);
+    try {
+      charged = chargeQuota({
+        wallet,
+        amount: quotaCost,
+        taskId,
+        chargePath: "generation"
+      });
+    } catch {
+      throw new Error("INSUFFICIENT_QUOTA");
+    }
 
-  const wallet = await getUserWalletFromSupabase(userId);
-
-  let charged;
-
-  try {
-    charged = chargeQuota({
-      wallet,
-      amount: quotaCost,
-      taskId,
-      chargePath: "generation"
-    });
-  } catch {
-    throw new Error("INSUFFICIENT_QUOTA");
+    try {
+      await applyWalletMutationWithLedgerInSupabase({
+        userId,
+        taskId,
+        expectedWallet: wallet,
+        nextWallet: charged.wallet,
+        entry: charged.entry
+      });
+      applied = true;
+      break;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (message === "WALLET_CONFLICT" || message === "WALLET_NEGATIVE_NOT_ALLOWED") {
+        continue;
+      }
+      throw error;
+    }
   }
 
-  // Update wallet
-  await setUserWalletInSupabase(userId, charged.wallet);
-
-  // Write ledger entry
-  await appendPaymentLedgerEntryToSupabase({
-    userId,
-    taskId,
-    entry: charged.entry,
-    walletAfter: charged.wallet
-  });
+  if (!applied || !charged) {
+    throw new Error("INSUFFICIENT_QUOTA");
+  }
 
   // Store reservation on task for later refund if needed
   await client
@@ -271,17 +281,34 @@ async function refundQuotaForTask(
     }
 
     const client = createSupabaseAdminClient();
-    const wallet = await getUserWalletFromSupabase(userId);
 
-    const refunded = refundChargedQuota({ wallet, reservation });
+    let cleared = false;
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const wallet = await getUserWalletFromSupabase(userId);
+      const refunded = refundChargedQuota({ wallet, reservation });
 
-    await setUserWalletInSupabase(userId, refunded.wallet);
-    await appendPaymentLedgerEntryToSupabase({
-      userId,
-      taskId,
-      entry: refunded.entry,
-      walletAfter: refunded.wallet
-    });
+      try {
+        await applyWalletMutationWithLedgerInSupabase({
+          userId,
+          taskId,
+          expectedWallet: wallet,
+          nextWallet: refunded.wallet,
+          entry: refunded.entry
+        });
+        cleared = true;
+        break;
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        if (message === "WALLET_CONFLICT" || message === "WALLET_NEGATIVE_NOT_ALLOWED") {
+          continue;
+        }
+        throw error;
+      }
+    }
+
+    if (!cleared) {
+      throw new Error("REFUND_WALLET_CONFLICT");
+    }
 
     await client
       .from("writing_tasks")

@@ -13,9 +13,8 @@ import {
 import { resolveHumanizeProvider } from "@/src/lib/humanize/resolve-provider";
 import { shouldUseSupabasePersistence } from "@/src/lib/persistence/runtime-mode";
 import {
-  appendPaymentLedgerEntryToSupabase,
+  applyWalletMutationWithLedgerInSupabase,
   getUserWalletFromSupabase,
-  setUserWalletInSupabase
 } from "@/src/lib/payments/supabase-wallet";
 import { releaseQuota } from "@/src/lib/billing/release-quota";
 import { settleQuota } from "@/src/lib/billing/settle-quota";
@@ -138,18 +137,7 @@ export async function runHumanizeDraftPipeline(
       outputKind: "humanized_docx"
     });
 
-    const wallet = await getUserWalletFromSupabase(input.userId);
-    const settled = settleQuota({
-      wallet,
-      reservation: input.reservationSnapshot
-    });
-    await setUserWalletInSupabase(input.userId, settled.wallet);
-    await appendPaymentLedgerEntryToSupabase({
-      userId: input.userId,
-      taskId: input.taskId,
-      entry: settled.entry,
-      walletAfter: settled.wallet
-    });
+    await settleHumanizeQuotaAtomically(input);
 
     await updateOwnedTaskHumanizeStateInSupabase(input.taskId, input.userId, {
       status: "completed",
@@ -166,18 +154,7 @@ export async function runHumanizeDraftPipeline(
     };
   } catch (error) {
     try {
-      const wallet = await getUserWalletFromSupabase(input.userId);
-      const released = releaseQuota({
-        wallet,
-        reservation: input.reservationSnapshot
-      });
-      await setUserWalletInSupabase(input.userId, released.wallet);
-      await appendPaymentLedgerEntryToSupabase({
-        userId: input.userId,
-        taskId: input.taskId,
-        entry: released.entry,
-        walletAfter: released.wallet
-      });
+      await releaseHumanizeQuotaAtomically(input);
     } catch (releaseError) {
       console.error(
         "[humanize-draft] refund failed:",
@@ -199,6 +176,62 @@ export async function runHumanizeDraftPipeline(
 
     throw error;
   }
+}
+
+async function settleHumanizeQuotaAtomically(input: HumanizeDraftJobInput) {
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const wallet = await getUserWalletFromSupabase(input.userId);
+    const settled = settleQuota({
+      wallet,
+      reservation: input.reservationSnapshot
+    });
+    try {
+      await applyWalletMutationWithLedgerInSupabase({
+        userId: input.userId,
+        taskId: input.taskId,
+        expectedWallet: wallet,
+        nextWallet: settled.wallet,
+        entry: settled.entry
+      });
+      return;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (message === "WALLET_CONFLICT" || message === "WALLET_NEGATIVE_NOT_ALLOWED") {
+        continue;
+      }
+      throw error;
+    }
+  }
+
+  throw new Error("SETTLE_WALLET_CONFLICT");
+}
+
+async function releaseHumanizeQuotaAtomically(input: HumanizeDraftJobInput) {
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const wallet = await getUserWalletFromSupabase(input.userId);
+    const released = releaseQuota({
+      wallet,
+      reservation: input.reservationSnapshot
+    });
+    try {
+      await applyWalletMutationWithLedgerInSupabase({
+        userId: input.userId,
+        taskId: input.taskId,
+        expectedWallet: wallet,
+        nextWallet: released.wallet,
+        entry: released.entry
+      });
+      return;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (message === "WALLET_CONFLICT" || message === "WALLET_NEGATIVE_NOT_ALLOWED") {
+        continue;
+      }
+      throw error;
+    }
+  }
+
+  throw new Error("RELEASE_WALLET_CONFLICT");
 }
 
 async function waitForHumanizedBody(input: {
