@@ -121,7 +121,6 @@ describe("task analysis status route", () => {
         targetWordCount: 2500,
         citationStyle: "Harvard",
         chineseMirrorPending: true,
-        chineseMirror: null,
         sections: [
           {
             title: "Intro",
