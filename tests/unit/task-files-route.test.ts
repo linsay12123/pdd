@@ -25,8 +25,47 @@ describe("task file async analysis routes", () => {
     process.env.NEXT_PUBLIC_SUPABASE_URL = "";
     process.env.SUPABASE_SERVICE_ROLE_KEY = "";
     process.env.TRIGGER_SECRET_KEY = "trigger-secret";
+    process.env.VERCEL_ENV = "preview";
     resetTaskStore();
     resetTaskFileStore();
+  });
+
+  it("blocks production upload when TRIGGER_SECRET_KEY uses dev prefix", async () => {
+    process.env.VERCEL_ENV = "production";
+    process.env.TRIGGER_SECRET_KEY = "tr_dev_example";
+
+    saveTaskSummary({
+      id: "task-dev-key",
+      userId: "user-1",
+      status: "created",
+      targetWordCount: null,
+      citationStyle: null,
+      specialRequirements: ""
+    });
+
+    const formData = new FormData();
+    formData.append(
+      "files",
+      new File(["Assignment brief text."], "assignment.txt", { type: "text/plain" })
+    );
+
+    const response = await handleTaskFileUploadRequest(
+      new Request("http://localhost/api/tasks/task-dev-key/files", {
+        method: "POST",
+        body: formData
+      }),
+      { taskId: "task-dev-key" },
+      {
+        isPersistenceReady: () => true,
+        requireUser: async () => makeUser(),
+        enqueueTaskAnalysis: async () => null
+      }
+    );
+    const payload = await response.json();
+
+    expect(response.status).toBe(503);
+    expect(String(payload.message)).toContain("生产环境");
+    expect(String(payload.message)).toContain("tr_live");
   });
 
   it("accepts upload with 202 and queues background analysis instead of blocking synchronously", async () => {
@@ -45,7 +84,7 @@ describe("task file async analysis routes", () => {
       new File(["Assignment brief text."], "assignment.txt", { type: "text/plain" })
     );
 
-    const enqueueTaskAnalysis = vi.fn(async () => undefined);
+    const enqueueTaskAnalysis = vi.fn(async () => null);
     const response = await handleTaskFileUploadRequest(
       new Request("http://localhost/api/tasks/task-1/files", {
         method: "POST",
@@ -138,7 +177,7 @@ describe("task file async analysis routes", () => {
       {
         isPersistenceReady: () => true,
         requireUser: async () => makeUser(),
-        enqueueTaskAnalysis: async () => undefined
+        enqueueTaskAnalysis: async () => null
       }
     );
     const payload = await response.json();
@@ -176,7 +215,7 @@ describe("task file async analysis routes", () => {
       {
         isPersistenceReady: () => true,
         requireUser: async () => makeUser(),
-        enqueueTaskAnalysis: async () => undefined
+        enqueueTaskAnalysis: async () => null
       }
     );
 
@@ -184,7 +223,7 @@ describe("task file async analysis routes", () => {
     const chosenFileId = files[1]?.id;
     expect(chosenFileId).toBeTruthy();
 
-    const enqueueTaskAnalysis = vi.fn(async () => undefined);
+    const enqueueTaskAnalysis = vi.fn(async () => null);
     const response = await handleConfirmPrimaryFileRequest(
       new Request("http://localhost/api/tasks/task-4/files/confirm-primary", {
         method: "POST",

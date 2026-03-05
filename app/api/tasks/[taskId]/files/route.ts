@@ -6,6 +6,7 @@ import { extractTextFromImageWithVision } from "@/src/lib/ai/services/extract-te
 import { requireCurrentSessionUser } from "@/src/lib/auth/current-user";
 import { detectSupportedFileKind } from "@/src/lib/files/file-kind";
 import { shouldUseSupabasePersistence } from "@/src/lib/persistence/runtime-mode";
+import { buildAnalysisProgressPayload } from "@/src/lib/tasks/analysis-progress";
 import {
   getOwnedTaskSummary,
   listTaskFilesForWorkflow,
@@ -14,6 +15,7 @@ import {
   saveTaskFiles,
   updateTaskFileOpenAIMetadata
 } from "@/src/lib/tasks/save-task-files";
+import { getInvalidTriggerKeyReason } from "@/src/lib/trigger/key-guard";
 import type { TaskWorkflowClassificationPayload } from "@/src/lib/tasks/request-task-file-upload";
 import {
   toSessionTaskHumanizePayload,
@@ -39,7 +41,7 @@ type EnqueueAnalyzeTaskInput = {
 type TaskFileUploadRouteDependencies = {
   requireUser?: () => Promise<SessionUser>;
   isPersistenceReady?: () => boolean;
-  enqueueTaskAnalysis?: (input: EnqueueAnalyzeTaskInput) => Promise<void>;
+  enqueueTaskAnalysis?: (input: EnqueueAnalyzeTaskInput) => Promise<string | null>;
 };
 
 export async function handleTaskFileUploadRequest(
@@ -69,6 +71,22 @@ export async function handleTaskFileUploadRequest(
         {
           ok: false,
           message: "后台任务密钥还没配置好，暂时不能启动上传分析。"
+        },
+        { status: 503 }
+      );
+    }
+
+    const invalidTriggerKeyReason = getInvalidTriggerKeyReason({
+      triggerSecretKey: process.env.TRIGGER_SECRET_KEY,
+      nodeEnv: process.env.NODE_ENV,
+      vercelEnv: process.env.VERCEL_ENV
+    });
+    if (invalidTriggerKeyReason === "dev_key_in_production") {
+      return NextResponse.json(
+        {
+          ok: false,
+          message:
+            "当前是生产环境，但后台任务密钥还是开发版（tr_dev_）。请先换成 tr_live_ 密钥再上传。"
         },
         { status: 503 }
       );
@@ -206,18 +224,25 @@ export async function handleTaskFileUploadRequest(
       }))
     });
 
-    await markTaskAnalysisPending({
+    const triggerRunId = await (dependencies.enqueueTaskAnalysis ?? enqueueAnalyzeTaskWithTrigger)({
       taskId: params.taskId,
       userId: user.id
     });
 
-    await (dependencies.enqueueTaskAnalysis ?? enqueueAnalyzeTaskWithTrigger)({
+    await markTaskAnalysisPending({
       taskId: params.taskId,
-      userId: user.id
+      userId: user.id,
+      triggerRunId
     });
 
     const refreshedTask = await getOwnedTaskSummary(params.taskId, user.id);
     const refreshedFiles = await listTaskFilesForWorkflow(params.taskId, user.id);
+    const analysisProgress = buildAnalysisProgressPayload({
+      status: "pending",
+      requestedAt: refreshedTask?.analysisRequestedAt ?? null,
+      startedAt: refreshedTask?.analysisStartedAt ?? null,
+      completedAt: refreshedTask?.analysisCompletedAt ?? null
+    });
 
     return NextResponse.json(
       {
@@ -228,6 +253,7 @@ export async function handleTaskFileUploadRequest(
           refreshedTask?.analysisSnapshot ?? null
         ),
         analysisStatus: "pending",
+        analysisProgress,
         analysis: refreshedTask?.analysisSnapshot ?? null,
         ruleCard: null,
         outline: null,
@@ -334,7 +360,7 @@ function buildClassificationFromAnalysis(
 }
 
 async function enqueueAnalyzeTaskWithTrigger(input: EnqueueAnalyzeTaskInput) {
-  await tasks.trigger(
+  const run = await tasks.trigger(
     "analyze-uploaded-task",
     {
       taskId: input.taskId,
@@ -347,4 +373,6 @@ async function enqueueAnalyzeTaskWithTrigger(input: EnqueueAnalyzeTaskInput) {
       idempotencyKey: `task-analysis-${input.taskId}-${input.userId}-${randomUUID()}`
     }
   );
+
+  return typeof run?.id === "string" ? run.id : null;
 }

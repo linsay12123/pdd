@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { requireCurrentSessionUser } from "@/src/lib/auth/current-user";
 import type { TaskWorkflowClassificationPayload } from "@/src/lib/tasks/request-task-file-upload";
+import { buildAnalysisProgressPayload } from "@/src/lib/tasks/analysis-progress";
 import {
   getOwnedTaskSummary,
   listTaskFilesForWorkflow
@@ -60,6 +61,12 @@ export async function handleTaskAnalysisStatusRequest(
     const files = await listTaskFilesForWorkflow(params.taskId, user.id);
     const analysis = task.analysisSnapshot ?? null;
     const analysisStatus = task.analysisStatus ?? "pending";
+    const analysisProgress = buildAnalysisProgressPayload({
+      status: analysisStatus,
+      requestedAt: task.analysisRequestedAt ?? null,
+      startedAt: task.analysisStartedAt ?? null,
+      completedAt: task.analysisCompletedAt ?? null
+    });
     const outline = task.latestOutlineVersionId
       ? await getOutlineByVersionId(params.taskId, user.id, task.latestOutlineVersionId)
       : null;
@@ -72,8 +79,10 @@ export async function handleTaskAnalysisStatusRequest(
     const classification = buildClassificationFromTask(task.primaryRequirementFileId ?? null, analysis);
 
     const message =
-      analysisStatus === "pending"
-        ? "系统正在后台分析你上传的文件，请稍等。"
+      analysisStatus === "pending" && analysisProgress.canRetry
+        ? "系统已经开始分析你上传的文件，但这次等待超时了。你可以点“一键重试分析”，不用重新上传文件。"
+        : analysisStatus === "pending"
+          ? "系统正在后台分析你上传的文件，请稍等。"
         : analysisStatus === "failed"
           ? mapAnalysisFailureMessage(analysis)
           : analysis?.needsUserConfirmation
@@ -87,6 +96,7 @@ export async function handleTaskAnalysisStatusRequest(
         files,
         classification,
         analysisStatus,
+        analysisProgress,
         analysis,
         ruleCard,
         outline: analysisStatus === "succeeded" ? outline : null,

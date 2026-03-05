@@ -67,7 +67,7 @@ export async function getOwnedTaskSummary(taskId: string, userId: string) {
   const { data, error } = await client
     .from("writing_tasks")
     .select(
-      "id,status,target_word_count,citation_style,special_requirements,primary_requirement_file_id,topic,requested_chapter_count,outline_revision_count,latest_outline_version_id,analysis_snapshot,analysis_status,analysis_model,analysis_completed_at"
+      "id,status,target_word_count,citation_style,special_requirements,primary_requirement_file_id,topic,requested_chapter_count,outline_revision_count,latest_outline_version_id,analysis_snapshot,analysis_status,analysis_model,analysis_trigger_run_id,analysis_requested_at,analysis_started_at,analysis_completed_at"
     )
     .eq("id", taskId)
     .eq("user_id", userId)
@@ -112,6 +112,15 @@ export async function getOwnedTaskSummary(taskId: string, userId: string) {
         ? data.analysis_status
         : "pending",
     analysisModel: data.analysis_model ? String(data.analysis_model) : null,
+    analysisTriggerRunId: data.analysis_trigger_run_id
+      ? String(data.analysis_trigger_run_id)
+      : null,
+    analysisRequestedAt: data.analysis_requested_at
+      ? String(data.analysis_requested_at)
+      : null,
+    analysisStartedAt: data.analysis_started_at
+      ? String(data.analysis_started_at)
+      : null,
     analysisCompletedAt: data.analysis_completed_at
       ? String(data.analysis_completed_at)
       : null
@@ -194,10 +203,20 @@ export async function markTaskAnalysisPending(input: {
   taskId: string;
   userId: string;
   primaryRequirementFileId?: string | null;
+  triggerRunId?: string | null;
 }) {
   return shouldUseSupabasePersistence()
     ? markTaskAnalysisPendingWithSupabase(input)
     : markTaskAnalysisPendingLocally(input);
+}
+
+export async function markTaskAnalysisStarted(input: {
+  taskId: string;
+  userId: string;
+}) {
+  return shouldUseSupabasePersistence()
+    ? markTaskAnalysisStartedWithSupabase(input)
+    : markTaskAnalysisStartedLocally(input);
 }
 
 async function saveTaskFilesLocally({
@@ -413,6 +432,7 @@ async function persistTaskModelAnalysisLocally(input: {
     analysisSnapshot: input.analysis,
     analysisStatus: "succeeded",
     analysisModel: "gpt-5.2",
+    analysisStartedAt: task.analysisStartedAt ?? new Date().toISOString(),
     analysisCompletedAt: new Date().toISOString()
   });
 
@@ -500,6 +520,7 @@ async function persistTaskModelAnalysisWithSupabase(input: {
       analysis_snapshot: input.analysis,
       analysis_status: "succeeded",
       analysis_model: "gpt-5.2",
+      analysis_started_at: ownedTask.analysisStartedAt ?? new Date().toISOString(),
       analysis_completed_at: new Date().toISOString()
     })
     .eq("id", input.taskId)
@@ -526,6 +547,7 @@ async function persistTaskModelAnalysisWithSupabase(input: {
       analysisSnapshot: input.analysis,
       analysisStatus: "succeeded",
       analysisModel: "gpt-5.2",
+      analysisStartedAt: ownedTask.analysisStartedAt ?? new Date().toISOString(),
       analysisCompletedAt: new Date().toISOString()
     },
     files: await listTaskFilesWithSupabase(input.taskId, input.userId),
@@ -642,6 +664,7 @@ async function markTaskAnalysisFailedLocally(input: {
     analysisStatus: "failed",
     analysisModel: "gpt-5.2",
     analysisCompletedAt: now,
+    analysisStartedAt: task.analysisStartedAt ?? now,
     analysisSnapshot: task.analysisSnapshot
       ? {
           ...task.analysisSnapshot,
@@ -693,6 +716,7 @@ async function markTaskAnalysisFailedWithSupabase(input: {
     .update({
       analysis_status: "failed",
       analysis_model: "gpt-5.2",
+      analysis_started_at: ownedTask?.analysisStartedAt ?? now,
       analysis_completed_at: now,
       analysis_snapshot: nextSnapshot
     })
@@ -708,6 +732,7 @@ async function markTaskAnalysisPendingLocally(input: {
   taskId: string;
   userId: string;
   primaryRequirementFileId?: string | null;
+  triggerRunId?: string | null;
 }) {
   const task = getTaskSummary(input.taskId);
   if (!task || task.userId !== input.userId) {
@@ -716,6 +741,9 @@ async function markTaskAnalysisPendingLocally(input: {
 
   return patchTaskSummary(input.taskId, {
     analysisStatus: "pending",
+    analysisTriggerRunId: input.triggerRunId ?? null,
+    analysisRequestedAt: new Date().toISOString(),
+    analysisStartedAt: null,
     analysisCompletedAt: null,
     analysisSnapshot: null,
     analysisModel: null,
@@ -731,10 +759,14 @@ async function markTaskAnalysisPendingWithSupabase(input: {
   taskId: string;
   userId: string;
   primaryRequirementFileId?: string | null;
+  triggerRunId?: string | null;
 }) {
   const client = createSupabaseAdminClient();
   const patch: Record<string, unknown> = {
     analysis_status: "pending",
+    analysis_trigger_run_id: input.triggerRunId ?? null,
+    analysis_requested_at: new Date().toISOString(),
+    analysis_started_at: null,
     analysis_completed_at: null,
     analysis_snapshot: null,
     analysis_model: null
@@ -752,5 +784,38 @@ async function markTaskAnalysisPendingWithSupabase(input: {
 
   if (error) {
     throw new Error(`写入分析中状态失败：${error.message}`);
+  }
+}
+
+async function markTaskAnalysisStartedLocally(input: {
+  taskId: string;
+  userId: string;
+}) {
+  const task = getTaskSummary(input.taskId);
+  if (!task || task.userId !== input.userId) {
+    return null;
+  }
+
+  const now = new Date().toISOString();
+  return patchTaskSummary(input.taskId, {
+    analysisStartedAt: now
+  });
+}
+
+async function markTaskAnalysisStartedWithSupabase(input: {
+  taskId: string;
+  userId: string;
+}) {
+  const client = createSupabaseAdminClient();
+  const { error } = await client
+    .from("writing_tasks")
+    .update({
+      analysis_started_at: new Date().toISOString()
+    })
+    .eq("id", input.taskId)
+    .eq("user_id", input.userId);
+
+  if (error) {
+    throw new Error(`写入分析启动时间失败：${error.message}`);
   }
 }

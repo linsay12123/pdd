@@ -37,7 +37,8 @@ describe("task analysis status route", () => {
       targetWordCount: null,
       citationStyle: null,
       specialRequirements: "",
-      analysisStatus: "pending"
+      analysisStatus: "pending",
+      analysisRequestedAt: new Date(Date.now() - 60 * 1000).toISOString()
     });
 
     saveTaskFileRecords([
@@ -67,6 +68,37 @@ describe("task analysis status route", () => {
     expect(payload.analysisStatus).toBe("pending");
     expect(payload.outline).toBeNull();
     expect(String(payload.message)).toContain("后台分析");
+    expect(payload.analysisProgress.maxWaitSeconds).toBe(600);
+    expect(payload.analysisProgress.elapsedSeconds).toBeGreaterThanOrEqual(60);
+    expect(payload.analysisProgress.canRetry).toBe(false);
+  });
+
+  it("returns canRetry=true when pending analysis exceeds max wait window", async () => {
+    saveTaskSummary({
+      id: "task-timeout",
+      userId: "user-1",
+      status: "created",
+      targetWordCount: null,
+      citationStyle: null,
+      specialRequirements: "",
+      analysisStatus: "pending",
+      analysisRequestedAt: new Date(Date.now() - 11 * 60 * 1000).toISOString()
+    });
+
+    const response = await handleTaskAnalysisStatusRequest(
+      new Request("http://localhost/api/tasks/task-timeout/analysis"),
+      { taskId: "task-timeout" },
+      {
+        isPersistenceReady: () => true,
+        requireUser: async () => makeUser()
+      }
+    );
+    const payload = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(payload.analysisStatus).toBe("pending");
+    expect(payload.analysisProgress.canRetry).toBe(true);
+    expect(String(payload.message)).toContain("超时");
   });
 
   it("returns succeeded payload with outline and rule card", async () => {
@@ -150,6 +182,7 @@ describe("task analysis status route", () => {
     expect(payload.outline.articleTitle).toBe("ASEAN Governance Risk");
     expect(payload.ruleCard.targetWordCount).toBe(2500);
     expect(payload.classification.primaryRequirementFileId).toBe("file-1");
+    expect(payload.analysisProgress.canRetry).toBe(false);
   });
 
   it("returns friendly failed message and no internal code", async () => {
@@ -194,5 +227,6 @@ describe("task analysis status route", () => {
     expect(payload.analysisStatus).toBe("failed");
     expect(String(payload.message)).toContain("返回内容不完整");
     expect(String(payload.message)).not.toContain("MODEL_ANALYSIS_INCOMPLETE");
+    expect(payload.analysisProgress.canRetry).toBe(true);
   });
 });

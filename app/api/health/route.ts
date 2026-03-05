@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { env } from "@/src/config/env";
 import { createSupabaseAdminClient } from "@/src/lib/supabase/admin";
+import { getInvalidTriggerKeyReason } from "@/src/lib/trigger/key-guard";
 
 export const dynamic = "force-dynamic";
 
@@ -77,9 +78,17 @@ export async function handleHealthRequest(
     : { ok: false, detail: "未配置（Undetectable 降AI功能不可用）" };
 
   // 6. Check Trigger Secret Key
-  checks.TRIGGER_SECRET_KEY = runtimeEnv.TRIGGER_SECRET_KEY
-    ? { ok: true, detail: `已配置 (${runtimeEnv.TRIGGER_SECRET_KEY.length} 字符)` }
-    : { ok: false, detail: "未配置（后台任务不可用）" };
+  const triggerKeyInvalidReason = getInvalidTriggerKeyReason({
+    triggerSecretKey: runtimeEnv.TRIGGER_SECRET_KEY,
+    nodeEnv: process.env.NODE_ENV,
+    vercelEnv: process.env.VERCEL_ENV
+  });
+  checks.TRIGGER_SECRET_KEY =
+    triggerKeyInvalidReason === "missing"
+      ? { ok: false, detail: "未配置（后台任务不可用）" }
+      : triggerKeyInvalidReason === "dev_key_in_production"
+        ? { ok: false, detail: "生产环境不能使用 tr_dev_，请改成 tr_live_。" }
+        : { ok: true, detail: `已配置 (${runtimeEnv.TRIGGER_SECRET_KEY.length} 字符)` };
 
   // 7. Try Supabase connection
   if (runtimeEnv.NEXT_PUBLIC_SUPABASE_URL && runtimeEnv.SUPABASE_SERVICE_ROLE_KEY) {

@@ -6,6 +6,7 @@ import {
   getOwnedTaskSummary,
   listTaskFilesForModel,
   markTaskAnalysisFailed,
+  markTaskAnalysisStarted,
   persistTaskModelAnalysis
 } from "@/src/lib/tasks/save-task-files";
 
@@ -43,6 +44,11 @@ export async function runAnalyzeUploadedTaskPipeline(
     if (files.length === 0) {
       throw new Error("TASK_FILES_NOT_FOUND");
     }
+
+    await markTaskAnalysisStarted({
+      taskId: input.taskId,
+      userId: input.userId
+    });
 
     const analyzed = await withTimeout(
       analyzeUploadedTaskWithOpenAI({

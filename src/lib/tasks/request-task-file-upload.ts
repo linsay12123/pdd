@@ -1,6 +1,7 @@
 import type { OutlineScaffold } from "@/src/lib/ai/prompts/generate-outline";
 import type { TaskAnalysisSnapshot } from "@/src/types/tasks";
 import type { TaskHumanizeStatus } from "@/src/types/tasks";
+import type { AnalysisProgressPayload } from "@/src/lib/tasks/analysis-progress";
 
 export type TaskWorkflowTaskPayload = {
   id: string;
@@ -50,6 +51,7 @@ export type TaskWorkflowPayload = {
   files: TaskWorkflowFilePayload[];
   classification: TaskWorkflowClassificationPayload;
   analysisStatus: "pending" | "succeeded" | "failed";
+  analysisProgress: AnalysisProgressPayload;
   analysis: TaskWorkflowAnalysisPayload | null;
   ruleCard: TaskWorkflowRuleCardPayload | null;
   outline: OutlineScaffold | null;

@@ -1,0 +1,163 @@
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+vi.mock("server-only", () => ({}));
+
+import { handleTaskAnalysisRetryRequest } from "../../app/api/tasks/[taskId]/analysis/retry/route";
+import {
+  getTaskSummary,
+  resetTaskFileStore,
+  resetTaskStore,
+  saveTaskFileRecords,
+  saveTaskSummary
+} from "../../src/lib/tasks/repository";
+
+function makeUser() {
+  return {
+    id: "user-1",
+    email: "user-1@example.com",
+    role: "user" as const
+  };
+}
+
+describe("analysis retry route", () => {
+  beforeEach(() => {
+    process.env.NEXT_PUBLIC_SUPABASE_URL = "";
+    process.env.SUPABASE_SERVICE_ROLE_KEY = "";
+    process.env.TRIGGER_SECRET_KEY = "trigger-secret";
+    resetTaskStore();
+    resetTaskFileStore();
+  });
+
+  it("accepts retry when pending analysis has timed out", async () => {
+    saveTaskSummary({
+      id: "task-timeout",
+      userId: "user-1",
+      status: "created",
+      targetWordCount: null,
+      citationStyle: null,
+      specialRequirements: "",
+      analysisStatus: "pending",
+      analysisRequestedAt: new Date(Date.now() - 11 * 60 * 1000).toISOString()
+    });
+
+    saveTaskFileRecords([
+      {
+        id: "file-1",
+        taskId: "task-timeout",
+        userId: "user-1",
+        originalFilename: "brief.txt",
+        storagePath: "tmp/brief.txt",
+        extractedText: "brief",
+        role: "unknown",
+        isPrimary: false
+      }
+    ]);
+
+    const enqueueTaskAnalysis = vi.fn(async () => "run-1");
+    const response = await handleTaskAnalysisRetryRequest(
+      new Request("http://localhost/api/tasks/task-timeout/analysis/retry", {
+        method: "POST"
+      }),
+      { taskId: "task-timeout" },
+      {
+        isPersistenceReady: () => true,
+        requireUser: async () => makeUser(),
+        enqueueTaskAnalysis
+      }
+    );
+    const payload = await response.json();
+
+    expect(response.status).toBe(202);
+    expect(payload.analysisStatus).toBe("pending");
+    expect(payload.analysisProgress.canRetry).toBe(false);
+    expect(enqueueTaskAnalysis).toHaveBeenCalledWith({
+      taskId: "task-timeout",
+      userId: "user-1",
+      forcedPrimaryFileId: null
+    });
+    expect(getTaskSummary("task-timeout")?.analysisStatus).toBe("pending");
+  });
+
+  it("rejects retry when pending analysis has not timed out", async () => {
+    saveTaskSummary({
+      id: "task-pending",
+      userId: "user-1",
+      status: "created",
+      targetWordCount: null,
+      citationStyle: null,
+      specialRequirements: "",
+      analysisStatus: "pending",
+      analysisRequestedAt: new Date(Date.now() - 2 * 60 * 1000).toISOString()
+    });
+
+    saveTaskFileRecords([
+      {
+        id: "file-1",
+        taskId: "task-pending",
+        userId: "user-1",
+        originalFilename: "brief.txt",
+        storagePath: "tmp/brief.txt",
+        extractedText: "brief",
+        role: "unknown",
+        isPrimary: false
+      }
+    ]);
+
+    const response = await handleTaskAnalysisRetryRequest(
+      new Request("http://localhost/api/tasks/task-pending/analysis/retry", {
+        method: "POST"
+      }),
+      { taskId: "task-pending" },
+      {
+        isPersistenceReady: () => true,
+        requireUser: async () => makeUser(),
+        enqueueTaskAnalysis: async () => "run-2"
+      }
+    );
+    const payload = await response.json();
+
+    expect(response.status).toBe(409);
+    expect(String(payload.message)).toContain("还在处理中");
+  });
+
+  it("accepts retry when analysis already failed", async () => {
+    saveTaskSummary({
+      id: "task-failed",
+      userId: "user-1",
+      status: "created",
+      targetWordCount: null,
+      citationStyle: null,
+      specialRequirements: "",
+      analysisStatus: "failed"
+    });
+
+    saveTaskFileRecords([
+      {
+        id: "file-1",
+        taskId: "task-failed",
+        userId: "user-1",
+        originalFilename: "brief.txt",
+        storagePath: "tmp/brief.txt",
+        extractedText: "brief",
+        role: "unknown",
+        isPrimary: false
+      }
+    ]);
+
+    const response = await handleTaskAnalysisRetryRequest(
+      new Request("http://localhost/api/tasks/task-failed/analysis/retry", {
+        method: "POST"
+      }),
+      { taskId: "task-failed" },
+      {
+        isPersistenceReady: () => true,
+        requireUser: async () => makeUser(),
+        enqueueTaskAnalysis: async () => "run-3"
+      }
+    );
+    const payload = await response.json();
+
+    expect(response.status).toBe(202);
+    expect(payload.analysisStatus).toBe("pending");
+  });
+});

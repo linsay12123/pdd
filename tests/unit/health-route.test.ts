@@ -166,4 +166,41 @@ describe("health route", () => {
     expect(payload.checks.TRIGGER_SECRET_KEY.ok).toBe(false);
     expect(payload.checks.TRIGGER_SECRET_KEY.detail).toContain("后台任务不可用");
   });
+
+  it("reports unhealthy in production when trigger key is a dev key", async () => {
+    process.env.VERCEL_ENV = "production";
+    process.env.TRIGGER_SECRET_KEY = "tr_dev_example";
+
+    fromMock.mockImplementation((table: string) => ({
+      select: () => ({
+        limit: async () => ({
+          data: table === "profiles" ? [{ id: "profile-1" }] : [],
+          error: null
+        })
+      })
+    }));
+
+    rpcMock.mockResolvedValue({
+      data: {
+        targetWordCountNullable: true,
+        citationStyleNullable: true,
+        analysisFieldsReady: true,
+        taskFileFieldsReady: true,
+        humanizeFieldsReady: true,
+        legacyPaymentTablesRemaining: [],
+        legacyPaymentTypesRemaining: [],
+        legacyTaskStatusesRemaining: []
+      },
+      error: null
+    });
+
+    const { GET } = await import("../../app/api/health/route");
+    const response = await GET();
+    const payload = await response.json();
+
+    expect(response.status).toBe(503);
+    expect(payload.status).toBe("unhealthy");
+    expect(payload.checks.TRIGGER_SECRET_KEY.ok).toBe(false);
+    expect(payload.checks.TRIGGER_SECRET_KEY.detail).toContain("tr_live");
+  });
 });

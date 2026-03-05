@@ -2,19 +2,21 @@ import { randomUUID } from "node:crypto";
 import { NextResponse } from "next/server";
 import { tasks } from "@trigger.dev/sdk/v3";
 import { requireCurrentSessionUser } from "@/src/lib/auth/current-user";
-import { buildAnalysisProgressPayload } from "@/src/lib/tasks/analysis-progress";
-import type { TaskWorkflowClassificationPayload } from "@/src/lib/tasks/request-task-file-upload";
+import {
+  buildAnalysisProgressPayload,
+  type AnalysisStatus
+} from "@/src/lib/tasks/analysis-progress";
 import {
   getOwnedTaskSummary,
   listTaskFilesForWorkflow,
   markTaskAnalysisPending
 } from "@/src/lib/tasks/save-task-files";
 import { shouldUseSupabasePersistence } from "@/src/lib/persistence/runtime-mode";
-import { getInvalidTriggerKeyReason } from "@/src/lib/trigger/key-guard";
 import {
   toSessionTaskHumanizePayload,
   toSessionTaskPayload
 } from "@/src/lib/tasks/session-task";
+import { getInvalidTriggerKeyReason } from "@/src/lib/trigger/key-guard";
 import type { SessionUser } from "@/src/types/auth";
 
 type RouteContext = {
@@ -23,46 +25,31 @@ type RouteContext = {
   }>;
 };
 
-type ConfirmPrimaryBody = {
-  fileId?: string;
+type EnqueueAnalyzeTaskInput = {
+  taskId: string;
+  userId: string;
+  forcedPrimaryFileId?: string | null;
 };
 
-type ConfirmPrimaryRouteDependencies = {
+type TaskAnalysisRetryRouteDependencies = {
   requireUser?: () => Promise<SessionUser>;
   isPersistenceReady?: () => boolean;
-  enqueueTaskAnalysis?: (input: {
-    taskId: string;
-    userId: string;
-    forcedPrimaryFileId: string;
-  }) => Promise<string | null>;
+  enqueueTaskAnalysis?: (input: EnqueueAnalyzeTaskInput) => Promise<string | null>;
 };
 
-export async function handleConfirmPrimaryFileRequest(
-  request: Request,
+export async function handleTaskAnalysisRetryRequest(
+  _request: Request,
   params: {
     taskId: string;
   },
-  dependencies: ConfirmPrimaryRouteDependencies = {}
+  dependencies: TaskAnalysisRetryRouteDependencies = {}
 ) {
-  const body = (await request.json().catch(() => null)) as ConfirmPrimaryBody | null;
-  const fileId = body?.fileId?.trim();
-
-  if (!fileId) {
-    return NextResponse.json(
-      {
-        ok: false,
-        message: "请先告诉系统你选中的主任务文件。"
-      },
-      { status: 400 }
-    );
-  }
-
   try {
     if (!(dependencies.isPersistenceReady ?? shouldUseSupabasePersistence)()) {
       return NextResponse.json(
         {
           ok: false,
-          message: "系统现在还没连上正式任务数据库，所以主任务文件暂时不能确认。"
+          message: "系统现在还没连上正式任务数据库，暂时不能重试分析。"
         },
         { status: 503 }
       );
@@ -72,7 +59,7 @@ export async function handleConfirmPrimaryFileRequest(
       return NextResponse.json(
         {
           ok: false,
-          message: "后台任务密钥还没配置好，暂时不能启动主文件重分析。"
+          message: "后台任务密钥还没配置好，暂时不能重试分析。"
         },
         { status: 503 }
       );
@@ -98,26 +85,55 @@ export async function handleConfirmPrimaryFileRequest(
     const task = await getOwnedTaskSummary(params.taskId, user.id);
 
     if (!task) {
-      throw new Error("TASK_NOT_FOUND");
+      return NextResponse.json(
+        {
+          ok: false,
+          message: "没有找到这个任务，暂时不能重试分析。"
+        },
+        { status: 404 }
+      );
     }
 
     const files = await listTaskFilesForWorkflow(params.taskId, user.id);
-    const targetFile = files.find((file) => file.id === fileId);
+    if (files.length === 0) {
+      return NextResponse.json(
+        {
+          ok: false,
+          message: "这个任务还没有可用文件，暂时不能重试分析。"
+        },
+        { status: 409 }
+      );
+    }
 
-    if (!targetFile) {
-      throw new Error("FILE_NOT_FOUND");
+    const currentStatus = (task.analysisStatus ?? "pending") as AnalysisStatus;
+    const currentProgress = buildAnalysisProgressPayload({
+      status: currentStatus,
+      requestedAt: task.analysisRequestedAt ?? null,
+      startedAt: task.analysisStartedAt ?? null,
+      completedAt: task.analysisCompletedAt ?? null
+    });
+    const canRetry = currentStatus === "failed" || currentProgress.canRetry;
+
+    if (!canRetry) {
+      return NextResponse.json(
+        {
+          ok: false,
+          message: "系统还在处理中，暂时不用重试。请稍后再看一次进度。"
+        },
+        { status: 409 }
+      );
     }
 
     const triggerRunId = await (dependencies.enqueueTaskAnalysis ?? enqueueAnalyzeTaskWithTrigger)({
       taskId: params.taskId,
       userId: user.id,
-      forcedPrimaryFileId: fileId
+      forcedPrimaryFileId: task.primaryRequirementFileId ?? null
     });
 
     await markTaskAnalysisPending({
       taskId: params.taskId,
       userId: user.id,
-      primaryRequirementFileId: fileId,
+      primaryRequirementFileId: task.primaryRequirementFileId ?? null,
       triggerRunId
     });
 
@@ -135,15 +151,20 @@ export async function handleConfirmPrimaryFileRequest(
         ok: true,
         task: toSessionTaskPayload(refreshedTask ?? task),
         files: refreshedFiles,
-        classification: buildPendingClassification(fileId, refreshedFiles),
+        classification: {
+          primaryRequirementFileId: refreshedTask?.primaryRequirementFileId ?? null,
+          backgroundFileIds: [],
+          irrelevantFileIds: [],
+          needsUserConfirmation: false,
+          reasoning: "系统已重新排队分析。"
+        },
         analysisStatus: "pending",
         analysisProgress,
-        analysis: refreshedTask?.analysisSnapshot ?? task.analysisSnapshot ?? null,
+        analysis: refreshedTask?.analysisSnapshot ?? null,
         ruleCard: null,
         outline: null,
         humanize: toSessionTaskHumanizePayload(refreshedTask ?? task),
-        primaryRequirementFileId: fileId,
-        message: "主任务文件已确认，系统正在后台重新分析并生成新大纲。"
+        message: "已重新提交后台分析，系统正在重新生成第一版大纲。"
       },
       { status: 202 }
     );
@@ -152,22 +173,9 @@ export async function handleConfirmPrimaryFileRequest(
       return NextResponse.json(
         {
           ok: false,
-          message: "请先登录后再确认主任务文件。"
+          message: "请先登录后再重试分析。"
         },
         { status: 401 }
-      );
-    }
-
-    if (
-      error instanceof Error &&
-      (error.message === "TASK_NOT_FOUND" || error.message === "FILE_NOT_FOUND")
-    ) {
-      return NextResponse.json(
-        {
-          ok: false,
-          message: "没有找到你要确认的任务文件。"
-        },
-        { status: 404 }
       );
     }
 
@@ -178,7 +186,7 @@ export async function handleConfirmPrimaryFileRequest(
       return NextResponse.json(
         {
           ok: false,
-          message: "系统已收到你的主文件确认，但后台重分析任务启动失败，请稍后重试。"
+          message: "后台重试任务启动失败，请稍后再试。"
         },
         { status: 502 }
       );
@@ -187,7 +195,7 @@ export async function handleConfirmPrimaryFileRequest(
     return NextResponse.json(
       {
         ok: false,
-        message: error instanceof Error ? error.message : "确认主任务文件失败"
+        message: error instanceof Error ? error.message : "重试分析失败"
       },
       { status: 500 }
     );
@@ -196,47 +204,24 @@ export async function handleConfirmPrimaryFileRequest(
 
 export async function POST(request: Request, context: RouteContext) {
   const { taskId } = await context.params;
-  return handleConfirmPrimaryFileRequest(request, { taskId });
+  return handleTaskAnalysisRetryRequest(request, { taskId });
 }
 
-function buildPendingClassification(
-  primaryRequirementFileId: string,
-  files: Array<{
-    id: string;
-    role: "requirement" | "background" | "irrelevant" | "unknown";
-  }>
-): TaskWorkflowClassificationPayload {
-  return {
-    primaryRequirementFileId,
-    backgroundFileIds: files
-      .filter((file) => file.id !== primaryRequirementFileId && file.role === "background")
-      .map((file) => file.id),
-    irrelevantFileIds: files
-      .filter((file) => file.id !== primaryRequirementFileId && file.role === "irrelevant")
-      .map((file) => file.id),
-    needsUserConfirmation: false,
-    reasoning: "你已确认主任务文件，系统正在后台重跑分析。"
-  };
-}
-
-async function enqueueAnalyzeTaskWithTrigger(input: {
-  taskId: string;
-  userId: string;
-  forcedPrimaryFileId: string;
-}) {
+async function enqueueAnalyzeTaskWithTrigger(input: EnqueueAnalyzeTaskInput) {
   const run = await tasks.trigger(
     "analyze-uploaded-task",
     {
       taskId: input.taskId,
       userId: input.userId,
-      forcedPrimaryFileId: input.forcedPrimaryFileId
+      forcedPrimaryFileId: input.forcedPrimaryFileId ?? null
     },
     {
       queue: "task-analysis",
       concurrencyKey: `task-analysis-${input.taskId}`,
-      idempotencyKey: `task-analysis-${input.taskId}-${input.userId}-${randomUUID()}`
+      idempotencyKey: `task-analysis-retry-${input.taskId}-${input.userId}-${randomUUID()}`
     }
   );
 
   return typeof run?.id === "string" ? run.id : null;
 }
+

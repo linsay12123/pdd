@@ -11,9 +11,14 @@ import {
   requestHumanizeStatus
 } from "@/src/lib/tasks/request-humanize";
 import {
+  ANALYSIS_POLL_INTERVAL_MS,
+  formatElapsedMinutes
+} from "@/src/lib/tasks/analysis-progress";
+import {
   requestTaskBootstrap,
 } from "@/src/lib/tasks/request-task-bootstrap";
 import { requestTaskAnalysisStatus } from "@/src/lib/tasks/request-task-analysis-status";
+import { requestTaskAnalysisRetry } from "@/src/lib/tasks/request-task-analysis-retry";
 import type {
   TaskWorkflowHumanizePayload,
   TaskWorkflowPayload
@@ -73,6 +78,7 @@ export function WorkspacePageClient({ initialQuota }: WorkspacePageClientProps) 
   const [selectedPrimaryFileId, setSelectedPrimaryFileId] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isConfirmingPrimaryFile, setIsConfirmingPrimaryFile] = useState(false);
+  const [isRetryingAnalysis, setIsRetryingAnalysis] = useState(false);
   const [isRegeneratingOutline, setIsRegeneratingOutline] = useState(false);
   const [isApprovingOutline, setIsApprovingOutline] = useState(false);
   const [downloadingOutputId, setDownloadingOutputId] = useState<string | null>(null);
@@ -220,6 +226,10 @@ export function WorkspacePageClient({ initialQuota }: WorkspacePageClientProps) 
       return;
     }
 
+    if (activeTask.analysisProgress?.canRetry) {
+      return;
+    }
+
     let cancelled = false;
     const timer = window.setTimeout(() => {
       void requestTaskAnalysisStatus({ taskId: activeTask.task.id })
@@ -247,6 +257,11 @@ export function WorkspacePageClient({ initialQuota }: WorkspacePageClientProps) 
               tone: "success",
               text: result.message
             });
+          } else if (result.analysisStatus === "pending" && result.analysisProgress.canRetry) {
+            setNotice({
+              tone: "error",
+              text: result.message
+            });
           } else if (result.analysisStatus === "failed") {
             setNotice({
               tone: "error",
@@ -264,13 +279,53 @@ export function WorkspacePageClient({ initialQuota }: WorkspacePageClientProps) 
             text: "读取分析进度失败，请稍后再试。"
           });
         });
-    }, 8_000);
+    }, ANALYSIS_POLL_INTERVAL_MS);
 
     return () => {
       cancelled = true;
       window.clearTimeout(timer);
     };
   }, [activeTask, step]);
+
+  const handleRetryAnalysis = async () => {
+    if (!activeTask) {
+      return;
+    }
+
+    setIsRetryingAnalysis(true);
+    setNotice({
+      tone: "info",
+      text: "已提交重试请求，系统正在后台重新分析。"
+    });
+
+    try {
+      const result = await requestTaskAnalysisRetry({ taskId: activeTask.task.id });
+      setActiveTask((currentTask) => {
+        if (!currentTask || currentTask.task.id !== activeTask.task.id) {
+          return currentTask;
+        }
+
+        return {
+          ...currentTask,
+          ...result,
+          downloads: currentTask.downloads,
+          frozenQuota: currentTask.frozenQuota,
+          humanize: result.humanize ?? currentTask.humanize ?? defaultHumanizeState
+        };
+      });
+      setNotice({
+        tone: "info",
+        text: result.message
+      });
+    } catch (error) {
+      setNotice({
+        tone: "error",
+        text: error instanceof Error ? error.message : "重试分析失败，请稍后再试。"
+      });
+    } finally {
+      setIsRetryingAnalysis(false);
+    }
+  };
 
   const handleUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files) {
@@ -528,6 +583,14 @@ export function WorkspacePageClient({ initialQuota }: WorkspacePageClientProps) 
   const taskFiles = activeTask?.files ?? [];
   const analysis = activeTask?.analysis ?? null;
   const analysisStatus = activeTask?.analysisStatus ?? "pending";
+  const analysisProgress = activeTask?.analysisProgress ?? {
+    requestedAt: null,
+    startedAt: null,
+    completedAt: null,
+    elapsedSeconds: 0,
+    maxWaitSeconds: 600,
+    canRetry: false
+  };
   const hasOutline = outlineSections.length > 0;
   const needsPrimaryFileConfirmation = Boolean(
     analysisStatus === "succeeded" &&
@@ -618,6 +681,7 @@ export function WorkspacePageClient({ initialQuota }: WorkspacePageClientProps) 
                 <div className="bg-brand-950 p-4 rounded-xl border border-white/5">
                   <h4 className="text-sm font-medium text-cream-100 mb-3">流程提醒</h4>
                   <p className="text-xs text-brand-700">系统会先分析材料并生成大纲，确认大纲后再进入正式写作。</p>
+                  <p className="text-xs text-brand-700 mt-2">系统每次只是查状态，不会每30秒重复调用大模型。</p>
                 </div>
               </div>
             </div>
@@ -733,6 +797,24 @@ export function WorkspacePageClient({ initialQuota }: WorkspacePageClientProps) 
                     <p className="text-sm text-brand-700">
                       你的文件已经上传成功，系统正在后台完整阅读并生成第一版大纲。你不用一直停在这里，稍后会自动刷新出结果。
                     </p>
+                    <p className="text-xs text-brand-700 mt-3">
+                      当前已等待：{formatElapsedMinutes(analysisProgress.elapsedSeconds)}（每 30 秒查一次状态，不会反复重跑大模型）
+                    </p>
+                    {analysisProgress.canRetry && (
+                      <div className="mt-4 flex items-center gap-3">
+                        <Button
+                          variant="outline"
+                          onClick={() => void handleRetryAnalysis()}
+                          disabled={isRetryingAnalysis}
+                          className="border-red-400/30 text-red-200"
+                        >
+                          {isRetryingAnalysis ? "正在重试..." : "一键重试分析"}
+                        </Button>
+                        <span className="text-xs text-brand-700">
+                          不需要重新上传文件，系统会直接用现有文件重跑。
+                        </span>
+                      </div>
+                    )}
                   </div>
                 ) : analysisStatus === "failed" ? (
                   <div className="glass-panel p-6 rounded-2xl border border-red-500/20">
@@ -747,8 +829,18 @@ export function WorkspacePageClient({ initialQuota }: WorkspacePageClientProps) 
                     </div>
 
                     <p className="text-sm text-brand-700">
-                      系统没能完成这次分析。你可以重新上传一次，如果连续失败，请联系人工支持团队处理。
+                      系统没能完成这次分析。你可以直接点下面的一键重试，不需要重新上传文件。
                     </p>
+                    <div className="mt-4">
+                      <Button
+                        variant="outline"
+                        onClick={() => void handleRetryAnalysis()}
+                        disabled={isRetryingAnalysis}
+                        className="border-red-400/30 text-red-200"
+                      >
+                        {isRetryingAnalysis ? "正在重试..." : "一键重试分析"}
+                      </Button>
+                    </div>
                   </div>
                 ) : needsPrimaryFileConfirmation ? (
                   <div className="glass-panel p-6 rounded-2xl border border-gold-500/30 shadow-[0_0_15px_rgba(245,158,11,0.1)]">
