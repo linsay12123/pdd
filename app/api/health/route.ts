@@ -261,15 +261,18 @@ export async function GET() {
 async function checkTriggerRuntime() {
   try {
     const page = await runs.list({
-      limit: 1,
+      limit: 20,
       taskIdentifier: "analyze-uploaded-task"
     });
     const items = Array.isArray((page as { data?: unknown[] } | null | undefined)?.data)
       ? ((page as { data: unknown[] }).data)
       : [];
-    const latest = items[0] as { status?: unknown } | undefined;
-    const latestStatus =
-      latest && typeof latest.status === "string" ? latest.status : null;
+    const statuses = items
+      .map((item) => {
+        const status = (item as { status?: unknown } | null | undefined)?.status;
+        return typeof status === "string" ? status : null;
+      })
+      .filter((status): status is string => Boolean(status));
 
     if (items.length === 0) {
       return {
@@ -279,17 +282,20 @@ async function checkTriggerRuntime() {
       };
     }
 
-    if (latestStatus === "PENDING_VERSION") {
+    const hasRealRuntimeStatus = statuses.some((status) => status !== "PENDING_VERSION");
+    if (!hasRealRuntimeStatus) {
       return {
         ok: false,
         detail:
-          "Trigger Runtime 可访问，但 analyze-uploaded-task 仍是 PENDING_VERSION（任务版本还没部署到生产）。"
+          "Trigger Runtime 可访问，但最近记录仍全部是 PENDING_VERSION（任务版本还没部署到生产）。"
       };
     }
 
+    const latestStableStatus = statuses.find((status) => status !== "PENDING_VERSION") ?? "unknown";
+
     return {
       ok: true,
-      detail: `Trigger Runtime 可访问，analyze-uploaded-task 最近状态：${latestStatus ?? "unknown"}。`
+      detail: `Trigger Runtime 可访问，analyze-uploaded-task 最近有效状态：${latestStableStatus}。`
     };
   } catch (error) {
     return {
