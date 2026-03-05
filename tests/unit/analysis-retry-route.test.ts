@@ -70,11 +70,13 @@ describe("analysis retry route", () => {
     expect(response.status).toBe(202);
     expect(payload.analysisStatus).toBe("pending");
     expect(payload.analysisProgress.canRetry).toBe(false);
-    expect(enqueueTaskAnalysis).toHaveBeenCalledWith({
-      taskId: "task-timeout",
-      userId: "user-1",
-      forcedPrimaryFileId: null
-    });
+    expect(enqueueTaskAnalysis).toHaveBeenCalledWith(
+      expect.objectContaining({
+        taskId: "task-timeout",
+        userId: "user-1",
+        forcedPrimaryFileId: null
+      })
+    );
     expect(getTaskSummary("task-timeout")?.analysisStatus).toBe("pending");
   });
 
@@ -122,6 +124,55 @@ describe("analysis retry route", () => {
     expect(response.status).toBe(202);
     expect(payload.analysisStatus).toBe("pending");
     expect(String(payload.message)).toContain("避免重复排队");
+    expect(payload.analysisProgress.canRetry).toBe(false);
+    expect(enqueueTaskAnalysis).not.toHaveBeenCalled();
+  });
+
+  it("does not enqueue another run when previous run state is unknown", async () => {
+    saveTaskSummary({
+      id: "task-unknown-run-state",
+      userId: "user-1",
+      status: "created",
+      targetWordCount: null,
+      citationStyle: null,
+      specialRequirements: "",
+      analysisStatus: "pending",
+      analysisRequestedAt: new Date(Date.now() - 11 * 60 * 1000).toISOString(),
+      analysisTriggerRunId: "run-unknown-1"
+    });
+
+    saveTaskFileRecords([
+      {
+        id: "file-1",
+        taskId: "task-unknown-run-state",
+        userId: "user-1",
+        originalFilename: "brief.txt",
+        storagePath: "tmp/brief.txt",
+        extractedText: "brief",
+        role: "unknown",
+        isPrimary: false
+      }
+    ]);
+
+    const enqueueTaskAnalysis = vi.fn(async () => "run-should-not-be-used");
+    const response = await handleTaskAnalysisRetryRequest(
+      new Request("http://localhost/api/tasks/task-unknown-run-state/analysis/retry", {
+        method: "POST"
+      }),
+      { taskId: "task-unknown-run-state" },
+      {
+        isPersistenceReady: () => true,
+        requireUser: async () => makeUser(),
+        getTriggerRunState: async () => "unknown",
+        enqueueTaskAnalysis
+      }
+    );
+    const payload = await response.json();
+
+    expect(response.status).toBe(202);
+    expect(payload.analysisStatus).toBe("pending");
+    expect(payload.analysisProgress.canRetry).toBe(false);
+    expect(String(payload.message)).toContain("暂不重复提交");
     expect(enqueueTaskAnalysis).not.toHaveBeenCalled();
   });
 
@@ -206,5 +257,46 @@ describe("analysis retry route", () => {
 
     expect(response.status).toBe(202);
     expect(payload.analysisStatus).toBe("pending");
+  });
+
+  it("returns 502 when trigger run id is missing", async () => {
+    saveTaskSummary({
+      id: "task-missing-run-id",
+      userId: "user-1",
+      status: "created",
+      targetWordCount: null,
+      citationStyle: null,
+      specialRequirements: "",
+      analysisStatus: "failed"
+    });
+
+    saveTaskFileRecords([
+      {
+        id: "file-1",
+        taskId: "task-missing-run-id",
+        userId: "user-1",
+        originalFilename: "brief.txt",
+        storagePath: "tmp/brief.txt",
+        extractedText: "brief",
+        role: "unknown",
+        isPrimary: false
+      }
+    ]);
+
+    const response = await handleTaskAnalysisRetryRequest(
+      new Request("http://localhost/api/tasks/task-missing-run-id/analysis/retry", {
+        method: "POST"
+      }),
+      { taskId: "task-missing-run-id" },
+      {
+        isPersistenceReady: () => true,
+        requireUser: async () => makeUser(),
+        enqueueTaskAnalysis: async () => null
+      }
+    );
+    const payload = await response.json();
+
+    expect(response.status).toBe(502);
+    expect(String(payload.message)).toContain("后台重试任务启动失败");
   });
 });

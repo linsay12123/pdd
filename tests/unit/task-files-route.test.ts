@@ -84,7 +84,7 @@ describe("task file async analysis routes", () => {
       new File(["Assignment brief text."], "assignment.txt", { type: "text/plain" })
     );
 
-    const enqueueTaskAnalysis = vi.fn(async () => null);
+    const enqueueTaskAnalysis = vi.fn(async () => "run-upload-task-1");
     const response = await handleTaskFileUploadRequest(
       new Request("http://localhost/api/tasks/task-1/files", {
         method: "POST",
@@ -105,10 +105,12 @@ describe("task file async analysis routes", () => {
     expect(payload.outline).toBeNull();
     expect(payload.analysis).toBeNull();
     expect(enqueueTaskAnalysis).toHaveBeenCalledTimes(1);
-    expect(enqueueTaskAnalysis).toHaveBeenCalledWith({
-      taskId: "task-1",
-      userId: "user-1"
-    });
+    expect(enqueueTaskAnalysis).toHaveBeenCalledWith(
+      expect.objectContaining({
+        taskId: "task-1",
+        userId: "user-1"
+      })
+    );
     expect(getTaskSummary("task-1")?.analysisStatus).toBe("pending");
     expect(listTaskFiles("task-1")).toHaveLength(1);
   });
@@ -177,7 +179,7 @@ describe("task file async analysis routes", () => {
       {
         isPersistenceReady: () => true,
         requireUser: async () => makeUser(),
-        enqueueTaskAnalysis: async () => null
+        enqueueTaskAnalysis: async () => "run-upload-task-3"
       }
     );
     const payload = await response.json();
@@ -215,7 +217,7 @@ describe("task file async analysis routes", () => {
       {
         isPersistenceReady: () => true,
         requireUser: async () => makeUser(),
-        enqueueTaskAnalysis: async () => null
+        enqueueTaskAnalysis: async () => "run-upload-task-4"
       }
     );
 
@@ -223,7 +225,7 @@ describe("task file async analysis routes", () => {
     const chosenFileId = files[1]?.id;
     expect(chosenFileId).toBeTruthy();
 
-    const enqueueTaskAnalysis = vi.fn(async () => null);
+    const enqueueTaskAnalysis = vi.fn(async () => "run-confirm-primary-task-4");
     const response = await handleConfirmPrimaryFileRequest(
       new Request("http://localhost/api/tasks/task-4/files/confirm-primary", {
         method: "POST",
@@ -244,12 +246,49 @@ describe("task file async analysis routes", () => {
     expect(response.status).toBe(202);
     expect(payload.analysisStatus).toBe("pending");
     expect(payload.primaryRequirementFileId).toBe(chosenFileId);
-    expect(enqueueTaskAnalysis).toHaveBeenCalledWith({
-      taskId: "task-4",
-      userId: "user-1",
-      forcedPrimaryFileId: chosenFileId
-    });
+    expect(enqueueTaskAnalysis).toHaveBeenCalledWith(
+      expect.objectContaining({
+        taskId: "task-4",
+        userId: "user-1",
+        forcedPrimaryFileId: chosenFileId
+      })
+    );
     expect(getTaskSummary("task-4")?.analysisStatus).toBe("pending");
     expect(getTaskSummary("task-4")?.primaryRequirementFileId).toBe(chosenFileId);
+  });
+
+  it("returns 502 when trigger does not return run id", async () => {
+    saveTaskSummary({
+      id: "task-missing-run-id",
+      userId: "user-1",
+      status: "created",
+      targetWordCount: null,
+      citationStyle: null,
+      specialRequirements: ""
+    });
+
+    const formData = new FormData();
+    formData.append(
+      "files",
+      new File(["Assignment brief text."], "assignment.txt", { type: "text/plain" })
+    );
+
+    const response = await handleTaskFileUploadRequest(
+      new Request("http://localhost/api/tasks/task-missing-run-id/files", {
+        method: "POST",
+        body: formData
+      }),
+      { taskId: "task-missing-run-id" },
+      {
+        isPersistenceReady: () => true,
+        requireUser: async () => makeUser(),
+        enqueueTaskAnalysis: async () => null
+      }
+    );
+    const payload = await response.json();
+
+    expect(response.status).toBe(502);
+    expect(String(payload.message)).toContain("后台分析任务启动失败");
+    expect(getTaskSummary("task-missing-run-id")?.analysisStatus).toBe("failed");
   });
 });

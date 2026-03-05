@@ -198,7 +198,7 @@ function mapAnalysisFailureMessage(analysis: TaskAnalysisSnapshot | null) {
   const code = warning?.replace("analysis_failed:", "")?.trim() ?? "";
 
   if (!code) {
-    return "这次文件分析失败了，请重试一次上传。";
+    return "这次分析失败了，请直接点“一键重试分析”，不用重新上传文件。";
   }
 
   if (code === "MODEL_ANALYSIS_TIMEOUT") {
@@ -218,5 +218,5 @@ function mapAnalysisFailureMessage(analysis: TaskAnalysisSnapshot | null) {
     return "模型服务暂时不稳定，请稍后再试。";
   }
 
-  return "系统分析失败，请重试一次上传。如果连续失败，请联系人工支持。";
+  return "系统分析失败，请直接点“一键重试分析”，不用重新上传文件。如果连续失败，请联系人工支持。";
 }

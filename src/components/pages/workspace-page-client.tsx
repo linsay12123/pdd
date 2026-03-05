@@ -226,10 +226,6 @@ export function WorkspacePageClient({ initialQuota }: WorkspacePageClientProps) 
       return;
     }
 
-    if (activeTask.analysisProgress?.canRetry) {
-      return;
-    }
-
     let cancelled = false;
     const timer = window.setTimeout(() => {
       void requestTaskAnalysisStatus({ taskId: activeTask.task.id })

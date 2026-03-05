@@ -229,4 +229,32 @@ describe("task analysis status route", () => {
     expect(String(payload.message)).not.toContain("MODEL_ANALYSIS_INCOMPLETE");
     expect(payload.analysisProgress.canRetry).toBe(true);
   });
+
+  it("returns retry-analysis message when failed snapshot has no internal code", async () => {
+    saveTaskSummary({
+      id: "task-failed-without-code",
+      userId: "user-1",
+      status: "created",
+      targetWordCount: null,
+      citationStyle: null,
+      specialRequirements: "",
+      analysisStatus: "failed",
+      analysisSnapshot: null
+    });
+
+    const response = await handleTaskAnalysisStatusRequest(
+      new Request("http://localhost/api/tasks/task-failed-without-code/analysis"),
+      { taskId: "task-failed-without-code" },
+      {
+        isPersistenceReady: () => true,
+        requireUser: async () => makeUser()
+      }
+    );
+    const payload = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(payload.analysisStatus).toBe("failed");
+    expect(String(payload.message)).toContain("一键重试分析");
+    expect(String(payload.message)).not.toContain("重试一次上传");
+  });
 });

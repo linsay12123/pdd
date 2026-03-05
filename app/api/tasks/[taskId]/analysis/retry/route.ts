@@ -1,4 +1,3 @@
-import { randomUUID } from "node:crypto";
 import { NextResponse } from "next/server";
 import { runs, tasks } from "@trigger.dev/sdk/v3";
 import { requireCurrentSessionUser } from "@/src/lib/auth/current-user";
@@ -29,6 +28,7 @@ type EnqueueAnalyzeTaskInput = {
   taskId: string;
   userId: string;
   forcedPrimaryFileId?: string | null;
+  idempotencyKey: string;
 };
 
 type TriggerRunState = "active" | "terminal" | "missing" | "unknown";
@@ -130,7 +130,7 @@ export async function handleTaskAnalysisRetryRequest(
     const currentRunId = task.analysisTriggerRunId?.trim();
     if (currentRunId) {
       const runState = await (dependencies.getTriggerRunState ?? getTriggerRunState)(currentRunId);
-      if (runState === "active") {
+      if (runState === "active" || runState === "unknown") {
         const activeProgress = buildAnalysisProgressPayload({
           status: "pending",
           requestedAt: task.analysisRequestedAt ?? null,
@@ -151,12 +151,18 @@ export async function handleTaskAnalysisRetryRequest(
               reasoning: "后台正在执行上一轮分析。"
             },
             analysisStatus: "pending",
-            analysisProgress: activeProgress,
+            analysisProgress: {
+              ...activeProgress,
+              canRetry: false
+            },
             analysis: task.analysisSnapshot ?? null,
             ruleCard: null,
             outline: null,
             humanize: toSessionTaskHumanizePayload(task),
-            message: "上一轮分析还在后台运行，系统已避免重复排队。请稍后再看进度。"
+            message:
+              runState === "active"
+                ? "上一轮分析还在后台运行，系统已避免重复排队。请稍后再看进度。"
+                : "系统正在确认上一轮分析任务状态。为避免重复排队，暂不重复提交。请稍后再试。"
           },
           { status: 202 }
         );
@@ -166,8 +172,15 @@ export async function handleTaskAnalysisRetryRequest(
     const triggerRunId = await (dependencies.enqueueTaskAnalysis ?? enqueueAnalyzeTaskWithTrigger)({
       taskId: params.taskId,
       userId: user.id,
-      forcedPrimaryFileId: task.primaryRequirementFileId ?? null
+      forcedPrimaryFileId: task.primaryRequirementFileId ?? null,
+      idempotencyKey: buildRetryIdempotencyKey(task.id, user.id, {
+        requestedAt: task.analysisRequestedAt ?? null,
+        triggerRunId: task.analysisTriggerRunId ?? null
+      })
     });
+    if (!triggerRunId) {
+      throw new Error("TRIGGER_RUN_ID_MISSING");
+    }
 
     await markTaskAnalysisPending({
       taskId: params.taskId,
@@ -220,7 +233,11 @@ export async function handleTaskAnalysisRetryRequest(
 
     if (
       error instanceof Error &&
-      (error.message.includes("trigger") || error.message.includes("queue"))
+      (
+        error.message.includes("trigger") ||
+        error.message.includes("queue") ||
+        error.message === "TRIGGER_RUN_ID_MISSING"
+      )
     ) {
       return NextResponse.json(
         {
@@ -257,11 +274,22 @@ async function enqueueAnalyzeTaskWithTrigger(input: EnqueueAnalyzeTaskInput) {
     {
       queue: "task-analysis",
       concurrencyKey: `task-analysis-${input.taskId}`,
-      idempotencyKey: `task-analysis-retry-${input.taskId}-${input.userId}-${randomUUID()}`
+      idempotencyKey: input.idempotencyKey
     }
   );
 
   return typeof run?.id === "string" ? run.id : null;
+}
+
+function buildRetryIdempotencyKey(
+  taskId: string,
+  userId: string,
+  seed: { requestedAt: string | null; triggerRunId: string | null }
+) {
+  const stableSeed = (seed.requestedAt ?? seed.triggerRunId ?? "no-analysis-request")
+    .replace(/[^a-zA-Z0-9_-]/g, "-")
+    .slice(0, 64);
+  return `task-analysis-retry-${taskId}-${userId}-${stableSeed}`;
 }
 
 async function getTriggerRunState(runId: string): Promise<TriggerRunState> {

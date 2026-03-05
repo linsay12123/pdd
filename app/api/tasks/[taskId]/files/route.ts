@@ -1,4 +1,3 @@
-import { randomUUID } from "node:crypto";
 import { NextResponse } from "next/server";
 import { tasks } from "@trigger.dev/sdk/v3";
 import { uploadOpenAIUserFile } from "@/src/lib/ai/openai-file-client";
@@ -36,6 +35,7 @@ type EnqueueAnalyzeTaskInput = {
   taskId: string;
   userId: string;
   forcedPrimaryFileId?: string | null;
+  idempotencyKey: string;
 };
 
 type TaskFileUploadRouteDependencies = {
@@ -226,8 +226,12 @@ export async function handleTaskFileUploadRequest(
 
     const triggerRunId = await (dependencies.enqueueTaskAnalysis ?? enqueueAnalyzeTaskWithTrigger)({
       taskId: params.taskId,
-      userId: user.id
+      userId: user.id,
+      idempotencyKey: buildUploadIdempotencyKey(params.taskId, user.id)
     });
+    if (!triggerRunId) {
+      throw new Error("TRIGGER_RUN_ID_MISSING");
+    }
 
     await markTaskAnalysisPending({
       taskId: params.taskId,
@@ -316,7 +320,8 @@ export async function handleTaskFileUploadRequest(
     if (
       errorMessage.includes("trigger") ||
       errorMessage.includes("queue") ||
-      errorMessage.includes("TRIGGER")
+      errorMessage.includes("TRIGGER") ||
+      errorMessage === "TRIGGER_RUN_ID_MISSING"
     ) {
       return NextResponse.json(
         {
@@ -370,9 +375,13 @@ async function enqueueAnalyzeTaskWithTrigger(input: EnqueueAnalyzeTaskInput) {
     {
       queue: "task-analysis",
       concurrencyKey: `task-analysis-${input.taskId}`,
-      idempotencyKey: `task-analysis-${input.taskId}-${input.userId}-${randomUUID()}`
+      idempotencyKey: input.idempotencyKey
     }
   );
 
   return typeof run?.id === "string" ? run.id : null;
+}
+
+function buildUploadIdempotencyKey(taskId: string, userId: string) {
+  return `task-analysis-upload-${taskId}-${userId}`;
 }

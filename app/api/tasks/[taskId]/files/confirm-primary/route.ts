@@ -1,4 +1,3 @@
-import { randomUUID } from "node:crypto";
 import { NextResponse } from "next/server";
 import { tasks } from "@trigger.dev/sdk/v3";
 import { requireCurrentSessionUser } from "@/src/lib/auth/current-user";
@@ -34,6 +33,7 @@ type ConfirmPrimaryRouteDependencies = {
     taskId: string;
     userId: string;
     forcedPrimaryFileId: string;
+    idempotencyKey: string;
   }) => Promise<string | null>;
 };
 
@@ -111,8 +111,12 @@ export async function handleConfirmPrimaryFileRequest(
     const triggerRunId = await (dependencies.enqueueTaskAnalysis ?? enqueueAnalyzeTaskWithTrigger)({
       taskId: params.taskId,
       userId: user.id,
-      forcedPrimaryFileId: fileId
+      forcedPrimaryFileId: fileId,
+      idempotencyKey: buildConfirmPrimaryIdempotencyKey(params.taskId, user.id, fileId)
     });
+    if (!triggerRunId) {
+      throw new Error("TRIGGER_RUN_ID_MISSING");
+    }
 
     await markTaskAnalysisPending({
       taskId: params.taskId,
@@ -173,7 +177,11 @@ export async function handleConfirmPrimaryFileRequest(
 
     if (
       error instanceof Error &&
-      (error.message.includes("trigger") || error.message.includes("queue"))
+      (
+        error.message.includes("trigger") ||
+        error.message.includes("queue") ||
+        error.message === "TRIGGER_RUN_ID_MISSING"
+      )
     ) {
       return NextResponse.json(
         {
@@ -223,6 +231,7 @@ async function enqueueAnalyzeTaskWithTrigger(input: {
   taskId: string;
   userId: string;
   forcedPrimaryFileId: string;
+  idempotencyKey: string;
 }) {
   const run = await tasks.trigger(
     "analyze-uploaded-task",
@@ -234,9 +243,17 @@ async function enqueueAnalyzeTaskWithTrigger(input: {
     {
       queue: "task-analysis",
       concurrencyKey: `task-analysis-${input.taskId}`,
-      idempotencyKey: `task-analysis-${input.taskId}-${input.userId}-${randomUUID()}`
+      idempotencyKey: input.idempotencyKey
     }
   );
 
   return typeof run?.id === "string" ? run.id : null;
+}
+
+function buildConfirmPrimaryIdempotencyKey(
+  taskId: string,
+  userId: string,
+  fileId: string
+) {
+  return `task-analysis-confirm-primary-${taskId}-${userId}-${fileId}`;
 }
