@@ -49,6 +49,7 @@ export type TaskWorkflowPayload = {
   task: TaskWorkflowTaskPayload;
   files: TaskWorkflowFilePayload[];
   classification: TaskWorkflowClassificationPayload;
+  analysisStatus: "pending" | "succeeded" | "failed";
   analysis: TaskWorkflowAnalysisPayload | null;
   ruleCard: TaskWorkflowRuleCardPayload | null;
   outline: OutlineScaffold | null;

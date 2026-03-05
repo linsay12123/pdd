@@ -1,23 +1,18 @@
+import { randomUUID } from "node:crypto";
 import { NextResponse } from "next/server";
-import type { OutlineScaffold } from "@/src/lib/ai/prompts/generate-outline";
-import { isMeaningfulOutline } from "@/src/lib/ai/outline-quality";
-import {
-  analyzeUploadedTaskWithOpenAI,
-  type ModelReadyTaskFile
-} from "@/src/lib/ai/services/analyze-uploaded-task";
+import { tasks } from "@trigger.dev/sdk/v3";
 import { requireCurrentSessionUser } from "@/src/lib/auth/current-user";
 import type { TaskWorkflowClassificationPayload } from "@/src/lib/tasks/request-task-file-upload";
 import {
   getOwnedTaskSummary,
-  listTaskFilesForModel,
-  persistTaskModelAnalysis
+  listTaskFilesForWorkflow,
+  markTaskAnalysisPending
 } from "@/src/lib/tasks/save-task-files";
 import { shouldUseSupabasePersistence } from "@/src/lib/persistence/runtime-mode";
 import {
   toSessionTaskHumanizePayload,
   toSessionTaskPayload
 } from "@/src/lib/tasks/session-task";
-import type { TaskAnalysisSnapshot } from "@/src/types/tasks";
 import type { SessionUser } from "@/src/types/auth";
 
 type RouteContext = {
@@ -33,16 +28,11 @@ type ConfirmPrimaryBody = {
 type ConfirmPrimaryRouteDependencies = {
   requireUser?: () => Promise<SessionUser>;
   isPersistenceReady?: () => boolean;
-  analyzeTask?: (input: {
+  enqueueTaskAnalysis?: (input: {
     taskId: string;
     userId: string;
-    specialRequirements: string;
-    files: ModelReadyTaskFile[];
     forcedPrimaryFileId: string;
-  }) => Promise<{
-    analysis: TaskAnalysisSnapshot;
-    outline: OutlineScaffold | null;
-  }>;
+  }) => Promise<void>;
 };
 
 export async function handleConfirmPrimaryFileRequest(
@@ -76,6 +66,16 @@ export async function handleConfirmPrimaryFileRequest(
       );
     }
 
+    if (!process.env.TRIGGER_SECRET_KEY?.trim()) {
+      return NextResponse.json(
+        {
+          ok: false,
+          message: "后台任务密钥还没配置好，暂时不能启动主文件重分析。"
+        },
+        { status: 503 }
+      );
+    }
+
     const user = await (dependencies.requireUser ?? requireCurrentSessionUser)();
     const task = await getOwnedTaskSummary(params.taskId, user.id);
 
@@ -83,49 +83,44 @@ export async function handleConfirmPrimaryFileRequest(
       throw new Error("TASK_NOT_FOUND");
     }
 
-    const files = await listTaskFilesForModel(params.taskId, user.id);
+    const files = await listTaskFilesForWorkflow(params.taskId, user.id);
     const targetFile = files.find((file) => file.id === fileId);
 
     if (!targetFile) {
       throw new Error("FILE_NOT_FOUND");
     }
 
-    const analyzeTask = dependencies.analyzeTask ?? analyzeUploadedTaskFromFiles;
-    const analyzed = await analyzeTask({
+    await markTaskAnalysisPending({
       taskId: params.taskId,
       userId: user.id,
-      specialRequirements: task.specialRequirements ?? "",
-      files,
+      primaryRequirementFileId: fileId
+    });
+
+    await (dependencies.enqueueTaskAnalysis ?? enqueueAnalyzeTaskWithTrigger)({
+      taskId: params.taskId,
+      userId: user.id,
       forcedPrimaryFileId: fileId
     });
 
-    if (!analyzed.outline?.sections.length || !isMeaningfulOutline(analyzed.outline)) {
-      throw new Error("模型没有返回可展示的大纲，请重试。");
-    }
+    const refreshedTask = await getOwnedTaskSummary(params.taskId, user.id);
+    const refreshedFiles = await listTaskFilesForWorkflow(params.taskId, user.id);
 
-    const result = await persistTaskModelAnalysis({
-      taskId: params.taskId,
-      userId: user.id,
-      analysis: {
-        ...analyzed.analysis,
-        chosenTaskFileId: fileId,
-        needsUserConfirmation: false
+    return NextResponse.json(
+      {
+        ok: true,
+        task: toSessionTaskPayload(refreshedTask ?? task),
+        files: refreshedFiles,
+        classification: buildPendingClassification(fileId, refreshedFiles),
+        analysisStatus: "pending",
+        analysis: refreshedTask?.analysisSnapshot ?? task.analysisSnapshot ?? null,
+        ruleCard: null,
+        outline: null,
+        humanize: toSessionTaskHumanizePayload(refreshedTask ?? task),
+        primaryRequirementFileId: fileId,
+        message: "主任务文件已确认，系统正在后台重新分析并生成新大纲。"
       },
-      outline: analyzed.outline
-    });
-
-    return NextResponse.json({
-      ok: true,
-      task: toSessionTaskPayload(result.task),
-      files: result.files,
-      classification: buildConfirmedClassification(fileId, result.files),
-      analysis: result.analysis,
-      ruleCard: result.ruleCard,
-      outline: result.outline,
-      humanize: toSessionTaskHumanizePayload(result.task),
-      primaryRequirementFileId: fileId,
-      message: "主任务文件已确认，模型已重新生成第一版大纲。"
-    });
+      { status: 202 }
+    );
   } catch (error) {
     if (error instanceof Error && error.message === "AUTH_REQUIRED") {
       return NextResponse.json(
@@ -150,29 +145,27 @@ export async function handleConfirmPrimaryFileRequest(
       );
     }
 
+    if (
+      error instanceof Error &&
+      (error.message.includes("trigger") || error.message.includes("queue"))
+    ) {
+      return NextResponse.json(
+        {
+          ok: false,
+          message: "系统已收到你的主文件确认，但后台重分析任务启动失败，请稍后重试。"
+        },
+        { status: 502 }
+      );
+    }
+
     return NextResponse.json(
       {
         ok: false,
-        message:
-          error instanceof Error ? error.message : "确认主任务文件失败"
+        message: error instanceof Error ? error.message : "确认主任务文件失败"
       },
       { status: 500 }
     );
   }
-}
-
-async function analyzeUploadedTaskFromFiles(input: {
-  taskId: string;
-  userId: string;
-  specialRequirements: string;
-  files: ModelReadyTaskFile[];
-  forcedPrimaryFileId: string;
-}) {
-  return analyzeUploadedTaskWithOpenAI({
-    files: input.files,
-    specialRequirements: input.specialRequirements,
-    forcedPrimaryFileId: input.forcedPrimaryFileId
-  });
 }
 
 export async function POST(request: Request, context: RouteContext) {
@@ -180,7 +173,7 @@ export async function POST(request: Request, context: RouteContext) {
   return handleConfirmPrimaryFileRequest(request, { taskId });
 }
 
-function buildConfirmedClassification(
+function buildPendingClassification(
   primaryRequirementFileId: string,
   files: Array<{
     id: string;
@@ -196,6 +189,26 @@ function buildConfirmedClassification(
       .filter((file) => file.id !== primaryRequirementFileId && file.role === "irrelevant")
       .map((file) => file.id),
     needsUserConfirmation: false,
-    reasoning: "The user confirmed the primary requirement file, so the model re-ran the analysis."
+    reasoning: "你已确认主任务文件，系统正在后台重跑分析。"
   };
+}
+
+async function enqueueAnalyzeTaskWithTrigger(input: {
+  taskId: string;
+  userId: string;
+  forcedPrimaryFileId: string;
+}) {
+  await tasks.trigger(
+    "analyze-uploaded-task",
+    {
+      taskId: input.taskId,
+      userId: input.userId,
+      forcedPrimaryFileId: input.forcedPrimaryFileId
+    },
+    {
+      queue: "task-analysis",
+      concurrencyKey: `task-analysis-${input.taskId}`,
+      idempotencyKey: `task-analysis-${input.taskId}-${input.userId}-${randomUUID()}`
+    }
+  );
 }

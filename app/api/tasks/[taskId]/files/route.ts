@@ -1,27 +1,24 @@
+import { randomUUID } from "node:crypto";
 import { NextResponse } from "next/server";
+import { tasks } from "@trigger.dev/sdk/v3";
 import { uploadOpenAIUserFile } from "@/src/lib/ai/openai-file-client";
-import { isMeaningfulOutline } from "@/src/lib/ai/outline-quality";
-import {
-  analyzeUploadedTaskWithOpenAI,
-  type ModelReadyTaskFile
-} from "@/src/lib/ai/services/analyze-uploaded-task";
 import { extractTextFromImageWithVision } from "@/src/lib/ai/services/extract-text-from-image";
 import { requireCurrentSessionUser } from "@/src/lib/auth/current-user";
 import { detectSupportedFileKind } from "@/src/lib/files/file-kind";
-import { extractTextFromUpload } from "@/src/lib/files/extract-text";
 import { shouldUseSupabasePersistence } from "@/src/lib/persistence/runtime-mode";
 import {
   getOwnedTaskSummary,
+  listTaskFilesForWorkflow,
   markTaskAnalysisFailed,
-  persistTaskModelAnalysis,
+  markTaskAnalysisPending,
   saveTaskFiles,
   updateTaskFileOpenAIMetadata
 } from "@/src/lib/tasks/save-task-files";
+import type { TaskWorkflowClassificationPayload } from "@/src/lib/tasks/request-task-file-upload";
 import {
   toSessionTaskHumanizePayload,
   toSessionTaskPayload
 } from "@/src/lib/tasks/session-task";
-import type { OutlineScaffold } from "@/src/lib/ai/prompts/generate-outline";
 import type { TaskAnalysisSnapshot } from "@/src/types/tasks";
 import type { SessionUser } from "@/src/types/auth";
 
@@ -33,20 +30,16 @@ type RouteContext = {
   }>;
 };
 
+type EnqueueAnalyzeTaskInput = {
+  taskId: string;
+  userId: string;
+  forcedPrimaryFileId?: string | null;
+};
+
 type TaskFileUploadRouteDependencies = {
   requireUser?: () => Promise<SessionUser>;
   isPersistenceReady?: () => boolean;
-  analyzeTimeoutMs?: number;
-  analyzeTask?: (input: {
-    taskId: string;
-    userId: string;
-    specialRequirements: string;
-    files: ModelReadyTaskFile[];
-    forcedPrimaryFileId?: string | null;
-  }) => Promise<{
-    analysis: TaskAnalysisSnapshot;
-    outline: OutlineScaffold | null;
-  }>;
+  enqueueTaskAnalysis?: (input: EnqueueAnalyzeTaskInput) => Promise<void>;
 };
 
 export async function handleTaskFileUploadRequest(
@@ -59,12 +52,23 @@ export async function handleTaskFileUploadRequest(
   let resolvedUserId: string | null = null;
   let taskIdForFailure: string | null = null;
   const requestStartedAt = Date.now();
+
   try {
     if (!(dependencies.isPersistenceReady ?? shouldUseSupabasePersistence)()) {
       return NextResponse.json(
         {
           ok: false,
           message: "系统现在还没连上正式任务数据库，所以文件暂时不能真的上传分析。"
+        },
+        { status: 503 }
+      );
+    }
+
+    if (!process.env.TRIGGER_SECRET_KEY?.trim()) {
+      return NextResponse.json(
+        {
+          ok: false,
+          message: "后台任务密钥还没配置好，暂时不能启动上传分析。"
         },
         { status: 503 }
       );
@@ -114,7 +118,7 @@ export async function handleTaskFileUploadRequest(
             "PDF 已直接交给模型读取，已跳过本地文字提取以提升稳定性和速度。"
           );
         } else {
-          extractedText = await extractTextFromUpload(file);
+          extractedText = await extractTextFromUploadLazily(file);
         }
 
         if (extractedText.startsWith("[image")) {
@@ -202,82 +206,40 @@ export async function handleTaskFileUploadRequest(
       }))
     });
 
-    const analyzeTask = dependencies.analyzeTask ?? analyzeUploadedTaskFromFiles;
-    const modelFiles = persistedFiles.map((file, index) => ({
-      ...file,
-      rawBody: preparedFiles[index]?.body ?? null,
-      contentType: preparedFiles[index]?.contentType ?? file.contentType,
-      openaiFileId: preparedFiles[index]?.openaiFileId ?? file.openaiFileId ?? null,
-      extractedText: preparedFiles[index]?.extractedText ?? file.extractedText
-    }));
-    const analyzeStartedAt = Date.now();
-    const analyzed = await withTimeout(
-      analyzeTask({
-        taskId: params.taskId,
-        userId: user.id,
-        specialRequirements: task.specialRequirements ?? "",
-        files: modelFiles
-      }),
-      dependencies.analyzeTimeoutMs ?? 45_000,
-      "MODEL_ANALYSIS_TIMEOUT"
-    );
-
-    console.info("[file-upload] analyze-finished", {
+    await markTaskAnalysisPending({
       taskId: params.taskId,
-      userId: user.id,
-      elapsedMs: Date.now() - analyzeStartedAt
+      userId: user.id
     });
 
-    if (
-      !analyzed.analysis.needsUserConfirmation &&
-      (!analyzed.outline?.sections.length || !isMeaningfulOutline(analyzed.outline))
-    ) {
-      throw new Error("模型没有返回可展示的大纲，请重试。");
-    }
-
-    const persistedResult = await persistTaskModelAnalysis({
+    await (dependencies.enqueueTaskAnalysis ?? enqueueAnalyzeTaskWithTrigger)({
       taskId: params.taskId,
-      userId: user.id,
-      analysis: analyzed.analysis,
-      outline: analyzed.outline
+      userId: user.id
     });
+
+    const refreshedTask = await getOwnedTaskSummary(params.taskId, user.id);
+    const refreshedFiles = await listTaskFilesForWorkflow(params.taskId, user.id);
 
     return NextResponse.json(
       {
         ok: true,
-        task: toSessionTaskPayload(persistedResult.task),
-        files: persistedResult.files,
-        classification: {
-          primaryRequirementFileId: persistedResult.analysis?.chosenTaskFileId ?? null,
-          backgroundFileIds: persistedResult.analysis?.supportingFileIds ?? [],
-          irrelevantFileIds: persistedResult.analysis?.ignoredFileIds ?? [],
-          needsUserConfirmation: persistedResult.analysis?.needsUserConfirmation ?? false,
-          reasoning: persistedResult.analysis?.reasoning ?? "模型已完成文件分析。"
-        },
-        analysis: persistedResult.analysis,
-        ruleCard: persistedResult.ruleCard,
-        outline: persistedResult.outline,
-        humanize: toSessionTaskHumanizePayload(persistedResult.task),
-        message: persistedResult.analysis?.needsUserConfirmation
-          ? "模型已阅读全部材料，但它认为主任务文件还需要你确认。"
-          : "文件已上传，模型已读完材料并生成第一版大纲。"
+        task: toSessionTaskPayload(refreshedTask ?? task),
+        files: refreshedFiles,
+        classification: buildClassificationFromAnalysis(
+          refreshedTask?.analysisSnapshot ?? null
+        ),
+        analysisStatus: "pending",
+        analysis: refreshedTask?.analysisSnapshot ?? null,
+        ruleCard: null,
+        outline: null,
+        humanize: toSessionTaskHumanizePayload(refreshedTask ?? task),
+        message: "文件已上传，系统正在后台分析并生成第一版大纲。"
       },
-      { status: 201 }
+      { status: 202 }
     );
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error);
-    const diagnostics =
-      typeof error === "object" && error !== null && "diagnostics" in error
-        ? (error as { diagnostics?: unknown }).diagnostics
-        : null;
-    const missingFields =
-      typeof error === "object" && error !== null && "missingFields" in error
-        ? (error as { missingFields?: unknown }).missingFields
-        : null;
     console.error("[file-upload] 上传文件失败:", {
-      errorMessage,
-      missingFields,
-      diagnostics
+      errorMessage
     });
 
     if (errorMessage === "AUTH_REQUIRED") {
@@ -313,25 +275,9 @@ export async function handleTaskFileUploadRequest(
     }
 
     if (
-      errorMessage === "MODEL_ANALYSIS_INCOMPLETE_AFTER_RETRY" ||
-      errorMessage === "MODEL_RETURNED_EMPTY_OUTLINE_AFTER_RETRY" ||
-      errorMessage === "MODEL_ANALYSIS_INCOMPLETE" ||
-      errorMessage === "MODEL_RETURNED_EMPTY_OUTLINE" ||
-      errorMessage === "MODEL_ANALYSIS_TIMEOUT"
+      errorMessage.startsWith("OpenAI file upload failed with status") ||
+      errorMessage.startsWith("OpenAI request failed with status")
     ) {
-      return NextResponse.json(
-        {
-          ok: false,
-          message:
-            errorMessage === "MODEL_ANALYSIS_TIMEOUT"
-              ? "系统已经开始分析你上传的文件，但这次处理超时了。请再点一次上传重试。"
-              : "系统已经读到你上传的文件，但模型这次返回内容不完整。系统已自动重试一次，仍未成功，请再点一次上传重试。"
-        },
-        { status: 502 }
-      );
-    }
-
-    if (errorMessage.startsWith("OpenAI request failed with status")) {
       return NextResponse.json(
         {
           ok: false,
@@ -341,13 +287,17 @@ export async function handleTaskFileUploadRequest(
       );
     }
 
-    if (errorMessage.includes("大纲")) {
+    if (
+      errorMessage.includes("trigger") ||
+      errorMessage.includes("queue") ||
+      errorMessage.includes("TRIGGER")
+    ) {
       return NextResponse.json(
         {
           ok: false,
-          message: errorMessage
+          message: "文件已上传，但后台分析任务启动失败。请稍后重试一次。"
         },
-        { status: 500 }
+        { status: 502 }
       );
     }
 
@@ -361,42 +311,40 @@ export async function handleTaskFileUploadRequest(
   }
 }
 
-async function analyzeUploadedTaskFromFiles(input: {
-  taskId: string;
-  userId: string;
-  specialRequirements: string;
-  files: ModelReadyTaskFile[];
-  forcedPrimaryFileId?: string | null;
-}) {
-  return analyzeUploadedTaskWithOpenAI({
-    files: input.files,
-    specialRequirements: input.specialRequirements,
-    forcedPrimaryFileId: input.forcedPrimaryFileId
-  });
-}
-
 export async function POST(request: Request, context: RouteContext) {
   const params = await context.params;
   return handleTaskFileUploadRequest(request, params);
 }
 
-async function withTimeout<T>(
-  promise: Promise<T>,
-  timeoutMs: number,
-  timeoutCode: string
-) {
-  let timeoutId: ReturnType<typeof setTimeout> | undefined;
-  const timeoutPromise = new Promise<never>((_, reject) => {
-    timeoutId = setTimeout(() => {
-      reject(new Error(timeoutCode));
-    }, timeoutMs);
-  });
+async function extractTextFromUploadLazily(file: File) {
+  const { extractTextFromUpload } = await import("@/src/lib/files/extract-text");
+  return extractTextFromUpload(file);
+}
 
-  try {
-    return await Promise.race([promise, timeoutPromise]);
-  } finally {
-    if (timeoutId) {
-      clearTimeout(timeoutId);
+function buildClassificationFromAnalysis(
+  analysis: TaskAnalysisSnapshot | null
+): TaskWorkflowClassificationPayload {
+  return {
+    primaryRequirementFileId: analysis?.chosenTaskFileId ?? null,
+    backgroundFileIds: analysis?.supportingFileIds ?? [],
+    irrelevantFileIds: analysis?.ignoredFileIds ?? [],
+    needsUserConfirmation: analysis?.needsUserConfirmation ?? false,
+    reasoning: analysis?.reasoning ?? "系统正在分析全部文件。"
+  };
+}
+
+async function enqueueAnalyzeTaskWithTrigger(input: EnqueueAnalyzeTaskInput) {
+  await tasks.trigger(
+    "analyze-uploaded-task",
+    {
+      taskId: input.taskId,
+      userId: input.userId,
+      forcedPrimaryFileId: input.forcedPrimaryFileId ?? null
+    },
+    {
+      queue: "task-analysis",
+      concurrencyKey: `task-analysis-${input.taskId}`,
+      idempotencyKey: `task-analysis-${input.taskId}-${input.userId}-${randomUUID()}`
     }
-  }
+  );
 }

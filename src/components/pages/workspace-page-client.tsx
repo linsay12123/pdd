@@ -13,6 +13,7 @@ import {
 import {
   requestTaskBootstrap,
 } from "@/src/lib/tasks/request-task-bootstrap";
+import { requestTaskAnalysisStatus } from "@/src/lib/tasks/request-task-analysis-status";
 import type {
   TaskWorkflowHumanizePayload,
   TaskWorkflowPayload
@@ -210,6 +211,67 @@ export function WorkspacePageClient({ initialQuota }: WorkspacePageClientProps) 
     };
   }, [activeTask, step]);
 
+  useEffect(() => {
+    if (!activeTask || step !== 2) {
+      return;
+    }
+
+    if (activeTask.analysisStatus !== "pending") {
+      return;
+    }
+
+    let cancelled = false;
+    const timer = window.setTimeout(() => {
+      void requestTaskAnalysisStatus({ taskId: activeTask.task.id })
+        .then((result) => {
+          if (cancelled) {
+            return;
+          }
+
+          setActiveTask((currentTask) => {
+            if (!currentTask || currentTask.task.id !== activeTask.task.id) {
+              return currentTask;
+            }
+
+            return {
+              ...currentTask,
+              ...result,
+              downloads: currentTask.downloads,
+              frozenQuota: currentTask.frozenQuota,
+              humanize: result.humanize ?? currentTask.humanize ?? defaultHumanizeState
+            };
+          });
+
+          if (result.analysisStatus === "succeeded") {
+            setNotice({
+              tone: "success",
+              text: result.message
+            });
+          } else if (result.analysisStatus === "failed") {
+            setNotice({
+              tone: "error",
+              text: result.message
+            });
+          }
+        })
+        .catch(() => {
+          if (cancelled) {
+            return;
+          }
+
+          setNotice({
+            tone: "error",
+            text: "读取分析进度失败，请稍后再试。"
+          });
+        });
+    }, 8_000);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [activeTask, step]);
+
   const handleUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files) {
       setFiles(Array.from(e.target.files));
@@ -248,7 +310,12 @@ export function WorkspacePageClient({ initialQuota }: WorkspacePageClientProps) 
       });
       setSelectedPrimaryFileId(result.classification.primaryRequirementFileId ?? "");
       setNotice({
-        tone: result.classification.needsUserConfirmation ? "info" : "success",
+        tone:
+          result.analysisStatus === "pending"
+            ? "info"
+            : result.classification.needsUserConfirmation
+              ? "info"
+              : "success",
         text: result.message
       });
       setStep(2);
@@ -283,7 +350,7 @@ export function WorkspacePageClient({ initialQuota }: WorkspacePageClientProps) 
     setIsConfirmingPrimaryFile(true);
     setNotice({
       tone: "info",
-      text: "系统正在确认主任务文件并生成第一版大纲。"
+      text: "系统已收到你的主任务文件确认，正在后台重新分析并生成新大纲。"
     });
 
     try {
@@ -308,7 +375,7 @@ export function WorkspacePageClient({ initialQuota }: WorkspacePageClientProps) 
       );
       setSelectedPrimaryFileId(result.primaryRequirementFileId);
       setNotice({
-        tone: "success",
+        tone: result.analysisStatus === "pending" ? "info" : "success",
         text: result.message
       });
     } catch (error) {
@@ -460,9 +527,11 @@ export function WorkspacePageClient({ initialQuota }: WorkspacePageClientProps) 
   const outlineSections = activeTask?.outline?.sections ?? [];
   const taskFiles = activeTask?.files ?? [];
   const analysis = activeTask?.analysis ?? null;
+  const analysisStatus = activeTask?.analysisStatus ?? "pending";
   const hasOutline = outlineSections.length > 0;
   const needsPrimaryFileConfirmation = Boolean(
-    analysis?.needsUserConfirmation ?? activeTask?.classification.needsUserConfirmation
+    analysisStatus === "succeeded" &&
+      (analysis?.needsUserConfirmation ?? activeTask?.classification.needsUserConfirmation)
   );
   const selectedTaskFileName =
     taskFiles.find((file) => file.id === analysis?.chosenTaskFileId)?.originalFilename ??
@@ -650,7 +719,38 @@ export function WorkspacePageClient({ initialQuota }: WorkspacePageClientProps) 
                   </div>
                 )}
 
-                {needsPrimaryFileConfirmation ? (
+                {analysisStatus === "pending" ? (
+                  <div className="glass-panel p-6 rounded-2xl border border-gold-500/30 shadow-[0_0_15px_rgba(245,158,11,0.1)]">
+                    <div className="flex items-center justify-between mb-4 pb-4 border-b border-white/10">
+                      <h2 className="text-xl font-bold text-cream-50 flex items-center gap-2">
+                        <Settings className="w-5 h-5 text-gold-400" />
+                        系统分析中
+                      </h2>
+                      <span className="px-3 py-1 bg-gold-500/20 text-gold-300 text-xs rounded-full border border-gold-500/30">
+                        后台处理中
+                      </span>
+                    </div>
+                    <p className="text-sm text-brand-700">
+                      你的文件已经上传成功，系统正在后台完整阅读并生成第一版大纲。你不用一直停在这里，稍后会自动刷新出结果。
+                    </p>
+                  </div>
+                ) : analysisStatus === "failed" ? (
+                  <div className="glass-panel p-6 rounded-2xl border border-red-500/20">
+                    <div className="flex items-center justify-between mb-4 pb-4 border-b border-white/10">
+                      <h2 className="text-xl font-bold text-cream-50 flex items-center gap-2">
+                        <AlertCircle className="w-5 h-5 text-red-300" />
+                        本次分析失败
+                      </h2>
+                      <span className="px-3 py-1 bg-red-500/10 text-red-200 text-xs rounded-full border border-red-500/20">
+                        可重试
+                      </span>
+                    </div>
+
+                    <p className="text-sm text-brand-700">
+                      系统没能完成这次分析。你可以重新上传一次，如果连续失败，请联系人工支持团队处理。
+                    </p>
+                  </div>
+                ) : needsPrimaryFileConfirmation ? (
                   <div className="glass-panel p-6 rounded-2xl border border-gold-500/30 shadow-[0_0_15px_rgba(245,158,11,0.1)]">
                     <div className="flex items-center justify-between mb-6 pb-4 border-b border-white/10">
                       <h2 className="text-xl font-bold text-cream-50 flex items-center gap-2">

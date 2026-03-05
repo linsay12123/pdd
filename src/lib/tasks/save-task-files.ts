@@ -160,6 +160,15 @@ export async function listTaskFilesForModel(
   return withBodies;
 }
 
+export async function listTaskFilesForWorkflow(
+  taskId: string,
+  userId: string
+): Promise<TaskFileRecord[]> {
+  return shouldUseSupabasePersistence()
+    ? listTaskFilesWithSupabase(taskId, userId)
+    : listTaskFiles(taskId).filter((file) => file.userId === userId);
+}
+
 export async function persistTaskModelAnalysis(input: {
   taskId: string;
   userId: string;
@@ -179,6 +188,16 @@ export async function markTaskAnalysisFailed(input: {
   return shouldUseSupabasePersistence()
     ? markTaskAnalysisFailedWithSupabase(input)
     : markTaskAnalysisFailedLocally(input);
+}
+
+export async function markTaskAnalysisPending(input: {
+  taskId: string;
+  userId: string;
+  primaryRequirementFileId?: string | null;
+}) {
+  return shouldUseSupabasePersistence()
+    ? markTaskAnalysisPendingWithSupabase(input)
+    : markTaskAnalysisPendingLocally(input);
 }
 
 async function saveTaskFilesLocally({
@@ -641,18 +660,93 @@ async function markTaskAnalysisFailedWithSupabase(input: {
   reason: string;
 }) {
   const client = createSupabaseAdminClient();
+  const ownedTask = await getOwnedTaskSummary(input.taskId, input.userId);
+  const existingSnapshot = ownedTask?.analysisSnapshot ?? null;
+  const existingWarnings = Array.isArray(existingSnapshot?.warnings)
+    ? existingSnapshot.warnings
+    : [];
+  const nextSnapshot = existingSnapshot
+    ? {
+        ...existingSnapshot,
+        warnings: [...existingWarnings, `analysis_failed:${input.reason}`]
+      }
+    : {
+        chosenTaskFileId: ownedTask?.primaryRequirementFileId ?? null,
+        supportingFileIds: [],
+        ignoredFileIds: [],
+        needsUserConfirmation: false,
+        reasoning: "Model analysis did not complete.",
+        targetWordCount: 2000,
+        citationStyle: "APA 7",
+        topic: null,
+        chapterCount: null,
+        mustCover: [],
+        gradingFocus: [],
+        appliedSpecialRequirements: ownedTask?.specialRequirements ?? "",
+        usedDefaultWordCount: true,
+        usedDefaultCitationStyle: true,
+        warnings: [`analysis_failed:${input.reason}`]
+      } satisfies TaskAnalysisSnapshot;
   const now = new Date().toISOString();
   const { error } = await client
     .from("writing_tasks")
     .update({
       analysis_status: "failed",
       analysis_model: "gpt-5.2",
-      analysis_completed_at: now
+      analysis_completed_at: now,
+      analysis_snapshot: nextSnapshot
     })
     .eq("id", input.taskId)
     .eq("user_id", input.userId);
 
   if (error) {
     throw new Error(`写入分析失败状态失败：${error.message}`);
+  }
+}
+
+async function markTaskAnalysisPendingLocally(input: {
+  taskId: string;
+  userId: string;
+  primaryRequirementFileId?: string | null;
+}) {
+  const task = getTaskSummary(input.taskId);
+  if (!task || task.userId !== input.userId) {
+    return null;
+  }
+
+  return patchTaskSummary(input.taskId, {
+    analysisStatus: "pending",
+    analysisCompletedAt: null,
+    ...(input.primaryRequirementFileId !== undefined
+      ? {
+          primaryRequirementFileId: input.primaryRequirementFileId
+        }
+      : {})
+  });
+}
+
+async function markTaskAnalysisPendingWithSupabase(input: {
+  taskId: string;
+  userId: string;
+  primaryRequirementFileId?: string | null;
+}) {
+  const client = createSupabaseAdminClient();
+  const patch: Record<string, unknown> = {
+    analysis_status: "pending",
+    analysis_completed_at: null
+  };
+
+  if (input.primaryRequirementFileId !== undefined) {
+    patch.primary_requirement_file_id = input.primaryRequirementFileId;
+  }
+
+  const { error } = await client
+    .from("writing_tasks")
+    .update(patch)
+    .eq("id", input.taskId)
+    .eq("user_id", input.userId);
+
+  if (error) {
+    throw new Error(`写入分析中状态失败：${error.message}`);
   }
 }
