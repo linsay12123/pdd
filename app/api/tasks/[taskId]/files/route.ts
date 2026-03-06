@@ -6,6 +6,7 @@ import { requireCurrentSessionUser } from "@/src/lib/auth/current-user";
 import { detectSupportedFileKind } from "@/src/lib/files/file-kind";
 import { shouldUseSupabasePersistence } from "@/src/lib/persistence/runtime-mode";
 import { buildAnalysisProgressPayload } from "@/src/lib/tasks/analysis-progress";
+import { startTaskAnalysisRun } from "@/src/lib/tasks/start-task-analysis-run";
 import {
   getOwnedTaskSummary,
   listTaskFilesForWorkflow,
@@ -15,6 +16,10 @@ import {
   updateTaskFileOpenAIMetadata
 } from "@/src/lib/tasks/save-task-files";
 import { getInvalidTriggerKeyReason } from "@/src/lib/trigger/key-guard";
+import {
+  resolveTriggerRunState,
+  type TriggerRunRuntimeState
+} from "@/src/lib/trigger/run-state";
 import type { TaskWorkflowClassificationPayload } from "@/src/lib/tasks/request-task-file-upload";
 import {
   toSessionTaskHumanizePayload,
@@ -41,6 +46,9 @@ type EnqueueAnalyzeTaskInput = {
 type TaskFileUploadRouteDependencies = {
   requireUser?: () => Promise<SessionUser>;
   isPersistenceReady?: () => boolean;
+  getTriggerRunState?: (
+    runId: string
+  ) => Promise<{ state: TriggerRunRuntimeState; status: string | null }>;
   enqueueTaskAnalysis?: (input: EnqueueAnalyzeTaskInput) => Promise<string | null>;
   maxFileCount?: number;
   maxFileBytes?: number;
@@ -257,21 +265,26 @@ export async function handleTaskFileUploadRequest(
       }))
     });
 
-    const triggerRunId = await (dependencies.enqueueTaskAnalysis ?? enqueueAnalyzeTaskWithTrigger)({
-      taskId: params.taskId,
+    const dispatchResult = await startTaskAnalysisRun({
+      task,
       userId: user.id,
-      idempotencyKey: buildUploadIdempotencyKey(params.taskId, user.id)
+      source: "upload",
+      enqueueTaskAnalysis: dependencies.enqueueTaskAnalysis ?? enqueueAnalyzeTaskWithTrigger,
+      getTriggerRunState: dependencies.getTriggerRunState ?? getTriggerRunState,
+      markTaskAnalysisPending,
+      markTaskAnalysisFailed
     });
-    if (!triggerRunId) {
-      throw new Error("TRIGGER_RUN_ID_MISSING");
-    }
 
-    await markTaskAnalysisPending({
-      taskId: params.taskId,
-      userId: user.id,
-      triggerRunId,
-      analysisModel: "gpt-5.2"
-    });
+    if (!dispatchResult.ok) {
+      return NextResponse.json(
+        {
+          ok: false,
+          message:
+            "文件已经收到了，但系统刚发出的后台分析任务连续两次都没真正启动起来。说明当前线上后台环境有问题，请稍后再试。"
+        },
+        { status: 503 }
+      );
+    }
 
     const refreshedTask = await getOwnedTaskSummary(params.taskId, user.id);
     const refreshedFiles = await listTaskFilesForWorkflow(params.taskId, user.id);
@@ -293,17 +306,24 @@ export async function handleTaskFileUploadRequest(
         analysisStatus: "pending",
         analysisProgress,
         analysisRuntime: {
-          state: "active",
-          status: "QUEUED",
-          detail: "后台任务已受理，正在排队或准备执行。",
-          autoRecovered: false,
-          runId: triggerRunId
+          state: dispatchResult.runtime.state,
+          status: dispatchResult.runtime.status,
+          detail:
+            dispatchResult.runtime.state === "unknown"
+              ? "后台任务已受理，系统正在确认这一轮是否已经真正开始执行。"
+              : dispatchResult.autoRecovered
+                ? "第一张后台任务编号已经坏了，系统刚刚已经自动换了一张新的后台编号。"
+                : "后台任务已受理，正在排队或准备执行。",
+          autoRecovered: dispatchResult.autoRecovered,
+          runId: dispatchResult.triggerRunId
         },
         analysis: refreshedTask?.analysisSnapshot ?? null,
         ruleCard: null,
         outline: null,
         humanize: toSessionTaskHumanizePayload(refreshedTask ?? task),
-        message: "文件已上传，系统正在后台分析并生成第一版大纲。"
+        message: dispatchResult.autoRecovered
+          ? "文件已上传。第一张后台任务编号刚刚失效，系统已经自动换了一张新的编号并继续分析。"
+          : "文件已上传，系统正在后台分析并生成第一版大纲。"
       },
       { status: 202 }
     );
@@ -423,6 +443,8 @@ async function enqueueAnalyzeTaskWithTrigger(input: EnqueueAnalyzeTaskInput) {
   return typeof run?.id === "string" ? run.id : null;
 }
 
-function buildUploadIdempotencyKey(taskId: string, userId: string) {
-  return `task-analysis-upload-${taskId}-${userId}`;
+async function getTriggerRunState(
+  runId: string
+): Promise<{ state: TriggerRunRuntimeState; status: string | null }> {
+  return resolveTriggerRunState(runId);
 }

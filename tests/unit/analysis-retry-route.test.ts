@@ -239,7 +239,7 @@ describe("analysis retry route", () => {
     expect(getTaskSummary("task-pending-version")?.analysisModel).toBe("gpt-5.2");
   });
 
-  it("returns 503 when a fresh retry run is still pending_version", async () => {
+  it("returns 503 with an environment problem message when a fresh retry run is still broken", async () => {
     saveTaskSummary({
       id: "task-pending-version-still-bad",
       userId: "user-1",
@@ -268,6 +268,7 @@ describe("analysis retry route", () => {
     const getTriggerRunState = vi
       .fn()
       .mockResolvedValueOnce({ state: "pending_version", status: "PENDING_VERSION" })
+      .mockResolvedValueOnce({ state: "pending_version", status: "PENDING_VERSION" })
       .mockResolvedValueOnce({ state: "pending_version", status: "PENDING_VERSION" });
     const response = await handleTaskAnalysisRetryRequest(
       new Request("http://localhost/api/tasks/task-pending-version-still-bad/analysis/retry", {
@@ -284,8 +285,9 @@ describe("analysis retry route", () => {
     const payload = await response.json();
 
     expect(response.status).toBe(503);
-    expect(String(payload.message)).toContain("版本没部署");
-    expect(getTriggerRunState).toHaveBeenCalledTimes(2);
+    expect(String(payload.message)).toContain("当前线上后台环境确实有问题");
+    expect(String(payload.message)).not.toContain("版本没部署");
+    expect(getTriggerRunState).toHaveBeenCalledTimes(3);
   });
 
   it("rejects retry when pending analysis has not timed out", async () => {

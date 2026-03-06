@@ -113,4 +113,52 @@ describe("health diagnostics", () => {
     expect(diagnostics.checks.DB_SCHEMA_COMPAT.ok).toBe(true);
     expect(diagnostics.checks.DB_LEGACY_STRUCTURES.ok).toBe(true);
   });
+
+  it("does not blame the current production environment just because recent runs are all old pending_version records", async () => {
+    fromMock.mockImplementation((table: string) => ({
+      select: () => ({
+        limit: async () => ({
+          data: table === "profiles" ? [{ id: "profile-1" }] : [],
+          error: null
+        })
+      })
+    }));
+
+    rpcMock.mockResolvedValue({
+      data: {
+        targetWordCountNullable: true,
+        citationStyleNullable: true,
+        analysisFieldsReady: true,
+        taskFileFieldsReady: true,
+        humanizeFieldsReady: true,
+        legacyPaymentTablesRemaining: [],
+        legacyPaymentTypesRemaining: [],
+        legacyTaskStatusesRemaining: []
+      },
+      error: null
+    });
+
+    runsListMock.mockResolvedValue({
+      data: [
+        {
+          id: "run-1",
+          status: "PENDING_VERSION"
+        },
+        {
+          id: "run-2",
+          status: "PENDING_VERSION"
+        }
+      ],
+      nextCursor: undefined
+    });
+
+    const { runHealthDiagnostics } = await import(
+      "../../src/lib/health/diagnostics"
+    );
+    const diagnostics = await runHealthDiagnostics();
+
+    expect(diagnostics.checks.TRIGGER_RUNTIME.ok).toBe(true);
+    expect(diagnostics.checks.TRIGGER_RUNTIME.detail).toContain("旧");
+    expect(diagnostics.checks.TRIGGER_RUNTIME.detail).not.toContain("还没部署到生产");
+  });
 });

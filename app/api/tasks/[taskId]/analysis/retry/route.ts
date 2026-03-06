@@ -5,9 +5,11 @@ import {
   buildAnalysisProgressPayload,
   type AnalysisStatus
 } from "@/src/lib/tasks/analysis-progress";
+import { startTaskAnalysisRun } from "@/src/lib/tasks/start-task-analysis-run";
 import {
   getOwnedTaskSummary,
   listTaskFilesForWorkflow,
+  markTaskAnalysisFailed,
   markTaskAnalysisPending
 } from "@/src/lib/tasks/save-task-files";
 import { shouldUseSupabasePersistence } from "@/src/lib/persistence/runtime-mode";
@@ -42,11 +44,6 @@ type TaskAnalysisRetryRouteDependencies = {
     runId: string
   ) => Promise<{ state: TriggerRunRuntimeState; status: string | null }>;
   enqueueTaskAnalysis?: (input: EnqueueAnalyzeTaskInput) => Promise<string | null>;
-};
-
-type TriggerRuntimeSnapshot = {
-  state: TriggerRunRuntimeState;
-  status: string | null;
 };
 
 export async function handleTaskAnalysisRetryRequest(
@@ -187,43 +184,23 @@ export async function handleTaskAnalysisRetryRequest(
       }
     }
 
-    const triggerRunId = await (dependencies.enqueueTaskAnalysis ?? enqueueAnalyzeTaskWithTrigger)({
-      taskId: params.taskId,
+    const dispatchResult = await startTaskAnalysisRun({
+      task,
       userId: user.id,
+      source: "manual_retry",
       forcedPrimaryFileId: task.primaryRequirementFileId ?? null,
-      idempotencyKey: buildRetryIdempotencyKey(task.id, user.id, {
-        requestedAt: task.analysisRequestedAt ?? null,
-        triggerRunId: task.analysisTriggerRunId ?? null
-      })
-    });
-    if (!triggerRunId) {
-      throw new Error("TRIGGER_RUN_ID_MISSING");
-    }
-
-    const freshRuntime = await (dependencies.getTriggerRunState ?? getTriggerRunState)(
-      triggerRunId
-    ).catch(
-      (): TriggerRuntimeSnapshot => ({
-        state: "unknown",
-        status: null
-      })
-    );
-
-    await markTaskAnalysisPending({
-      taskId: params.taskId,
-      userId: user.id,
-      primaryRequirementFileId: task.primaryRequirementFileId ?? null,
-      triggerRunId,
-      analysisModel: task.analysisModel ?? "gpt-5.2",
-      incrementRetryCount: true
+      enqueueTaskAnalysis: dependencies.enqueueTaskAnalysis ?? enqueueAnalyzeTaskWithTrigger,
+      getTriggerRunState: dependencies.getTriggerRunState ?? getTriggerRunState,
+      markTaskAnalysisPending,
+      markTaskAnalysisFailed
     });
 
-    if (freshRuntime.state === "pending_version") {
+    if (!dispatchResult.ok) {
       return NextResponse.json(
         {
           ok: false,
           message:
-            "系统刚刚已经重新换了一条后台任务，但新的任务还是显示“版本没部署”。说明现在生产环境还没准备好。"
+            "系统刚刚已经重新换了一条新的后台任务，但新的任务还是没真正启动起来。说明当前线上后台环境确实有问题。"
         },
         { status: 503 }
       );
@@ -253,17 +230,24 @@ export async function handleTaskAnalysisRetryRequest(
         analysisStatus: "pending",
         analysisProgress,
         analysisRuntime: {
-          state: normalizeFreshEnqueuedRuntime(freshRuntime).state,
-          status: normalizeFreshEnqueuedRuntime(freshRuntime).status,
-          detail: "后台重试任务已受理，正在排队或准备执行。",
-          autoRecovered: false,
-          runId: triggerRunId
+          state: dispatchResult.runtime.state,
+          status: dispatchResult.runtime.status,
+          detail:
+            dispatchResult.runtime.state === "unknown"
+              ? "后台重试任务已受理，系统正在确认这一轮是否已经真正开始执行。"
+              : dispatchResult.autoRecovered
+                ? "第一张后台任务编号已经坏了，系统刚刚已经自动换了一张新的后台编号。"
+                : "后台重试任务已受理，正在排队或准备执行。",
+          autoRecovered: dispatchResult.autoRecovered,
+          runId: dispatchResult.triggerRunId
         },
         analysis: refreshedTask?.analysisSnapshot ?? null,
         ruleCard: null,
         outline: null,
         humanize: toSessionTaskHumanizePayload(refreshedTask ?? task),
-        message: "已重新提交后台分析，系统正在重新生成第一版大纲。"
+        message: dispatchResult.autoRecovered
+          ? "系统已经重新发起分析，并且自动跳过了一张坏掉的后台任务编号。"
+          : "已重新提交后台分析，系统正在重新生成第一版大纲。"
       },
       { status: 202 }
     );
@@ -326,30 +310,6 @@ async function enqueueAnalyzeTaskWithTrigger(input: EnqueueAnalyzeTaskInput) {
   );
 
   return typeof run?.id === "string" ? run.id : null;
-}
-
-function normalizeFreshEnqueuedRuntime(
-  runtime: TriggerRuntimeSnapshot
-): TriggerRuntimeSnapshot {
-  if (runtime.state === "pending_version") {
-    return runtime;
-  }
-
-  return {
-    state: "active",
-    status: runtime.status ?? "QUEUED"
-  };
-}
-
-function buildRetryIdempotencyKey(
-  taskId: string,
-  userId: string,
-  seed: { requestedAt: string | null; triggerRunId: string | null }
-) {
-  const stableSeed = (seed.requestedAt ?? seed.triggerRunId ?? "no-analysis-request")
-    .replace(/[^a-zA-Z0-9_-]/g, "-")
-    .slice(0, 64);
-  return `task-analysis-retry-${taskId}-${userId}-${stableSeed}`;
 }
 
 async function getTriggerRunState(

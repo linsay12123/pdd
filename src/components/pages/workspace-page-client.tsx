@@ -853,7 +853,7 @@ export function WorkspacePageClient({ initialQuota }: WorkspacePageClientProps) 
                     </p>
                     {analysisRuntime.state === "pending_version" && (
                       <p className="text-xs text-red-200 mt-3">
-                        这条后台任务编号现在是坏的。只要你已经把后台任务重新部署好了，直接点下面的“一键重试分析”就会换一条新的后台编号。
+                        这条后台任务编号已经失效了。你可以直接点下面的“一键重试分析”，系统会换一条新的后台编号，不用重新上传文件。
                       </p>
                     )}
                     {showAnalysisRetryButton && (

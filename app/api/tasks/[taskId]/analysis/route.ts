@@ -4,7 +4,8 @@ import type { TaskWorkflowClassificationPayload } from "@/src/lib/tasks/request-
 import { buildAnalysisProgressPayload } from "@/src/lib/tasks/analysis-progress";
 import {
   getOwnedTaskSummary,
-  listTaskFilesForWorkflow
+  listTaskFilesForWorkflow,
+  markTaskAnalysisFailed
 } from "@/src/lib/tasks/save-task-files";
 import {
   requireFormalPersistence,
@@ -42,6 +43,7 @@ type AnalysisRuntimePayload = {
 type AnalysisRouteDependencies = {
   requireUser?: () => Promise<SessionUser>;
   isPersistenceReady?: () => boolean;
+  markTaskAnalysisFailed?: typeof markTaskAnalysisFailed;
   getTriggerRunState?: (
     runId: string
   ) => Promise<{ state: TriggerRunRuntimeState; status: string | null }>;
@@ -91,7 +93,25 @@ export async function handleTaskAnalysisStatusRequest(
 
     if (analysisStatus === "pending") {
       analysisRuntime = await resolveAnalysisRuntime(task, dependencies);
-      if (canRetryPendingVersionImmediately(task, analysisRuntime.state)) {
+
+      if (shouldRepairBrokenPendingRun(task, analysisRuntime.state)) {
+        await (dependencies.markTaskAnalysisFailed ?? markTaskAnalysisFailed)({
+          taskId: params.taskId,
+          userId: user.id,
+          reason: STALE_TRIGGER_RUN_REASON
+        });
+
+        task = (await getOwnedTaskSummary(params.taskId, user.id)) ?? task;
+        analysis = task.analysisSnapshot ?? null;
+        analysisStatus = task.analysisStatus ?? "failed";
+        analysisProgress = buildAnalysisProgressPayload({
+          status: analysisStatus,
+          requestedAt: task.analysisRequestedAt ?? null,
+          startedAt: task.analysisStartedAt ?? null,
+          completedAt: task.analysisCompletedAt ?? null
+        });
+        analysisRuntime = buildDefaultAnalysisRuntime(task, analysisStatus);
+      } else if (canRetryPendingVersionImmediately(task, analysisRuntime.state)) {
         analysisProgress = {
           ...analysisProgress,
           canRetry: true
@@ -357,7 +377,7 @@ function mapRunStateDetail(state: TriggerRunRuntimeState) {
     case "active":
       return "后台任务正在执行中。";
     case "pending_version":
-      return "这条旧的后台任务编号已经失效，你可以直接点“一键重试分析”换一条新的编号。";
+      return "这条后台任务编号已经失效，系统会把它当成旧坏号处理。";
     case "terminal":
       return "上一轮后台任务已经结束，但任务状态还停在分析中。";
     case "missing":
@@ -371,7 +391,22 @@ function canRetryPendingVersionImmediately(
   task: { analysisStartedAt?: string | null },
   runtimeState: AnalysisRuntimePayload["state"]
 ) {
-  return !task.analysisStartedAt && runtimeState === "pending_version";
+  return Boolean(task.analysisStartedAt) && runtimeState === "pending_version";
+}
+
+function shouldRepairBrokenPendingRun(
+  task: { analysisStartedAt?: string | null; analysisTriggerRunId?: string | null },
+  runtimeState: AnalysisRuntimePayload["state"]
+) {
+  if (task.analysisStartedAt || !task.analysisTriggerRunId?.trim()) {
+    return false;
+  }
+
+  return (
+    runtimeState === "pending_version" ||
+    runtimeState === "missing" ||
+    runtimeState === "terminal"
+  );
 }
 
 async function getTriggerRunState(

@@ -9,6 +9,7 @@ import {
   listTaskFiles,
   resetTaskFileStore,
   resetTaskStore,
+  saveTaskFileRecords,
   saveTaskSummary
 } from "../../src/lib/tasks/repository";
 
@@ -183,6 +184,103 @@ describe("task file async analysis routes", () => {
     expect(listTaskFiles("task-1")).toHaveLength(1);
   });
 
+  it("auto-recovers immediately when the first fresh upload run id is already broken", async () => {
+    saveTaskSummary({
+      id: "task-upload-auto-recover",
+      userId: "user-1",
+      status: "created",
+      targetWordCount: null,
+      citationStyle: null,
+      specialRequirements: ""
+    });
+
+    const formData = new FormData();
+    formData.append(
+      "files",
+      new File(["Assignment brief text."], "assignment.txt", { type: "text/plain" })
+    );
+
+    const enqueueTaskAnalysis = vi
+      .fn()
+      .mockResolvedValueOnce("run-upload-bad-0")
+      .mockResolvedValueOnce("run-upload-good-1");
+    const getTriggerRunState = vi
+      .fn()
+      .mockResolvedValueOnce({ state: "pending_version", status: "PENDING_VERSION" })
+      .mockResolvedValueOnce({ state: "active", status: "QUEUED" });
+
+    const response = await handleTaskFileUploadRequest(
+      new Request("http://localhost/api/tasks/task-upload-auto-recover/files", {
+        method: "POST",
+        body: formData
+      }),
+      { taskId: "task-upload-auto-recover" },
+      {
+        isPersistenceReady: () => true,
+        requireUser: async () => makeUser(),
+        enqueueTaskAnalysis,
+        getTriggerRunState
+      } as never
+    );
+    const payload = await response.json();
+
+    expect(response.status).toBe(202);
+    expect(payload.analysisStatus).toBe("pending");
+    expect(payload.analysisRuntime.runId).toBe("run-upload-good-1");
+    expect(payload.analysisRuntime.autoRecovered).toBe(true);
+    expect(enqueueTaskAnalysis).toHaveBeenCalledTimes(2);
+    expect(getTriggerRunState).toHaveBeenCalledTimes(2);
+    expect(enqueueTaskAnalysis.mock.calls[0]?.[0]?.idempotencyKey).not.toBe(
+      enqueueTaskAnalysis.mock.calls[1]?.[0]?.idempotencyKey
+    );
+    expect(getTaskSummary("task-upload-auto-recover")?.analysisRetryCount).toBe(1);
+  });
+
+  it("fails fast when even the recovered upload run is still broken", async () => {
+    saveTaskSummary({
+      id: "task-upload-runtime-bad",
+      userId: "user-1",
+      status: "created",
+      targetWordCount: null,
+      citationStyle: null,
+      specialRequirements: ""
+    });
+
+    const formData = new FormData();
+    formData.append(
+      "files",
+      new File(["Assignment brief text."], "assignment.txt", { type: "text/plain" })
+    );
+
+    const enqueueTaskAnalysis = vi
+      .fn()
+      .mockResolvedValueOnce("run-upload-bad-0")
+      .mockResolvedValueOnce("run-upload-bad-1");
+    const getTriggerRunState = vi
+      .fn()
+      .mockResolvedValueOnce({ state: "pending_version", status: "PENDING_VERSION" })
+      .mockResolvedValueOnce({ state: "pending_version", status: "PENDING_VERSION" });
+
+    const response = await handleTaskFileUploadRequest(
+      new Request("http://localhost/api/tasks/task-upload-runtime-bad/files", {
+        method: "POST",
+        body: formData
+      }),
+      { taskId: "task-upload-runtime-bad" },
+      {
+        isPersistenceReady: () => true,
+        requireUser: async () => makeUser(),
+        enqueueTaskAnalysis,
+        getTriggerRunState
+      } as never
+    );
+    const payload = await response.json();
+
+    expect(response.status).toBe(503);
+    expect(String(payload.message)).toContain("线上后台环境");
+    expect(getTaskSummary("task-upload-runtime-bad")?.analysisStatus).toBe("failed");
+  });
+
   it("returns 502 and marks analysis failed when queue submission fails", async () => {
     saveTaskSummary({
       id: "task-2",
@@ -323,6 +421,67 @@ describe("task file async analysis routes", () => {
     );
     expect(getTaskSummary("task-4")?.analysisStatus).toBe("pending");
     expect(getTaskSummary("task-4")?.primaryRequirementFileId).toBe(chosenFileId);
+  });
+
+  it("auto-recovers immediately when confirm-primary gets a broken fresh run id", async () => {
+    saveTaskSummary({
+      id: "task-confirm-auto-recover",
+      userId: "user-1",
+      status: "awaiting_primary_file_confirmation",
+      targetWordCount: null,
+      citationStyle: null,
+      specialRequirements: ""
+    });
+
+    saveTaskFileRecords([
+      {
+        id: "file-1",
+        taskId: "task-confirm-auto-recover",
+        userId: "user-1",
+        originalFilename: "brief-a.txt",
+        storagePath: "tmp/brief-a.txt",
+        extractedText: "A brief",
+        role: "unknown",
+        isPrimary: false
+      }
+    ]);
+
+    const enqueueTaskAnalysis = vi
+      .fn()
+      .mockResolvedValueOnce("run-confirm-bad-0")
+      .mockResolvedValueOnce("run-confirm-good-1");
+    const getTriggerRunState = vi
+      .fn()
+      .mockResolvedValueOnce({ state: "pending_version", status: "PENDING_VERSION" })
+      .mockResolvedValueOnce({ state: "active", status: "QUEUED" });
+
+    const response = await handleConfirmPrimaryFileRequest(
+      new Request("http://localhost/api/tasks/task-confirm-auto-recover/files/confirm-primary", {
+        method: "POST",
+        body: JSON.stringify({ fileId: "file-1" }),
+        headers: {
+          "content-type": "application/json"
+        }
+      }),
+      { taskId: "task-confirm-auto-recover" },
+      {
+        isPersistenceReady: () => true,
+        requireUser: async () => makeUser(),
+        enqueueTaskAnalysis,
+        getTriggerRunState
+      } as never
+    );
+    const payload = await response.json();
+
+    expect(response.status).toBe(202);
+    expect(payload.analysisStatus).toBe("pending");
+    expect(payload.analysisRuntime.runId).toBe("run-confirm-good-1");
+    expect(payload.analysisRuntime.autoRecovered).toBe(true);
+    expect(enqueueTaskAnalysis).toHaveBeenCalledTimes(2);
+    expect(enqueueTaskAnalysis.mock.calls[0]?.[0]?.idempotencyKey).not.toBe(
+      enqueueTaskAnalysis.mock.calls[1]?.[0]?.idempotencyKey
+    );
+    expect(getTaskSummary("task-confirm-auto-recover")?.analysisRetryCount).toBe(2);
   });
 
   it("returns 502 when trigger does not return run id", async () => {

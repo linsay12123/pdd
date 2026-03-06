@@ -10,7 +10,8 @@ import { readTaskArtifact, saveTaskArtifact } from "@/src/lib/storage/task-artif
 import { createSupabaseAdminClient } from "@/src/lib/supabase/admin";
 import {
   buildStaleTriggerRunRepairPatch,
-  normalizeAnalysisModel
+  normalizeAnalysisModel,
+  shouldClearBrokenTriggerRun
 } from "@/src/lib/tasks/analysis-runtime-cleanup";
 import { assertStatusTransition } from "@/src/lib/tasks/status-machine";
 import { saveOutlineVersion } from "@/src/lib/tasks/save-outline-version";
@@ -257,6 +258,7 @@ export async function markTaskAnalysisPending(input: {
   primaryRequirementFileId?: string | null;
   triggerRunId?: string | null;
   analysisModel?: string | null;
+  analysisRetryCount?: number;
   incrementRetryCount?: boolean;
 }) {
   if (shouldUseSupabasePersistence()) {
@@ -731,24 +733,26 @@ async function markTaskAnalysisFailedLocally(input: {
   }
 
   const stalePatch = buildStaleTriggerRunRepairPatch({
-    analysisModel: task.analysisModel
+    analysisModel: task.analysisModel,
+    reason: input.reason
   });
+  const clearBrokenRun = shouldClearBrokenTriggerRun(input.reason);
   return patchTaskSummary(input.taskId, {
     analysisStatus: "failed",
     analysisModel:
-      input.reason === "STALE_TRIGGER_RUN"
+      clearBrokenRun
         ? stalePatch.analysisModel
         : normalizeAnalysisModel(task.analysisModel),
     analysisErrorMessage: input.reason,
     analysisCompletedAt: stalePatch.analysisCompletedAt,
     analysisStartedAt:
-      input.reason === "STALE_TRIGGER_RUN"
+      clearBrokenRun
         ? stalePatch.analysisStartedAt
         : task.analysisStartedAt ?? stalePatch.analysisCompletedAt,
     analysisTriggerRunId:
-      input.reason === "STALE_TRIGGER_RUN" ? stalePatch.analysisTriggerRunId : task.analysisTriggerRunId,
+      clearBrokenRun ? stalePatch.analysisTriggerRunId : task.analysisTriggerRunId,
     analysisSnapshot:
-      input.reason === "STALE_TRIGGER_RUN"
+      clearBrokenRun
         ? null
         : task.analysisSnapshot
       ? {
@@ -780,27 +784,29 @@ async function markTaskAnalysisFailedWithSupabase(input: {
       }
     : null;
   const stalePatch = buildStaleTriggerRunRepairPatch({
-    analysisModel: ownedTask?.analysisModel
+    analysisModel: ownedTask?.analysisModel,
+    reason: input.reason
   });
+  const clearBrokenRun = shouldClearBrokenTriggerRun(input.reason);
   const { error } = await client
     .from("writing_tasks")
     .update({
       analysis_status: "failed",
       analysis_model:
-        input.reason === "STALE_TRIGGER_RUN"
+        clearBrokenRun
           ? stalePatch.analysisModel
           : normalizeAnalysisModel(ownedTask?.analysisModel),
       analysis_error_message: input.reason,
       analysis_started_at:
-        input.reason === "STALE_TRIGGER_RUN"
+        clearBrokenRun
           ? stalePatch.analysisStartedAt
           : ownedTask?.analysisStartedAt ?? stalePatch.analysisCompletedAt,
       analysis_completed_at: stalePatch.analysisCompletedAt,
       analysis_trigger_run_id:
-        input.reason === "STALE_TRIGGER_RUN"
+        clearBrokenRun
           ? stalePatch.analysisTriggerRunId
           : ownedTask?.analysisTriggerRunId ?? null,
-      analysis_snapshot: input.reason === "STALE_TRIGGER_RUN" ? null : nextSnapshot
+      analysis_snapshot: clearBrokenRun ? null : nextSnapshot
     })
     .eq("id", input.taskId)
     .eq("user_id", input.userId);
@@ -816,6 +822,7 @@ async function markTaskAnalysisPendingLocally(input: {
   primaryRequirementFileId?: string | null;
   triggerRunId?: string | null;
   analysisModel?: string | null;
+  analysisRetryCount?: number;
   incrementRetryCount?: boolean;
 }) {
   const task = getTaskSummary(input.taskId);
@@ -823,9 +830,11 @@ async function markTaskAnalysisPendingLocally(input: {
     return null;
   }
 
-  const nextRetryCount = input.incrementRetryCount
-    ? (task.analysisRetryCount ?? 0) + 1
-    : (task.analysisRetryCount ?? 0);
+  const nextRetryCount =
+    input.analysisRetryCount ??
+    (input.incrementRetryCount
+      ? (task.analysisRetryCount ?? 0) + 1
+      : (task.analysisRetryCount ?? 0));
 
   return patchTaskSummary(input.taskId, {
     analysisStatus: "pending",
@@ -851,13 +860,16 @@ async function markTaskAnalysisPendingWithSupabase(input: {
   primaryRequirementFileId?: string | null;
   triggerRunId?: string | null;
   analysisModel?: string | null;
+  analysisRetryCount?: number;
   incrementRetryCount?: boolean;
 }) {
   const client = createSupabaseAdminClient();
   const ownedTask = await getOwnedTaskSummary(input.taskId, input.userId);
-  const nextRetryCount = input.incrementRetryCount
-    ? (ownedTask?.analysisRetryCount ?? 0) + 1
-    : (ownedTask?.analysisRetryCount ?? 0);
+  const nextRetryCount =
+    input.analysisRetryCount ??
+    (input.incrementRetryCount
+      ? (ownedTask?.analysisRetryCount ?? 0) + 1
+      : (ownedTask?.analysisRetryCount ?? 0));
   const patch: Record<string, unknown> = {
     analysis_status: "pending",
     analysis_model: normalizeAnalysisModel(input.analysisModel ?? ownedTask?.analysisModel ?? null),

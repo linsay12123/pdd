@@ -6,10 +6,16 @@ import type { TaskWorkflowClassificationPayload } from "@/src/lib/tasks/request-
 import {
   getOwnedTaskSummary,
   listTaskFilesForWorkflow,
+  markTaskAnalysisFailed,
   markTaskAnalysisPending
 } from "@/src/lib/tasks/save-task-files";
 import { shouldUseSupabasePersistence } from "@/src/lib/persistence/runtime-mode";
 import { getInvalidTriggerKeyReason } from "@/src/lib/trigger/key-guard";
+import { startTaskAnalysisRun } from "@/src/lib/tasks/start-task-analysis-run";
+import {
+  resolveTriggerRunState,
+  type TriggerRunRuntimeState
+} from "@/src/lib/trigger/run-state";
 import {
   toSessionTaskHumanizePayload,
   toSessionTaskPayload
@@ -29,10 +35,13 @@ type ConfirmPrimaryBody = {
 type ConfirmPrimaryRouteDependencies = {
   requireUser?: () => Promise<SessionUser>;
   isPersistenceReady?: () => boolean;
+  getTriggerRunState?: (
+    runId: string
+  ) => Promise<{ state: TriggerRunRuntimeState; status: string | null }>;
   enqueueTaskAnalysis?: (input: {
     taskId: string;
     userId: string;
-    forcedPrimaryFileId: string;
+    forcedPrimaryFileId?: string | null;
     idempotencyKey: string;
   }) => Promise<string | null>;
 };
@@ -108,23 +117,27 @@ export async function handleConfirmPrimaryFileRequest(
       throw new Error("FILE_NOT_FOUND");
     }
 
-    const triggerRunId = await (dependencies.enqueueTaskAnalysis ?? enqueueAnalyzeTaskWithTrigger)({
-      taskId: params.taskId,
+    const dispatchResult = await startTaskAnalysisRun({
+      task,
       userId: user.id,
+      source: "confirm_primary",
       forcedPrimaryFileId: fileId,
-      idempotencyKey: buildConfirmPrimaryIdempotencyKey(params.taskId, user.id, fileId)
+      enqueueTaskAnalysis: dependencies.enqueueTaskAnalysis ?? enqueueAnalyzeTaskWithTrigger,
+      getTriggerRunState: dependencies.getTriggerRunState ?? getTriggerRunState,
+      markTaskAnalysisPending,
+      markTaskAnalysisFailed
     });
-    if (!triggerRunId) {
-      throw new Error("TRIGGER_RUN_ID_MISSING");
-    }
 
-    await markTaskAnalysisPending({
-      taskId: params.taskId,
-      userId: user.id,
-      primaryRequirementFileId: fileId,
-      triggerRunId,
-      analysisModel: task.analysisModel ?? "gpt-5.2"
-    });
+    if (!dispatchResult.ok) {
+      return NextResponse.json(
+        {
+          ok: false,
+          message:
+            "你已经确认了主任务文件，但系统刚发出的后台分析任务连续两次都没真正启动起来。说明当前线上后台环境有问题，请稍后再试。"
+        },
+        { status: 503 }
+      );
+    }
 
     const refreshedTask = await getOwnedTaskSummary(params.taskId, user.id);
     const refreshedFiles = await listTaskFilesForWorkflow(params.taskId, user.id);
@@ -144,18 +157,25 @@ export async function handleConfirmPrimaryFileRequest(
         analysisStatus: "pending",
         analysisProgress,
         analysisRuntime: {
-          state: "active",
-          status: "QUEUED",
-          detail: "后台重分析任务已受理，正在排队或准备执行。",
-          autoRecovered: false,
-          runId: triggerRunId
+          state: dispatchResult.runtime.state,
+          status: dispatchResult.runtime.status,
+          detail:
+            dispatchResult.runtime.state === "unknown"
+              ? "后台重分析任务已受理，系统正在确认这一轮是否已经真正开始执行。"
+              : dispatchResult.autoRecovered
+                ? "第一张后台任务编号已经坏了，系统刚刚已经自动换了一张新的后台编号。"
+                : "后台重分析任务已受理，正在排队或准备执行。",
+          autoRecovered: dispatchResult.autoRecovered,
+          runId: dispatchResult.triggerRunId
         },
         analysis: refreshedTask?.analysisSnapshot ?? task.analysisSnapshot ?? null,
         ruleCard: null,
         outline: null,
         humanize: toSessionTaskHumanizePayload(refreshedTask ?? task),
         primaryRequirementFileId: fileId,
-        message: "主任务文件已确认，系统正在后台重新分析并生成新大纲。"
+        message: dispatchResult.autoRecovered
+          ? "主任务文件已确认。第一张后台任务编号刚刚失效，系统已经自动换了一张新的编号并继续分析。"
+          : "主任务文件已确认，系统正在后台重新分析并生成新大纲。"
       },
       { status: 202 }
     );
@@ -238,7 +258,7 @@ function buildPendingClassification(
 async function enqueueAnalyzeTaskWithTrigger(input: {
   taskId: string;
   userId: string;
-  forcedPrimaryFileId: string;
+  forcedPrimaryFileId?: string | null;
   idempotencyKey: string;
 }) {
   const run = await tasks.trigger(
@@ -246,7 +266,7 @@ async function enqueueAnalyzeTaskWithTrigger(input: {
     {
       taskId: input.taskId,
       userId: input.userId,
-      forcedPrimaryFileId: input.forcedPrimaryFileId
+      forcedPrimaryFileId: input.forcedPrimaryFileId ?? null
     },
     {
       queue: "task-analysis",
@@ -258,10 +278,8 @@ async function enqueueAnalyzeTaskWithTrigger(input: {
   return typeof run?.id === "string" ? run.id : null;
 }
 
-function buildConfirmPrimaryIdempotencyKey(
-  taskId: string,
-  userId: string,
-  fileId: string
-) {
-  return `task-analysis-confirm-primary-${taskId}-${userId}-${fileId}`;
+async function getTriggerRunState(
+  runId: string
+): Promise<{ state: TriggerRunRuntimeState; status: string | null }> {
+  return resolveTriggerRunState(runId);
 }

@@ -287,9 +287,9 @@ async function checkTriggerRuntime() {
     const hasRealRuntimeStatus = statuses.some((status) => status !== "PENDING_VERSION");
     if (!hasRealRuntimeStatus) {
       return {
-        ok: false,
+        ok: true,
         detail:
-          "Trigger Runtime 可访问，但最近记录仍全部是 PENDING_VERSION（任务版本还没部署到生产）。"
+          "Trigger Runtime 可访问，但最近记录全部是旧的坏任务编号。单凭这些旧记录，还不能判断当前生产环境有没有问题。"
       };
     }
 

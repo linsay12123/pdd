@@ -4,6 +4,7 @@ vi.mock("server-only", () => ({}));
 
 import { handleTaskAnalysisStatusRequest } from "../../app/api/tasks/[taskId]/analysis/route";
 import {
+  getTaskSummary,
   resetTaskFileStore,
   resetTaskOutlineStore,
   resetTaskStore,
@@ -264,7 +265,7 @@ describe("task analysis status route", () => {
     expect(String(payload.message)).not.toContain("重试一次上传");
   });
 
-  it("treats pending_version as a stale old run and exposes retry instead of blaming the whole environment", async () => {
+  it("repairs a stale old run into a failed-but-retriable task instead of pretending it is still pending", async () => {
     process.env.TRIGGER_SECRET_KEY = "tr_prod_example";
     process.env.VERCEL_ENV = "production";
 
@@ -295,13 +296,15 @@ describe("task analysis status route", () => {
     const payload = await response.json();
 
     expect(response.status).toBe(200);
-    expect(payload.analysisStatus).toBe("pending");
-    expect(payload.analysisRuntime.state).toBe("pending_version");
+    expect(payload.analysisStatus).toBe("failed");
+    expect(payload.analysisRuntime.state).toBe("not_applicable");
     expect(String(payload.message)).toContain("旧");
     expect(String(payload.message)).toContain("一键重试分析");
     expect(String(payload.message)).not.toContain("重新部署");
     expect(String(payload.message)).not.toContain("生产环境还没准备好");
     expect(payload.analysisProgress.canRetry).toBe(true);
+    expect(getTaskSummary("task-pending-version")?.analysisTriggerRunId).toBeNull();
+    expect(getTaskSummary("task-pending-version")?.analysisErrorMessage).toBe("STALE_TRIGGER_RUN");
   });
 
   it("uses analysis_error_message as the main failed hint even when snapshot warnings are empty", async () => {
