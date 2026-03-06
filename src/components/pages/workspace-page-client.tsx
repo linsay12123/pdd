@@ -633,6 +633,10 @@ export function WorkspacePageClient({ initialQuota }: WorkspacePageClientProps) 
     autoRecovered: false,
     runId: null
   };
+  const showAnalysisRetryButton =
+    analysisStatus === "failed" ||
+    (analysisStatus === "pending" &&
+      (analysisProgress.canRetry || analysisRuntime.state === "pending_version"));
   const hasOutline = outlineSections.length > 0;
   const needsPrimaryFileConfirmation = Boolean(
     analysisStatus === "succeeded" &&
@@ -849,10 +853,10 @@ export function WorkspacePageClient({ initialQuota }: WorkspacePageClientProps) 
                     </p>
                     {analysisRuntime.state === "pending_version" && (
                       <p className="text-xs text-red-200 mt-3">
-                        当前是环境配置问题：后台任务版本还没部署到生产环境，这时点重试不会生效。
+                        这条后台任务编号现在是坏的。只要你已经把后台任务重新部署好了，直接点下面的“一键重试分析”就会换一条新的后台编号。
                       </p>
                     )}
-                    {analysisProgress.canRetry && analysisRuntime.state !== "pending_version" && (
+                    {showAnalysisRetryButton && (
                       <div className="mt-4 flex items-center gap-3">
                         <Button
                           variant="outline"

@@ -52,6 +52,19 @@ type AnalysisRouteDependencies = {
   markAnalysisPending?: typeof markTaskAnalysisPending;
 };
 
+type TriggerRuntimeSnapshot = {
+  state: TriggerRunRuntimeState;
+  status: string | null;
+};
+
+type AutoRecoverPendingAnalysisResult = {
+  attempted: boolean;
+  triggered: boolean;
+  triggerRunId: string | null;
+  runtime: TriggerRuntimeSnapshot;
+  detail: string;
+};
+
 const ANALYSIS_AUTO_RECOVER_AFTER_SECONDS = 2 * 60;
 const ANALYSIS_AUTO_RECOVER_MAX_SECONDS = 10 * 60;
 
@@ -113,13 +126,16 @@ export async function handleTaskAnalysisStatusRequest(
           dependencies
         });
 
-        if (autoRecoverResult.triggered) {
+        if (autoRecoverResult.attempted) {
           analysisRuntime = {
             state: autoRecoverResult.runtime.state,
             status: autoRecoverResult.runtime.status,
-            detail: "检测到上一轮后台分析没有真正启动，系统已自动补提一次分析任务。",
-            autoRecovered: true,
-            runId: autoRecoverResult.triggerRunId
+            detail: autoRecoverResult.detail,
+            autoRecovered: autoRecoverResult.triggered,
+            runId:
+              autoRecoverResult.triggerRunId ??
+              task.analysisTriggerRunId?.trim() ??
+              null
           };
 
           const refreshedTask = await getOwnedTaskSummary(params.taskId, user.id);
@@ -135,6 +151,13 @@ export async function handleTaskAnalysisStatusRequest(
             });
           }
         }
+      }
+
+      if (canRetryPendingVersionImmediately(task, analysisRuntime.state)) {
+        analysisProgress = {
+          ...analysisProgress,
+          canRetry: true
+        };
       }
     }
 
@@ -312,7 +335,7 @@ function mapAnalysisMessage(input: {
   }
 
   if (input.analysisRuntime.state === "pending_version") {
-    return "后台任务版本还没部署到生产环境，当前这轮不会真正执行。请先部署 Trigger 任务版本。";
+    return "这条后台任务编号现在还是坏的。等你把后台任务重新部署好后，直接点“一键重试分析”就行，不用重新上传文件。";
   }
 
   if (input.analysisProgress.canRetry) {
@@ -404,12 +427,12 @@ function canAutoRecoverPendingAnalysis(input: {
     input.progressElapsedSeconds <= ANALYSIS_AUTO_RECOVER_MAX_SECONDS;
   const canRecoverByState =
     input.runtimeState === "terminal" || input.runtimeState === "missing";
+  const shouldRecoverBadPendingVersion = input.runtimeState === "pending_version";
 
   return (
     !hasStarted &&
     !alreadyAutoRecovered &&
-    withinAutoRecoverWindow &&
-    canRecoverByState
+    (shouldRecoverBadPendingVersion || (withinAutoRecoverWindow && canRecoverByState))
   );
 }
 
@@ -422,16 +445,14 @@ async function tryAutoRecoverPendingAnalysis(input: {
   };
   userId: string;
   dependencies: AnalysisRouteDependencies;
-}): Promise<{
-  triggered: boolean;
-  triggerRunId: string | null;
-  runtime: { state: TriggerRunRuntimeState; status: string | null };
-}> {
+}): Promise<AutoRecoverPendingAnalysisResult> {
   if (!process.env.TRIGGER_SECRET_KEY?.trim()) {
     return {
+      attempted: false,
       triggered: false,
       triggerRunId: null,
-      runtime: { state: "unknown", status: null }
+      runtime: { state: "unknown", status: null },
+      detail: "后台任务密钥还没配置好，系统暂时没法自动补提分析。"
     };
   }
 
@@ -442,9 +463,11 @@ async function tryAutoRecoverPendingAnalysis(input: {
   });
   if (invalidTriggerKeyReason === "dev_key_in_production") {
     return {
+      attempted: false,
       triggered: false,
       triggerRunId: null,
-      runtime: { state: "pending_version", status: "INVALID_KEY" }
+      runtime: { state: "pending_version", status: "INVALID_KEY" },
+      detail: "当前使用的还是开发版后台密钥，所以自动补提不会生效。"
     };
   }
 
@@ -461,11 +484,22 @@ async function tryAutoRecoverPendingAnalysis(input: {
 
   if (!triggerRunId) {
     return {
+      attempted: false,
       triggered: false,
       triggerRunId: null,
-      runtime: { state: "unknown", status: null }
+      runtime: { state: "unknown", status: null },
+      detail: "系统刚尝试自动补提分析，但没拿到新的后台任务编号。"
     };
   }
+
+  const freshRuntime = await (input.dependencies.getTriggerRunState ?? getTriggerRunState)(
+    triggerRunId
+  ).catch(
+    (): TriggerRuntimeSnapshot => ({
+      state: "unknown",
+      status: null
+    })
+  );
 
   await (input.dependencies.markAnalysisPending ?? markTaskAnalysisPending)({
     taskId: input.task.id,
@@ -475,10 +509,43 @@ async function tryAutoRecoverPendingAnalysis(input: {
     analysisModel: "analysis_auto_recovered_once"
   }).catch(() => null);
 
+  if (freshRuntime.state === "pending_version") {
+    return {
+      attempted: true,
+      triggered: false,
+      triggerRunId,
+      runtime: freshRuntime,
+      detail:
+        "系统刚刚已经自动换过一次后台任务，但新任务还是显示“版本没部署”。说明现在生产环境还没准备好。"
+    };
+  }
+
   return {
+    attempted: true,
     triggered: true,
     triggerRunId,
-    runtime: { state: "active", status: "QUEUED" }
+    runtime: normalizeFreshEnqueuedRuntime(freshRuntime),
+    detail: "检测到上一轮后台分析没有真正启动，系统已自动换成新的后台任务。"
+  };
+}
+
+function canRetryPendingVersionImmediately(
+  task: { analysisStartedAt?: string | null },
+  runtimeState: AnalysisRuntimePayload["state"]
+) {
+  return !task.analysisStartedAt && runtimeState === "pending_version";
+}
+
+function normalizeFreshEnqueuedRuntime(
+  runtime: TriggerRuntimeSnapshot
+): TriggerRuntimeSnapshot {
+  if (runtime.state === "pending_version") {
+    return runtime;
+  }
+
+  return {
+    state: "active",
+    status: runtime.status ?? "QUEUED"
   };
 }
 

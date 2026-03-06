@@ -24,6 +24,7 @@ describe("analysis retry route", () => {
     process.env.NEXT_PUBLIC_SUPABASE_URL = "";
     process.env.SUPABASE_SERVICE_ROLE_KEY = "";
     process.env.TRIGGER_SECRET_KEY = "trigger-secret";
+    process.env.VERCEL_ENV = "";
     resetTaskStore();
     resetTaskFileStore();
   });
@@ -181,7 +182,7 @@ describe("analysis retry route", () => {
     );
   });
 
-  it("returns 503 when previous run is pending_version and cannot be retried", async () => {
+  it("allows immediate retry when previous run is pending_version but a fresh run can start", async () => {
     saveTaskSummary({
       id: "task-pending-version",
       userId: "user-1",
@@ -190,7 +191,7 @@ describe("analysis retry route", () => {
       citationStyle: null,
       specialRequirements: "",
       analysisStatus: "pending",
-      analysisRequestedAt: new Date(Date.now() - 11 * 60 * 1000).toISOString(),
+      analysisRequestedAt: new Date(Date.now() - 60 * 1000).toISOString(),
       analysisTriggerRunId: "run-pending-version-1"
     });
 
@@ -207,6 +208,10 @@ describe("analysis retry route", () => {
       }
     ]);
 
+    const getTriggerRunState = vi
+      .fn()
+      .mockResolvedValueOnce({ state: "pending_version", status: "PENDING_VERSION" })
+      .mockResolvedValueOnce({ state: "active", status: "QUEUED" });
     const response = await handleTaskAnalysisRetryRequest(
       new Request("http://localhost/api/tasks/task-pending-version/analysis/retry", {
         method: "POST"
@@ -215,14 +220,66 @@ describe("analysis retry route", () => {
       {
         isPersistenceReady: () => true,
         requireUser: async () => makeUser(),
-        getTriggerRunState: async () => ({ state: "pending_version", status: "PENDING_VERSION" }),
-        enqueueTaskAnalysis: async () => "run-should-not-be-used"
+        getTriggerRunState,
+        enqueueTaskAnalysis: async () => "run-retried-from-pending-version"
+      }
+    );
+    const payload = await response.json();
+
+    expect(response.status).toBe(202);
+    expect(payload.analysisStatus).toBe("pending");
+    expect(payload.analysisRuntime.runId).toBe("run-retried-from-pending-version");
+    expect(String(payload.message)).toContain("已重新提交后台分析");
+    expect(getTriggerRunState).toHaveBeenCalledTimes(2);
+  });
+
+  it("returns 503 when a fresh retry run is still pending_version", async () => {
+    saveTaskSummary({
+      id: "task-pending-version-still-bad",
+      userId: "user-1",
+      status: "created",
+      targetWordCount: null,
+      citationStyle: null,
+      specialRequirements: "",
+      analysisStatus: "pending",
+      analysisRequestedAt: new Date(Date.now() - 60 * 1000).toISOString(),
+      analysisTriggerRunId: "run-pending-version-old"
+    });
+
+    saveTaskFileRecords([
+      {
+        id: "file-1",
+        taskId: "task-pending-version-still-bad",
+        userId: "user-1",
+        originalFilename: "brief.txt",
+        storagePath: "tmp/brief.txt",
+        extractedText: "brief",
+        role: "unknown",
+        isPrimary: false
+      }
+    ]);
+
+    const getTriggerRunState = vi
+      .fn()
+      .mockResolvedValueOnce({ state: "pending_version", status: "PENDING_VERSION" })
+      .mockResolvedValueOnce({ state: "pending_version", status: "PENDING_VERSION" });
+    const response = await handleTaskAnalysisRetryRequest(
+      new Request("http://localhost/api/tasks/task-pending-version-still-bad/analysis/retry", {
+        method: "POST"
+      }),
+      { taskId: "task-pending-version-still-bad" },
+      {
+        isPersistenceReady: () => true,
+        requireUser: async () => makeUser(),
+        getTriggerRunState,
+        enqueueTaskAnalysis: async () => "run-pending-version-new"
       }
     );
     const payload = await response.json();
 
     expect(response.status).toBe(503);
-    expect(String(payload.message)).toContain("还没部署");
+    expect(String(payload.message)).toContain("版本没部署");
+    expect(getTriggerRunState).toHaveBeenCalledTimes(2);
   });
 
   it("rejects retry when pending analysis has not timed out", async () => {

@@ -44,6 +44,11 @@ type TaskAnalysisRetryRouteDependencies = {
   enqueueTaskAnalysis?: (input: EnqueueAnalyzeTaskInput) => Promise<string | null>;
 };
 
+type TriggerRuntimeSnapshot = {
+  state: TriggerRunRuntimeState;
+  status: string | null;
+};
+
 export async function handleTaskAnalysisRetryRequest(
   _request: Request,
   params: {
@@ -119,7 +124,14 @@ export async function handleTaskAnalysisRetryRequest(
       startedAt: task.analysisStartedAt ?? null,
       completedAt: task.analysisCompletedAt ?? null
     });
-    const canRetry = currentStatus === "failed" || currentProgress.canRetry;
+    const currentRunId = task.analysisTriggerRunId?.trim();
+    const currentRuntime = currentRunId
+      ? await (dependencies.getTriggerRunState ?? getTriggerRunState)(currentRunId)
+      : null;
+    const canRetry =
+      currentStatus === "failed" ||
+      currentProgress.canRetry ||
+      currentRuntime?.state === "pending_version";
 
     if (!canRetry) {
       return NextResponse.json(
@@ -131,21 +143,8 @@ export async function handleTaskAnalysisRetryRequest(
       );
     }
 
-    const currentRunId = task.analysisTriggerRunId?.trim();
-    if (currentRunId) {
-      const runtime = await (dependencies.getTriggerRunState ?? getTriggerRunState)(currentRunId);
-      if (runtime.state === "pending_version") {
-        return NextResponse.json(
-          {
-            ok: false,
-            message:
-              "后台任务版本还没部署到生产环境，这次重试不会真正执行。请先部署 Trigger 任务版本后再重试。"
-          },
-          { status: 503 }
-        );
-      }
-
-      if (runtime.state === "active") {
+    if (currentRuntime) {
+      if (currentRuntime.state === "active") {
         const activeProgress = buildAnalysisProgressPayload({
           status: "pending",
           requestedAt: task.analysisRequestedAt ?? null,
@@ -171,8 +170,8 @@ export async function handleTaskAnalysisRetryRequest(
               canRetry: false
             },
             analysisRuntime: {
-              state: runtime.state,
-              status: runtime.status,
+              state: currentRuntime.state,
+              status: currentRuntime.status,
               detail: "上一轮后台分析任务还在运行中。",
               autoRecovered: false,
               runId: currentRunId
@@ -201,12 +200,32 @@ export async function handleTaskAnalysisRetryRequest(
       throw new Error("TRIGGER_RUN_ID_MISSING");
     }
 
+    const freshRuntime = await (dependencies.getTriggerRunState ?? getTriggerRunState)(
+      triggerRunId
+    ).catch(
+      (): TriggerRuntimeSnapshot => ({
+        state: "unknown",
+        status: null
+      })
+    );
+
     await markTaskAnalysisPending({
       taskId: params.taskId,
       userId: user.id,
       primaryRequirementFileId: task.primaryRequirementFileId ?? null,
       triggerRunId
     });
+
+    if (freshRuntime.state === "pending_version") {
+      return NextResponse.json(
+        {
+          ok: false,
+          message:
+            "系统刚刚已经重新换了一条后台任务，但新的任务还是显示“版本没部署”。说明现在生产环境还没准备好。"
+        },
+        { status: 503 }
+      );
+    }
 
     const refreshedTask = await getOwnedTaskSummary(params.taskId, user.id);
     const refreshedFiles = await listTaskFilesForWorkflow(params.taskId, user.id);
@@ -232,8 +251,8 @@ export async function handleTaskAnalysisRetryRequest(
         analysisStatus: "pending",
         analysisProgress,
         analysisRuntime: {
-          state: "active",
-          status: "QUEUED",
+          state: normalizeFreshEnqueuedRuntime(freshRuntime).state,
+          status: normalizeFreshEnqueuedRuntime(freshRuntime).status,
           detail: "后台重试任务已受理，正在排队或准备执行。",
           autoRecovered: false,
           runId: triggerRunId
@@ -305,6 +324,19 @@ async function enqueueAnalyzeTaskWithTrigger(input: EnqueueAnalyzeTaskInput) {
   );
 
   return typeof run?.id === "string" ? run.id : null;
+}
+
+function normalizeFreshEnqueuedRuntime(
+  runtime: TriggerRuntimeSnapshot
+): TriggerRuntimeSnapshot {
+  if (runtime.state === "pending_version") {
+    return runtime;
+  }
+
+  return {
+    state: "active",
+    status: runtime.status ?? "QUEUED"
+  };
 }
 
 function buildRetryIdempotencyKey(

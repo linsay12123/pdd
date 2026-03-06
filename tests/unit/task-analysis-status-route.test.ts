@@ -24,6 +24,8 @@ describe("task analysis status route", () => {
   beforeEach(() => {
     process.env.NEXT_PUBLIC_SUPABASE_URL = "";
     process.env.SUPABASE_SERVICE_ROLE_KEY = "";
+    process.env.TRIGGER_SECRET_KEY = "";
+    process.env.VERCEL_ENV = "";
     resetTaskStore();
     resetTaskFileStore();
     resetTaskOutlineStore();
@@ -292,7 +294,58 @@ describe("task analysis status route", () => {
     expect(response.status).toBe(200);
     expect(payload.analysisStatus).toBe("pending");
     expect(payload.analysisRuntime.state).toBe("pending_version");
-    expect(String(payload.message)).toContain("还没部署");
+    expect(String(payload.message)).toContain("重新部署");
+    expect(payload.analysisProgress.canRetry).toBe(true);
+  });
+
+  it("auto-recovers immediately when an old pending_version run can be replaced by a fresh active run", async () => {
+    process.env.TRIGGER_SECRET_KEY = "tr_prod_example";
+    process.env.VERCEL_ENV = "production";
+
+    saveTaskSummary({
+      id: "task-pending-version-auto-recover",
+      userId: "user-1",
+      status: "created",
+      targetWordCount: null,
+      citationStyle: null,
+      specialRequirements: "",
+      analysisStatus: "pending",
+      analysisRequestedAt: new Date(Date.now() - 60 * 1000).toISOString(),
+      analysisTriggerRunId: "run-pending-version-old"
+    });
+
+    const getTriggerRunState = vi
+      .fn()
+      .mockResolvedValueOnce({
+        state: "pending_version",
+        status: "PENDING_VERSION"
+      })
+      .mockResolvedValueOnce({
+        state: "active",
+        status: "QUEUED"
+      });
+    const enqueueTaskAnalysis = vi.fn(async () => "run-pending-version-recovered");
+
+    const response = await handleTaskAnalysisStatusRequest(
+      new Request("http://localhost/api/tasks/task-pending-version-auto-recover/analysis"),
+      { taskId: "task-pending-version-auto-recover" },
+      {
+        isPersistenceReady: () => true,
+        requireUser: async () => makeUser(),
+        getTriggerRunState,
+        enqueueTaskAnalysis
+      }
+    );
+    const payload = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(payload.analysisStatus).toBe("pending");
+    expect(payload.analysisRuntime.state).toBe("active");
+    expect(payload.analysisRuntime.autoRecovered).toBe(true);
+    expect(payload.analysisRuntime.runId).toBe("run-pending-version-recovered");
+    expect(String(payload.message)).toContain("自动补提一次分析任务");
+    expect(enqueueTaskAnalysis).toHaveBeenCalledTimes(1);
+    expect(getTriggerRunState).toHaveBeenCalledTimes(2);
   });
 
   it("auto-recovers once when run ended early but task never started", async () => {
