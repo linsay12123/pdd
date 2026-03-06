@@ -1,6 +1,7 @@
 export const STALE_TRIGGER_RUN_REASON = "STALE_TRIGGER_RUN";
 export const TRIGGER_RUNTIME_UNAVAILABLE_REASON = "TRIGGER_RUNTIME_UNAVAILABLE";
 export const TRIGGER_STARTUP_STALLED_REASON = "TRIGGER_STARTUP_STALLED";
+export const TRIGGER_DEPLOYMENT_UNAVAILABLE_REASON = "TRIGGER_DEPLOYMENT_UNAVAILABLE";
 
 const LEGACY_ANALYSIS_MODEL_MARKER = "analysis_auto_recovered_once";
 const DEFAULT_ANALYSIS_MODEL = "gpt-5.2";
@@ -35,6 +36,7 @@ export function buildStaleTriggerRunRepairPatch(input: {
 export function shouldClearBrokenTriggerRun(reason: string) {
   return (
     reason === STALE_TRIGGER_RUN_REASON ||
+    reason === TRIGGER_DEPLOYMENT_UNAVAILABLE_REASON ||
     reason === TRIGGER_RUNTIME_UNAVAILABLE_REASON ||
     reason === TRIGGER_STARTUP_STALLED_REASON
   );

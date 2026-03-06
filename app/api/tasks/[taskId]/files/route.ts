@@ -20,6 +20,7 @@ import {
   resolveTriggerRunState,
   type TriggerRunRuntimeState
 } from "@/src/lib/trigger/run-state";
+import { TRIGGER_DEPLOYMENT_UNAVAILABLE_REASON } from "@/src/lib/tasks/analysis-runtime-cleanup";
 import type { TaskWorkflowClassificationPayload } from "@/src/lib/tasks/request-task-file-upload";
 import {
   toSessionTaskHumanizePayload,
@@ -286,7 +287,9 @@ export async function handleTaskFileUploadRequest(
         {
           ok: false,
           message:
-            "文件已经收到了，但系统刚发出的后台分析任务连续两次都没真正启动起来。说明当前线上后台环境有问题，请稍后再试。"
+            dispatchResult.reason === TRIGGER_DEPLOYMENT_UNAVAILABLE_REASON
+              ? "文件已经收到了，但后台环境里的分析版本当前还没准备好，所以这次不能真正开工。请先把后台发布完成，再重新分析。"
+              : "文件已经收到了，但系统刚发出的后台分析任务连续两次都没真正启动起来。说明当前线上后台环境有问题，请稍后再试。"
         },
         { status: 503 }
       );
@@ -317,8 +320,6 @@ export async function handleTaskFileUploadRequest(
           detail:
             dispatchResult.runtime.state === "unknown"
               ? "后台任务已受理，系统正在确认这一轮是否已经真正开始执行。"
-              : dispatchResult.runtime.state === "pending_version"
-                ? "后台任务已受理，这一轮正在启动中。"
               : dispatchResult.autoRecovered
                 ? "第一张后台任务编号没有真正启动，系统刚刚已经自动换了一张新的后台编号。"
                 : "后台任务已受理，正在排队或准备执行。",

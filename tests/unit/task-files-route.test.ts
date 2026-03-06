@@ -186,7 +186,7 @@ describe("task file async analysis routes", () => {
     expect(listTaskFiles("task-1")).toHaveLength(1);
   });
 
-  it("treats pending_version as normal startup and keeps the first fresh upload run", async () => {
+  it("returns 503 when a fresh upload stays stuck in pending_version during startup confirmation", async () => {
     saveTaskSummary({
       id: "task-upload-starting",
       userId: "user-1",
@@ -222,13 +222,60 @@ describe("task file async analysis routes", () => {
     );
     const payload = await response.json();
 
+    expect(response.status).toBe(503);
+    expect(String(payload.message)).toContain("后台环境");
+    expect(enqueueTaskAnalysis).toHaveBeenCalledTimes(1);
+    expect(getTriggerRunState).toHaveBeenCalledTimes(4);
+    expect(getTaskSummary("task-upload-starting")?.analysisStatus).toBe("failed");
+    expect(getTaskSummary("task-upload-starting")?.analysisErrorMessage).toBe(
+      "TRIGGER_DEPLOYMENT_UNAVAILABLE"
+    );
+  });
+
+  it("keeps probing startup when pending_version later turns into active", async () => {
+    saveTaskSummary({
+      id: "task-upload-waits-for-active",
+      userId: "user-1",
+      status: "created",
+      targetWordCount: null,
+      citationStyle: null,
+      specialRequirements: ""
+    });
+
+    const formData = new FormData();
+    formData.append(
+      "files",
+      new File(["Assignment brief text."], "assignment.txt", { type: "text/plain" })
+    );
+
+    const enqueueTaskAnalysis = vi.fn().mockResolvedValueOnce("run-upload-waits-for-active-0");
+    const getTriggerRunState = vi
+      .fn()
+      .mockResolvedValueOnce({ state: "pending_version", status: "PENDING_VERSION" })
+      .mockResolvedValueOnce({ state: "active", status: "QUEUED" });
+
+    const response = await handleTaskFileUploadRequest(
+      new Request("http://localhost/api/tasks/task-upload-waits-for-active/files", {
+        method: "POST",
+        body: formData
+      }),
+      { taskId: "task-upload-waits-for-active" },
+      {
+        isPersistenceReady: () => true,
+        requireUser: async () => makeUser(),
+        enqueueTaskAnalysis,
+        getTriggerRunState,
+        startupProbeAttempts: 2
+      } as never
+    );
+    const payload = await response.json();
+
     expect(response.status).toBe(202);
     expect(payload.analysisStatus).toBe("pending");
-    expect(payload.analysisRuntime.runId).toBe("run-upload-pending-version-0");
-    expect(payload.analysisRuntime.autoRecovered).toBe(false);
+    expect(payload.analysisRuntime.runId).toBe("run-upload-waits-for-active-0");
     expect(enqueueTaskAnalysis).toHaveBeenCalledTimes(1);
-    expect(getTriggerRunState).toHaveBeenCalledTimes(1);
-    expect(getTaskSummary("task-upload-starting")?.analysisRetryCount).toBe(0);
+    expect(getTriggerRunState).toHaveBeenCalledTimes(2);
+    expect(getTaskSummary("task-upload-waits-for-active")?.analysisStatus).toBe("pending");
   });
 
   it("fails fast only when startup confirmation never sees an accepted runtime state", async () => {
@@ -425,7 +472,7 @@ describe("task file async analysis routes", () => {
     expect(getTaskSummary("task-4")?.primaryRequirementFileId).toBe(chosenFileId);
   });
 
-  it("treats pending_version as normal startup when confirm-primary launches a fresh run", async () => {
+  it("returns 503 when confirm-primary stays stuck in pending_version during startup confirmation", async () => {
     saveTaskSummary({
       id: "task-confirm-starting",
       userId: "user-1",
@@ -473,12 +520,13 @@ describe("task file async analysis routes", () => {
     );
     const payload = await response.json();
 
-    expect(response.status).toBe(202);
-    expect(payload.analysisStatus).toBe("pending");
-    expect(payload.analysisRuntime.runId).toBe("run-confirm-pending-version-0");
-    expect(payload.analysisRuntime.autoRecovered).toBe(false);
+    expect(response.status).toBe(503);
+    expect(String(payload.message)).toContain("后台环境");
     expect(enqueueTaskAnalysis).toHaveBeenCalledTimes(1);
-    expect(getTaskSummary("task-confirm-starting")?.analysisRetryCount).toBe(1);
+    expect(getTaskSummary("task-confirm-starting")?.analysisStatus).toBe("failed");
+    expect(getTaskSummary("task-confirm-starting")?.analysisErrorMessage).toBe(
+      "TRIGGER_DEPLOYMENT_UNAVAILABLE"
+    );
   });
 
   it("returns 502 when trigger does not return run id", async () => {

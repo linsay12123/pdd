@@ -30,6 +30,7 @@ type HealthDiagnosticsDependencies = {
   runtimeEnv?: typeof env;
   createClient?: typeof createSupabaseAdminClient;
   checkTriggerRuntime?: () => Promise<{ ok: boolean; detail: string }>;
+  checkTriggerDeploymentReady?: () => Promise<{ ok: boolean; detail: string }>;
 };
 
 export async function runHealthDiagnostics(
@@ -77,6 +78,11 @@ export async function runHealthDiagnostics(
   checks.TRIGGER_RUNTIME = checks.TRIGGER_SECRET_KEY.ok
     ? await (dependencies.checkTriggerRuntime ?? checkTriggerRuntime)()
     : { ok: false, detail: "跳过 — TRIGGER_SECRET_KEY 未就绪" };
+
+  checks.TRIGGER_DEPLOYMENT_READY =
+    checks.TRIGGER_SECRET_KEY.ok && checks.TRIGGER_RUNTIME.ok
+      ? await (dependencies.checkTriggerDeploymentReady ?? checkTriggerDeploymentReady)()
+      : { ok: false, detail: "跳过 — Trigger Runtime 未就绪" };
 
   if (runtimeEnv.NEXT_PUBLIC_SUPABASE_URL && runtimeEnv.SUPABASE_SERVICE_ROLE_KEY) {
     try {
@@ -221,6 +227,7 @@ export async function runHealthDiagnostics(
     "UNDETECTABLE_API_KEY",
     "TRIGGER_SECRET_KEY",
     "TRIGGER_RUNTIME",
+    "TRIGGER_DEPLOYMENT_READY",
     "SUPABASE_DB_CONNECTION",
     "DB_TABLES",
     "DB_SCHEMA_COMPAT",
@@ -279,17 +286,7 @@ async function checkTriggerRuntime() {
     if (items.length === 0) {
       return {
         ok: false,
-        detail:
-          "Trigger Runtime 可访问，但还没有 analyze-uploaded-task 的运行记录，暂时无法确认任务版本是否已部署。"
-      };
-    }
-
-    const hasRealRuntimeStatus = statuses.some((status) => status !== "PENDING_VERSION");
-    if (!hasRealRuntimeStatus) {
-      return {
-        ok: true,
-        detail:
-          "Trigger Runtime 可访问，但最近记录全部是旧的坏任务编号。单凭这些旧记录，还不能判断当前生产环境有没有问题。"
+        detail: "Trigger Runtime 可访问，但还没有 analyze-uploaded-task 的运行记录。"
       };
     }
 
@@ -304,6 +301,52 @@ async function checkTriggerRuntime() {
       detail: `Trigger Runtime API 检查失败：${
         error instanceof Error ? error.message : String(error)
       }`
+    };
+  }
+}
+
+async function checkTriggerDeploymentReady() {
+  try {
+    const page = await runs.list({
+      limit: 20,
+      taskIdentifier: "analyze-uploaded-task"
+    });
+    const items = Array.isArray((page as { data?: unknown[] } | null | undefined)?.data)
+      ? ((page as { data: unknown[] }).data)
+      : [];
+    const statuses = items
+      .map((item) => {
+        const status = (item as { status?: unknown } | null | undefined)?.status;
+        return typeof status === "string" ? status : null;
+      })
+      .filter((status): status is string => Boolean(status));
+
+    if (items.length === 0) {
+      return {
+        ok: false,
+        detail:
+          "还没有可用的 analyze-uploaded-task 运行记录，暂时不能确认后台分析版本是否已就绪。"
+      };
+    }
+
+    const hasReadyStatus = statuses.some((status) => status !== "PENDING_VERSION");
+    if (!hasReadyStatus) {
+      return {
+        ok: false,
+        detail:
+          "最近的 analyze-uploaded-task 记录全部停在 PENDING_VERSION，说明后台分析版本当前还没真正接上生产环境。"
+      };
+    }
+
+    const latestReadyStatus = statuses.find((status) => status !== "PENDING_VERSION") ?? "unknown";
+    return {
+      ok: true,
+      detail: `后台分析版本已接上生产环境，最近有效状态：${latestReadyStatus}。`
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      detail: `后台分析版本检查失败：${error instanceof Error ? error.message : String(error)}`
     };
   }
 }

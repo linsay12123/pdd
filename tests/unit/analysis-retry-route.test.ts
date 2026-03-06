@@ -281,7 +281,7 @@ describe("analysis retry route", () => {
     expect(String(payload.message)).toContain("还在处理中");
   });
 
-  it("accepts retry when analysis already failed", async () => {
+  it("returns 503 when a failed task retries but the new run never gets past pending_version", async () => {
     saveTaskSummary({
       id: "task-failed",
       userId: "user-1",
@@ -326,12 +326,69 @@ describe("analysis retry route", () => {
     );
     const payload = await response.json();
 
+    expect(response.status).toBe(503);
+    expect(String(payload.message)).toContain("后台分析版本");
+    expect(getTaskSummary("task-failed")?.analysisRetryCount).toBe(1);
+    expect(getTaskSummary("task-failed")?.analysisErrorMessage).toBe(
+      "TRIGGER_DEPLOYMENT_UNAVAILABLE"
+    );
+    expect(getTaskSummary("task-failed")?.analysisModel).toBe("gpt-5.2");
+  });
+
+  it("accepts retry only after pending_version becomes active during startup confirmation", async () => {
+    saveTaskSummary({
+      id: "task-failed-active-after-pending-version",
+      userId: "user-1",
+      status: "created",
+      targetWordCount: null,
+      citationStyle: null,
+      specialRequirements: "",
+      analysisStatus: "failed",
+      analysisModel: "gpt-5.2",
+      analysisRetryCount: 0,
+      analysisErrorMessage: "MODEL_ANALYSIS_TIMEOUT"
+    });
+
+    saveTaskFileRecords([
+      {
+        id: "file-1",
+        taskId: "task-failed-active-after-pending-version",
+        userId: "user-1",
+        originalFilename: "brief.txt",
+        storagePath: "tmp/brief.txt",
+        extractedText: "brief",
+        role: "unknown",
+        isPrimary: false
+      }
+    ]);
+
+    const getTriggerRunState = vi
+      .fn()
+      .mockResolvedValueOnce({ state: "pending_version", status: "PENDING_VERSION" })
+      .mockResolvedValueOnce({ state: "active", status: "QUEUED" });
+    const response = await handleTaskAnalysisRetryRequest(
+      new Request(
+        "http://localhost/api/tasks/task-failed-active-after-pending-version/analysis/retry",
+        {
+          method: "POST"
+        }
+      ),
+      { taskId: "task-failed-active-after-pending-version" },
+      {
+        isPersistenceReady: () => true,
+        requireUser: async () => makeUser(),
+        getTriggerRunState,
+        enqueueTaskAnalysis: async () => "run-3",
+        startupProbeAttempts: 2
+      }
+    );
+    const payload = await response.json();
+
     expect(response.status).toBe(202);
     expect(payload.analysisStatus).toBe("pending");
     expect(payload.analysisRuntime.runId).toBe("run-3");
-    expect(getTaskSummary("task-failed")?.analysisRetryCount).toBe(1);
-    expect(getTaskSummary("task-failed")?.analysisErrorMessage).toBeNull();
-    expect(getTaskSummary("task-failed")?.analysisModel).toBe("gpt-5.2");
+    expect(getTaskSummary("task-failed-active-after-pending-version")?.analysisRetryCount).toBe(1);
+    expect(getTaskSummary("task-failed-active-after-pending-version")?.analysisErrorMessage).toBeNull();
   });
 
   it("returns 503 when a failed task retries but startup confirmation never reaches a valid state", async () => {

@@ -240,6 +240,7 @@ export async function markTaskAnalysisFailed(input: {
   taskId: string;
   userId: string;
   reason: string;
+  analysisRetryCount?: number;
 }) {
   if (shouldUseSupabasePersistence()) {
     return markTaskAnalysisFailedWithSupabase(input);
@@ -726,6 +727,7 @@ async function markTaskAnalysisFailedLocally(input: {
   taskId: string;
   userId: string;
   reason: string;
+  analysisRetryCount?: number;
 }) {
   const task = getTaskSummary(input.taskId);
   if (!task || task.userId !== input.userId) {
@@ -739,6 +741,7 @@ async function markTaskAnalysisFailedLocally(input: {
   const clearBrokenRun = shouldClearBrokenTriggerRun(input.reason);
   return patchTaskSummary(input.taskId, {
     analysisStatus: "failed",
+    analysisRetryCount: input.analysisRetryCount ?? task.analysisRetryCount,
     analysisModel:
       clearBrokenRun
         ? stalePatch.analysisModel
@@ -770,6 +773,7 @@ async function markTaskAnalysisFailedWithSupabase(input: {
   taskId: string;
   userId: string;
   reason: string;
+  analysisRetryCount?: number;
 }) {
   const client = createSupabaseAdminClient();
   const ownedTask = await getOwnedTaskSummary(input.taskId, input.userId);
@@ -792,6 +796,7 @@ async function markTaskAnalysisFailedWithSupabase(input: {
     .from("writing_tasks")
     .update({
       analysis_status: "failed",
+      analysis_retry_count: input.analysisRetryCount ?? ownedTask?.analysisRetryCount ?? 0,
       analysis_model:
         clearBrokenRun
           ? stalePatch.analysisModel

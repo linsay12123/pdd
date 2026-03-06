@@ -114,7 +114,7 @@ describe("health diagnostics", () => {
     expect(diagnostics.checks.DB_LEGACY_STRUCTURES.ok).toBe(true);
   });
 
-  it("does not blame the current production environment just because recent runs are all old pending_version records", async () => {
+  it("reports unhealthy when recent analyze-uploaded-task runs are all pending_version", async () => {
     fromMock.mockImplementation((table: string) => ({
       select: () => ({
         limit: async () => ({
@@ -157,8 +157,9 @@ describe("health diagnostics", () => {
     );
     const diagnostics = await runHealthDiagnostics();
 
+    expect(diagnostics.httpStatus).toBe(503);
     expect(diagnostics.checks.TRIGGER_RUNTIME.ok).toBe(true);
-    expect(diagnostics.checks.TRIGGER_RUNTIME.detail).toContain("旧");
-    expect(diagnostics.checks.TRIGGER_RUNTIME.detail).not.toContain("还没部署到生产");
+    expect(diagnostics.checks.TRIGGER_DEPLOYMENT_READY.ok).toBe(false);
+    expect(diagnostics.checks.TRIGGER_DEPLOYMENT_READY.detail).toContain("版本");
   });
 });

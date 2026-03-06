@@ -22,6 +22,7 @@ import type { TaskAnalysisSnapshot } from "@/src/types/tasks";
 import type { SessionUser } from "@/src/types/auth";
 import {
   STALE_TRIGGER_RUN_REASON,
+  TRIGGER_DEPLOYMENT_UNAVAILABLE_REASON,
   TRIGGER_STARTUP_STALLED_REASON
 } from "@/src/lib/tasks/analysis-runtime-cleanup";
 import {
@@ -100,10 +101,14 @@ export async function handleTaskAnalysisStatusRequest(
       analysisRuntime = await resolveAnalysisRuntime(task, dependencies);
 
       if (shouldFailStalledStartup(task, analysisRuntime.state)) {
+        const failureReason =
+          analysisRuntime.state === "pending_version"
+            ? TRIGGER_DEPLOYMENT_UNAVAILABLE_REASON
+            : TRIGGER_STARTUP_STALLED_REASON;
         await (dependencies.markTaskAnalysisFailed ?? markTaskAnalysisFailed)({
           taskId: params.taskId,
           userId: user.id,
-          reason: TRIGGER_STARTUP_STALLED_REASON
+          reason: failureReason
         });
 
         task = (await getOwnedTaskSummary(params.taskId, user.id)) ?? task;
@@ -270,6 +275,10 @@ function mapAnalysisFailureMessage(input: {
 
   if (code === STALE_TRIGGER_RUN_REASON) {
     return "这条旧的后台任务编号已经坏了。请直接点“一键重试分析”，系统会换一条新的后台任务编号，不用重新上传文件。";
+  }
+
+  if (code === TRIGGER_DEPLOYMENT_UNAVAILABLE_REASON) {
+    return "后台分析版本当前没准备好，这次不是你的文件问题。等后台发布完成后，再重新分析。";
   }
 
   if (code === TRIGGER_STARTUP_STALLED_REASON) {

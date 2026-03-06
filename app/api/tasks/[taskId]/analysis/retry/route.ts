@@ -22,6 +22,7 @@ import {
   resolveTriggerRunState,
   type TriggerRunRuntimeState
 } from "@/src/lib/trigger/run-state";
+import { TRIGGER_DEPLOYMENT_UNAVAILABLE_REASON } from "@/src/lib/tasks/analysis-runtime-cleanup";
 import type { SessionUser } from "@/src/types/auth";
 
 type RouteContext = {
@@ -205,7 +206,9 @@ export async function handleTaskAnalysisRetryRequest(
         {
           ok: false,
           message:
-            "系统刚刚已经重新换了一条新的后台任务，但新的任务还是没真正启动起来。说明当前线上后台环境确实有问题。"
+            dispatchResult.reason === TRIGGER_DEPLOYMENT_UNAVAILABLE_REASON
+              ? "后台分析版本当前还没准备好，所以这次重新分析也没法真正开工。请先把后台发布完成，再重试。"
+              : "系统刚刚已经重新换了一条新的后台任务，但新的任务还是没真正启动起来。说明当前线上后台环境确实有问题。"
         },
         { status: 503 }
       );
@@ -240,10 +243,8 @@ export async function handleTaskAnalysisRetryRequest(
           detail:
             dispatchResult.runtime.state === "unknown"
               ? "后台重试任务已受理，系统正在确认这一轮是否已经真正开始执行。"
-              : dispatchResult.runtime.state === "pending_version"
-                ? "后台重试任务已受理，这一轮正在启动中。"
-                : dispatchResult.autoRecovered
-                  ? "第一张后台任务编号没有真正启动，系统刚刚已经自动换了一张新的后台编号。"
+              : dispatchResult.autoRecovered
+                ? "第一张后台任务编号没有真正启动，系统刚刚已经自动换了一张新的后台编号。"
                 : "后台重试任务已受理，正在排队或准备执行。",
           autoRecovered: dispatchResult.autoRecovered,
           runId: dispatchResult.triggerRunId

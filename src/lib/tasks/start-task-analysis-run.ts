@@ -1,6 +1,7 @@
 import type { TriggerRunRuntimeState } from "@/src/lib/trigger/run-state";
 import {
   normalizeAnalysisModel,
+  TRIGGER_DEPLOYMENT_UNAVAILABLE_REASON,
   TRIGGER_RUNTIME_UNAVAILABLE_REASON
 } from "@/src/lib/tasks/analysis-runtime-cleanup";
 import type { TaskSummary } from "@/src/types/tasks";
@@ -36,6 +37,7 @@ type StartTaskAnalysisRunInput = {
     taskId: string;
     userId: string;
     reason: string;
+    analysisRetryCount?: number;
   }) => Promise<unknown>;
   startupProbeAttempts?: number;
   startupProbeDelayMs?: number;
@@ -65,7 +67,6 @@ export async function startTaskAnalysisRun(
   input: StartTaskAnalysisRunInput
 ): Promise<StartTaskAnalysisRunResult> {
   const analysisModel = normalizeAnalysisModel(input.task.analysisModel ?? "gpt-5.2");
-  const startingRetryCount = Number(input.task.analysisRetryCount ?? 0);
   const firstAttemptRetryCount = computeFirstAttemptRetryCount(input.task, input.source);
 
   const firstAttempt = await enqueueAndInspectRun({
@@ -95,6 +96,25 @@ export async function startTaskAnalysisRun(
       ok: true,
       triggerRunId: firstAttempt.triggerRunId,
       runtime: normalizeAcceptedRuntime(firstAttempt.runtime),
+      autoRecovered: false,
+      analysisRetryCount: firstAttemptRetryCount,
+      analysisModel
+    };
+  }
+
+  if (firstAttempt.reason === TRIGGER_DEPLOYMENT_UNAVAILABLE_REASON) {
+    await input.markTaskAnalysisFailed({
+      taskId: input.task.id,
+      userId: input.userId,
+      reason: firstAttempt.reason,
+      analysisRetryCount: firstAttemptRetryCount
+    });
+
+    return {
+      ok: false,
+      reason: firstAttempt.reason,
+      triggerRunId: firstAttempt.triggerRunId,
+      runtime: firstAttempt.runtime,
       autoRecovered: false,
       analysisRetryCount: firstAttemptRetryCount,
       analysisModel
@@ -138,12 +158,13 @@ export async function startTaskAnalysisRun(
   await input.markTaskAnalysisFailed({
     taskId: input.task.id,
     userId: input.userId,
-    reason: TRIGGER_RUNTIME_UNAVAILABLE_REASON
+    reason: recoveredAttempt.reason ?? TRIGGER_RUNTIME_UNAVAILABLE_REASON,
+    analysisRetryCount: recoveredRetryCount
   });
 
   return {
     ok: false,
-    reason: TRIGGER_RUNTIME_UNAVAILABLE_REASON,
+    reason: recoveredAttempt.reason ?? TRIGGER_RUNTIME_UNAVAILABLE_REASON,
     triggerRunId: recoveredAttempt.triggerRunId,
     runtime: recoveredAttempt.runtime,
     autoRecovered: true,
@@ -207,7 +228,8 @@ async function enqueueAndInspectRun(input: {
   return {
     triggerRunId,
     runtime: normalizeRuntimeSnapshot(runtime.runtime),
-    accepted: runtime.accepted
+    accepted: runtime.accepted,
+    reason: runtime.reason
   };
 }
 
@@ -229,10 +251,6 @@ function sanitizeKeyPart(value: string) {
 }
 
 function normalizeAcceptedRuntime(runtime: TriggerRuntimeSnapshot): TriggerRuntimeSnapshot {
-  if (runtime.state === "pending_version") {
-    return runtime;
-  }
-
   return {
     state: "active",
     status: runtime.status ?? "QUEUED"
@@ -267,7 +285,11 @@ async function confirmRunStartup(input: {
   startupProbeAttempts?: number;
   startupProbeDelayMs?: number;
   sleepImpl?: (ms: number) => Promise<void>;
-}): Promise<{ accepted: boolean; runtime: TriggerRuntimeSnapshot }> {
+}): Promise<{
+  accepted: boolean;
+  runtime: TriggerRuntimeSnapshot;
+  reason: string | null;
+}> {
   const attempts =
     Number.isFinite(input.startupProbeAttempts) && (input.startupProbeAttempts ?? 0) > 0
       ? Number(input.startupProbeAttempts)
@@ -286,18 +308,25 @@ async function confirmRunStartup(input: {
   };
 
   for (let index = 0; index < attempts; index += 1) {
-    const runtime = await input.getTriggerRunState(input.runId).catch(
+    const runtime = await Promise.resolve(input.getTriggerRunState(input.runId)).catch(
       (): TriggerRuntimeSnapshot => ({
         state: "unknown",
         status: null
       })
     );
-    lastRuntime = normalizeRuntimeSnapshot(runtime);
+    const normalizedRuntime = normalizeRuntimeSnapshot(runtime);
+
+    // 一旦已经看到 Trigger 明确返回过 pending_version，就不要让后续的 unknown
+    // 把这条线索冲掉，否则会把“版本没就绪”误判成“普通未知异常”。
+    if (!(normalizedRuntime.state === "unknown" && lastRuntime.state === "pending_version")) {
+      lastRuntime = normalizedRuntime;
+    }
 
     if (isAcceptedStartupState(lastRuntime.state)) {
       return {
         accepted: true,
-        runtime: lastRuntime
+        runtime: lastRuntime,
+        reason: null
       };
     }
 
@@ -308,12 +337,16 @@ async function confirmRunStartup(input: {
 
   return {
     accepted: false,
-    runtime: lastRuntime
+    runtime: lastRuntime,
+    reason:
+      lastRuntime.state === "pending_version"
+        ? TRIGGER_DEPLOYMENT_UNAVAILABLE_REASON
+        : TRIGGER_RUNTIME_UNAVAILABLE_REASON
   };
 }
 
 function isAcceptedStartupState(state: TriggerRunRuntimeState) {
-  return state === "active" || state === "pending_version";
+  return state === "active";
 }
 
 function sleep(ms: number) {
