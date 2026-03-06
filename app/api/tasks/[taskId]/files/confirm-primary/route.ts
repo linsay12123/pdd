@@ -16,7 +16,6 @@ import {
   resolveTriggerRunState,
   type TriggerRunRuntimeState
 } from "@/src/lib/trigger/run-state";
-import { TRIGGER_DEPLOYMENT_UNAVAILABLE_REASON } from "@/src/lib/tasks/analysis-runtime-cleanup";
 import {
   toSessionTaskHumanizePayload,
   toSessionTaskPayload
@@ -140,9 +139,7 @@ export async function handleConfirmPrimaryFileRequest(
         {
           ok: false,
           message:
-            dispatchResult.reason === TRIGGER_DEPLOYMENT_UNAVAILABLE_REASON
-              ? "你已经确认了主任务文件，但后台环境里的分析版本当前还没准备好，所以这次不能真正开工。请先把后台发布完成，再重新分析。"
-              : "你已经确认了主任务文件，但系统刚发出的后台分析任务连续两次都没真正启动起来。说明当前线上后台环境有问题，请稍后再试。"
+            "你已经确认了主任务文件，但系统刚发出的后台分析任务连续两次都没真正启动起来。说明当前线上后台环境有问题，请稍后再试。"
         },
         { status: 503 }
       );

@@ -304,7 +304,7 @@ describe("task analysis status route", () => {
     expect(getTaskSummary("task-pending-version")?.analysisErrorMessage).toBeUndefined();
   });
 
-  it("marks deployment unavailable after the grace window when pending_version still never really starts", async () => {
+  it("marks startup stalled after the grace window when pending_version still never really starts", async () => {
     process.env.TRIGGER_SECRET_KEY = "tr_prod_example";
     process.env.VERCEL_ENV = "production";
 
@@ -337,11 +337,11 @@ describe("task analysis status route", () => {
     expect(response.status).toBe(200);
     expect(payload.analysisStatus).toBe("failed");
     expect(payload.analysisRuntime.state).toBe("not_applicable");
-    expect(String(payload.message)).toContain("后台分析版本当前没准备好");
+    expect(String(payload.message)).toContain("后台分析没有真正启动成功");
     expect(payload.analysisProgress.canRetry).toBe(true);
     expect(getTaskSummary("task-pending-version-stalled")?.analysisTriggerRunId).toBeNull();
     expect(getTaskSummary("task-pending-version-stalled")?.analysisErrorMessage).toBe(
-      "TRIGGER_DEPLOYMENT_UNAVAILABLE"
+      "TRIGGER_STARTUP_STALLED"
     );
   });
 

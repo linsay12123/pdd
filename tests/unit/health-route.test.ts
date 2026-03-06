@@ -114,7 +114,7 @@ describe("health diagnostics", () => {
     expect(diagnostics.checks.DB_LEGACY_STRUCTURES.ok).toBe(true);
   });
 
-  it("reports unhealthy when recent analyze-uploaded-task runs are all pending_version", async () => {
+  it("keeps runtime healthy even when recent runs are still pending_version", async () => {
     fromMock.mockImplementation((table: string) => ({
       select: () => ({
         limit: async () => ({
@@ -157,9 +157,8 @@ describe("health diagnostics", () => {
     );
     const diagnostics = await runHealthDiagnostics();
 
-    expect(diagnostics.httpStatus).toBe(503);
+    expect(diagnostics.httpStatus).toBe(200);
     expect(diagnostics.checks.TRIGGER_RUNTIME.ok).toBe(true);
-    expect(diagnostics.checks.TRIGGER_DEPLOYMENT_READY.ok).toBe(false);
-    expect(diagnostics.checks.TRIGGER_DEPLOYMENT_READY.detail).toContain("版本");
+    expect("TRIGGER_CURRENT_DEPLOYMENT_READY" in diagnostics.checks).toBe(false);
   });
 });

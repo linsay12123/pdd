@@ -281,7 +281,7 @@ describe("analysis retry route", () => {
     expect(String(payload.message)).toContain("还在处理中");
   });
 
-  it("returns 503 when a failed task retries but the new run never gets past pending_version", async () => {
+  it("keeps retry pending when the new run is still pending_version", async () => {
     saveTaskSummary({
       id: "task-failed",
       userId: "user-1",
@@ -326,12 +326,10 @@ describe("analysis retry route", () => {
     );
     const payload = await response.json();
 
-    expect(response.status).toBe(503);
-    expect(String(payload.message)).toContain("后台分析版本");
+    expect(response.status).toBe(202);
+    expect(String(payload.message)).toContain("已重新提交后台分析");
     expect(getTaskSummary("task-failed")?.analysisRetryCount).toBe(1);
-    expect(getTaskSummary("task-failed")?.analysisErrorMessage).toBe(
-      "TRIGGER_DEPLOYMENT_UNAVAILABLE"
-    );
+    expect(getTaskSummary("task-failed")?.analysisErrorMessage).toBeNull();
     expect(getTaskSummary("task-failed")?.analysisModel).toBe("gpt-5.2");
   });
 
@@ -488,4 +486,5 @@ describe("analysis retry route", () => {
     expect(response.status).toBe(502);
     expect(String(payload.message)).toContain("后台重试任务启动失败");
   });
+
 });

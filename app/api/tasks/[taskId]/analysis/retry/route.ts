@@ -22,7 +22,6 @@ import {
   resolveTriggerRunState,
   type TriggerRunRuntimeState
 } from "@/src/lib/trigger/run-state";
-import { TRIGGER_DEPLOYMENT_UNAVAILABLE_REASON } from "@/src/lib/tasks/analysis-runtime-cleanup";
 import type { SessionUser } from "@/src/types/auth";
 
 type RouteContext = {
@@ -206,9 +205,7 @@ export async function handleTaskAnalysisRetryRequest(
         {
           ok: false,
           message:
-            dispatchResult.reason === TRIGGER_DEPLOYMENT_UNAVAILABLE_REASON
-              ? "后台分析版本当前还没准备好，所以这次重新分析也没法真正开工。请先把后台发布完成，再重试。"
-              : "系统刚刚已经重新换了一条新的后台任务，但新的任务还是没真正启动起来。说明当前线上后台环境确实有问题。"
+            "系统刚刚已经重新换了一条新的后台任务，但新的任务还是没真正启动起来。说明当前线上后台环境确实有问题。"
         },
         { status: 503 }
       );

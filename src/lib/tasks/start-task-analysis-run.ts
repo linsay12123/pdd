@@ -1,7 +1,6 @@
 import type { TriggerRunRuntimeState } from "@/src/lib/trigger/run-state";
 import {
   normalizeAnalysisModel,
-  TRIGGER_DEPLOYMENT_UNAVAILABLE_REASON,
   TRIGGER_RUNTIME_UNAVAILABLE_REASON
 } from "@/src/lib/tasks/analysis-runtime-cleanup";
 import type { TaskSummary } from "@/src/types/tasks";
@@ -96,25 +95,6 @@ export async function startTaskAnalysisRun(
       ok: true,
       triggerRunId: firstAttempt.triggerRunId,
       runtime: normalizeAcceptedRuntime(firstAttempt.runtime),
-      autoRecovered: false,
-      analysisRetryCount: firstAttemptRetryCount,
-      analysisModel
-    };
-  }
-
-  if (firstAttempt.reason === TRIGGER_DEPLOYMENT_UNAVAILABLE_REASON) {
-    await input.markTaskAnalysisFailed({
-      taskId: input.task.id,
-      userId: input.userId,
-      reason: firstAttempt.reason,
-      analysisRetryCount: firstAttemptRetryCount
-    });
-
-    return {
-      ok: false,
-      reason: firstAttempt.reason,
-      triggerRunId: firstAttempt.triggerRunId,
-      runtime: firstAttempt.runtime,
       autoRecovered: false,
       analysisRetryCount: firstAttemptRetryCount,
       analysisModel
@@ -317,7 +297,8 @@ async function confirmRunStartup(input: {
     const normalizedRuntime = normalizeRuntimeSnapshot(runtime);
 
     // 一旦已经看到 Trigger 明确返回过 pending_version，就不要让后续的 unknown
-    // 把这条线索冲掉，否则会把“版本没就绪”误判成“普通未知异常”。
+    // 把这条线索冲掉。这里的 pending_version 只表示“后台正在把这一轮接上”，
+    // 不是“这条任务已经坏了”。
     if (!(normalizedRuntime.state === "unknown" && lastRuntime.state === "pending_version")) {
       lastRuntime = normalizedRuntime;
     }
@@ -338,15 +319,12 @@ async function confirmRunStartup(input: {
   return {
     accepted: false,
     runtime: lastRuntime,
-    reason:
-      lastRuntime.state === "pending_version"
-        ? TRIGGER_DEPLOYMENT_UNAVAILABLE_REASON
-        : TRIGGER_RUNTIME_UNAVAILABLE_REASON
+    reason: TRIGGER_RUNTIME_UNAVAILABLE_REASON
   };
 }
 
 function isAcceptedStartupState(state: TriggerRunRuntimeState) {
-  return state === "active";
+  return state === "active" || state === "pending_version";
 }
 
 function sleep(ms: number) {
