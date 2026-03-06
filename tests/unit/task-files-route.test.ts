@@ -168,7 +168,7 @@ function makeFailedInlineResult(
       ...succeeded.taskSummary,
       status: "created",
       analysisStatus: "failed",
-      analysisErrorMessage: "MODEL_ANALYSIS_INCOMPLETE_AFTER_RETRY",
+      analysisErrorMessage: "MODEL_REQUIREMENTS_INCOMPLETE_AFTER_RETRY",
       latestOutlineVersionId: null,
       analysisSnapshot: null
     },
@@ -313,7 +313,7 @@ describe("task file first-outline routes", () => {
     expect(listTaskFiles("task-1")).toHaveLength(1);
   });
 
-  it("returns a readable failed payload when inline analysis fails", async () => {
+  it("returns 422 when the model still cannot extract complete requirements", async () => {
     saveTaskSummary({
       id: "task-inline-failed",
       userId: "user-1",
@@ -358,10 +358,60 @@ describe("task file first-outline routes", () => {
     );
     const payload = await response.json();
 
-    expect(response.status).toBe(502);
+    expect(response.status).toBe(422);
     expect(payload.analysisStatus).toBe("failed");
-    expect(String(payload.message)).toContain("模型");
+    expect(String(payload.message)).toContain("完整写作要求");
     expect(payload.outline).toBeNull();
+  });
+
+  it("returns 400 when the files never became model-ready inputs", async () => {
+    saveTaskSummary({
+      id: "task-input-not-ready",
+      userId: "user-1",
+      status: "created",
+      targetWordCount: null,
+      citationStyle: null,
+      specialRequirements: ""
+    });
+
+    const formData = new FormData();
+    formData.append(
+      "files",
+      new File(["Assignment brief text."], "assignment.pdf", { type: "application/pdf" })
+    );
+
+    const response = await handleTaskFileUploadRequest(
+      new Request("http://localhost/api/tasks/task-input-not-ready/files", {
+        method: "POST",
+        body: formData
+      }),
+      { taskId: "task-input-not-ready" },
+      {
+        isPersistenceReady: () => true,
+        requireUser: async () => makeUser(),
+        runInlineFirstOutline: vi.fn().mockResolvedValue(
+          makeFailedInlineResult({
+            task: {
+              id: "task-input-not-ready",
+              status: "created",
+              targetWordCount: null,
+              citationStyle: null,
+              specialRequirements: ""
+            },
+            taskSummary: {
+              ...makeFailedInlineResult().taskSummary,
+              id: "task-input-not-ready",
+              specialRequirements: "",
+              analysisErrorMessage: "MODEL_INPUT_NOT_READY"
+            }
+          })
+        )
+      } as never
+    );
+    const payload = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(String(payload.message)).toContain("文件完整交给分析模型");
   });
 
   it("keeps pdf transport-only strategy while still returning the outline directly", async () => {

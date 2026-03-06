@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { requireCurrentSessionUser } from "@/src/lib/auth/current-user";
 import type { TaskWorkflowClassificationPayload } from "@/src/lib/tasks/request-task-file-upload";
 import { buildAnalysisProgressPayload } from "@/src/lib/tasks/analysis-progress";
+import { resolveInlineAnalysisFailure } from "@/src/lib/tasks/inline-analysis-failure";
 import {
   getOwnedTaskSummary,
   listTaskFilesForWorkflow,
@@ -276,25 +277,11 @@ function mapAnalysisFailureMessage(input: {
     return "这次后台分析没有真正启动成功。你可以直接点“一键重试分析”，不用重新上传文件。";
   }
 
-  if (code === "INLINE_ANALYSIS_DID_NOT_FINISH") {
-    return "这次分析没有正常完成。你可以直接点“一键重试分析”，不用重新上传文件。";
-  }
-
-  if (code === "MODEL_ANALYSIS_TIMEOUT") {
-    return "系统已经开始分析你上传的文件，但本次处理超过等待上限。请直接点“一键重试分析”，不用重新上传。";
-  }
-
-  if (
-    code === "MODEL_ANALYSIS_INCOMPLETE" ||
-    code === "MODEL_ANALYSIS_INCOMPLETE_AFTER_RETRY" ||
-    code === "MODEL_RETURNED_EMPTY_OUTLINE" ||
-    code === "MODEL_RETURNED_EMPTY_OUTLINE_AFTER_RETRY"
-  ) {
-    return "系统已经读到你上传的文件，但模型这次返回内容不完整。请直接点“一键重试分析”，不用重新上传。";
-  }
-
-  if (code.startsWith("OpenAI request failed with status")) {
-    return "模型服务暂时不稳定，请稍后再试。";
+  if (code) {
+    return resolveInlineAnalysisFailure(
+      input.analysisErrorMessage,
+      input.analysis
+    ).message;
   }
 
   return "系统分析失败，请直接点“一键重试分析”，不用重新上传文件。如果连续失败，请联系人工支持。";

@@ -48,6 +48,12 @@ type RunInlineFirstOutlineInput = {
 };
 
 const INLINE_ANALYSIS_DID_NOT_FINISH = "INLINE_ANALYSIS_DID_NOT_FINISH";
+const OUTLINE_STAGE_FAILURE_CODES = new Set([
+  "MODEL_OUTLINE_INCOMPLETE",
+  "MODEL_OUTLINE_INCOMPLETE_AFTER_RETRY",
+  "MODEL_RETURNED_EMPTY_OUTLINE",
+  "MODEL_RETURNED_EMPTY_OUTLINE_AFTER_RETRY"
+]);
 
 export async function runInlineFirstOutline(
   input: RunInlineFirstOutlineInput
@@ -58,6 +64,7 @@ export async function runInlineFirstOutline(
   }
 
   const nextRetryCount = computeNextAnalysisRetryCount(taskBeforeRun, input.source);
+  const seedAnalysis = resolveSeedAnalysis(taskBeforeRun, input);
 
   await markTaskAnalysisPending({
     taskId: input.taskId,
@@ -73,7 +80,8 @@ export async function runInlineFirstOutline(
     await runAnalyzeUploadedTaskPipeline({
       taskId: input.taskId,
       userId: input.userId,
-      forcedPrimaryFileId: input.forcedPrimaryFileId ?? null
+      forcedPrimaryFileId: input.forcedPrimaryFileId ?? null,
+      seedAnalysis
     });
   } catch {
     // The pipeline already writes the failed state. The route only needs the final snapshot.
@@ -149,6 +157,35 @@ function computeNextAnalysisRetryCount(
   }
 
   return current + 1;
+}
+
+function resolveSeedAnalysis(
+  task: Pick<TaskSummary, "analysisSnapshot" | "analysisErrorMessage">,
+  input: RunInlineFirstOutlineInput
+) {
+  if (input.source !== "manual_retry") {
+    return null;
+  }
+
+  const analysis = task.analysisSnapshot ?? null;
+  if (!analysis) {
+    return null;
+  }
+
+  const errorCode = task.analysisErrorMessage?.trim() ?? "";
+  if (!OUTLINE_STAGE_FAILURE_CODES.has(errorCode)) {
+    return null;
+  }
+
+  if (
+    input.forcedPrimaryFileId &&
+    analysis.chosenTaskFileId &&
+    input.forcedPrimaryFileId !== analysis.chosenTaskFileId
+  ) {
+    return null;
+  }
+
+  return analysis;
 }
 
 function buildClassificationFromTask(

@@ -232,7 +232,7 @@ describe("task analysis status route", () => {
     expect(response.status).toBe(200);
     expect(payload.analysisStatus).toBe("failed");
     expect(payload.analysisRuntime.state).toBe("not_applicable");
-    expect(String(payload.message)).toContain("返回内容不完整");
+    expect(String(payload.message)).toContain("完整写作要求");
     expect(String(payload.message)).not.toContain("MODEL_ANALYSIS_INCOMPLETE");
     expect(payload.analysisProgress.canRetry).toBe(true);
   });

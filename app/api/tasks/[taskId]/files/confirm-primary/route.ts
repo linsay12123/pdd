@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { requireCurrentSessionUser } from "@/src/lib/auth/current-user";
+import { resolveInlineAnalysisFailure } from "@/src/lib/tasks/inline-analysis-failure";
 import { runInlineFirstOutline } from "@/src/lib/tasks/inline-first-outline";
 import {
   getOwnedTaskSummary,
@@ -10,7 +11,6 @@ import {
   toSessionTaskHumanizePayload,
   toSessionTaskPayload
 } from "@/src/lib/tasks/session-task";
-import type { TaskAnalysisSnapshot } from "@/src/types/tasks";
 import type { SessionUser } from "@/src/types/auth";
 
 type RouteContext = {
@@ -97,11 +97,19 @@ export async function handleConfirmPrimaryFileRequest(
       message:
         result.analysisStatus === "succeeded"
           ? "主任务文件已确认，系统已经完成重新分析并生成新大纲。"
-          : mapInlineFailureMessage(result.taskSummary.analysisErrorMessage, result.analysis)
+          : resolveInlineAnalysisFailure(
+              result.taskSummary.analysisErrorMessage,
+              result.analysis
+            ).message
     };
 
+    const failure = resolveInlineAnalysisFailure(
+      result.taskSummary.analysisErrorMessage,
+      result.analysis
+    );
+
     return NextResponse.json(payload, {
-      status: result.analysisStatus === "succeeded" ? 200 : 502
+      status: result.analysisStatus === "succeeded" ? 200 : failure.status
     });
   } catch (error) {
     if (error instanceof Error && error.message === "AUTH_REQUIRED") {
@@ -140,38 +148,4 @@ export async function handleConfirmPrimaryFileRequest(
 export async function POST(request: Request, context: RouteContext) {
   const { taskId } = await context.params;
   return handleConfirmPrimaryFileRequest(request, { taskId });
-}
-
-function mapInlineFailureMessage(
-  analysisErrorMessage: string | null | undefined,
-  analysis: TaskAnalysisSnapshot | null
-) {
-  const warning = analysis?.warnings?.find((item) => item.startsWith("analysis_failed:"));
-  const code =
-    analysisErrorMessage?.trim() ||
-    warning?.replace("analysis_failed:", "")?.trim() ||
-    "";
-
-  if (
-    code === "MODEL_ANALYSIS_INCOMPLETE" ||
-    code === "MODEL_ANALYSIS_INCOMPLETE_AFTER_RETRY" ||
-    code === "MODEL_RETURNED_EMPTY_OUTLINE" ||
-    code === "MODEL_RETURNED_EMPTY_OUTLINE_AFTER_RETRY"
-  ) {
-    return "系统已经收到了你的主文件确认，但模型这次返回内容不完整。请直接再试一次，不用重新上传文件。";
-  }
-
-  if (code === "MODEL_ANALYSIS_TIMEOUT") {
-    return "系统已经收到了你的主文件确认，但这次分析时间过长。请直接再试一次，不用重新上传文件。";
-  }
-
-  if (code === "INLINE_ANALYSIS_DID_NOT_FINISH") {
-    return "系统已经收到了你的主文件确认，但这次分析没有正常完成。请直接再试一次，不用重新上传文件。";
-  }
-
-  if (code.startsWith("OpenAI request failed with status")) {
-    return "模型服务暂时不稳定，请稍后再试。";
-  }
-
-  return "系统已经收到了你的主文件确认，但这次分析失败了。请直接再试一次，不用重新上传文件。";
 }

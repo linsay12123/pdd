@@ -4,6 +4,7 @@ import {
   buildAnalysisProgressPayload,
   type AnalysisStatus
 } from "@/src/lib/tasks/analysis-progress";
+import { resolveInlineAnalysisFailure } from "@/src/lib/tasks/inline-analysis-failure";
 import { runInlineFirstOutline } from "@/src/lib/tasks/inline-first-outline";
 import {
   getOwnedTaskSummary,
@@ -18,7 +19,6 @@ import {
   resolveTriggerRunState,
   type TriggerRunRuntimeState
 } from "@/src/lib/trigger/run-state";
-import type { TaskAnalysisSnapshot } from "@/src/types/tasks";
 import type { SessionUser } from "@/src/types/auth";
 
 type RouteContext = {
@@ -165,11 +165,19 @@ export async function handleTaskAnalysisRetryRequest(
       message:
         result.analysisStatus === "succeeded"
           ? "系统已经完成重新分析，并生成了新的第一版大纲。"
-          : mapInlineFailureMessage(result.taskSummary.analysisErrorMessage, result.analysis)
+          : resolveInlineAnalysisFailure(
+              result.taskSummary.analysisErrorMessage,
+              result.analysis
+            ).message
     };
 
+    const failure = resolveInlineAnalysisFailure(
+      result.taskSummary.analysisErrorMessage,
+      result.analysis
+    );
+
     return NextResponse.json(payload, {
-      status: result.analysisStatus === "succeeded" ? 200 : 502
+      status: result.analysisStatus === "succeeded" ? 200 : failure.status
     });
   } catch (error) {
     if (error instanceof Error && error.message === "AUTH_REQUIRED") {
@@ -201,38 +209,4 @@ async function getTriggerRunState(
   runId: string
 ): Promise<{ state: TriggerRunRuntimeState; status: string | null }> {
   return resolveTriggerRunState(runId);
-}
-
-function mapInlineFailureMessage(
-  analysisErrorMessage: string | null | undefined,
-  analysis: TaskAnalysisSnapshot | null
-) {
-  const warning = analysis?.warnings?.find((item) => item.startsWith("analysis_failed:"));
-  const code =
-    analysisErrorMessage?.trim() ||
-    warning?.replace("analysis_failed:", "")?.trim() ||
-    "";
-
-  if (
-    code === "MODEL_ANALYSIS_INCOMPLETE" ||
-    code === "MODEL_ANALYSIS_INCOMPLETE_AFTER_RETRY" ||
-    code === "MODEL_RETURNED_EMPTY_OUTLINE" ||
-    code === "MODEL_RETURNED_EMPTY_OUTLINE_AFTER_RETRY"
-  ) {
-    return "系统已经重新读了一遍文件，但模型这次返回内容不完整。请直接再试一次，不用重新上传。";
-  }
-
-  if (code === "MODEL_ANALYSIS_TIMEOUT") {
-    return "系统已经重新开始分析文件，但这次处理时间过长。请直接再试一次，不用重新上传。";
-  }
-
-  if (code === "INLINE_ANALYSIS_DID_NOT_FINISH") {
-    return "这次重新分析没有正常完成。你可以直接再试一次，不用重新上传文件。";
-  }
-
-  if (code.startsWith("OpenAI request failed with status")) {
-    return "模型服务暂时不稳定，请稍后再试。";
-  }
-
-  return "系统没能完成这次分析。你可以直接再试一次，不用重新上传文件。";
 }

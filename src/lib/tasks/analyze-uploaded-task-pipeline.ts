@@ -1,4 +1,3 @@
-import { isMeaningfulOutline } from "@/src/lib/ai/outline-quality";
 import { analyzeUploadedTaskWithOpenAI } from "@/src/lib/ai/services/analyze-uploaded-task";
 import { requireFormalPersistence, shouldUseSupabasePersistence } from "@/src/lib/persistence/runtime-mode";
 import {
@@ -6,13 +5,16 @@ import {
   listTaskFilesForModel,
   markTaskAnalysisFailed,
   markTaskAnalysisStarted,
+  persistTaskPartialModelAnalysis,
   persistTaskModelAnalysis
 } from "@/src/lib/tasks/save-task-files";
+import type { TaskAnalysisSnapshot } from "@/src/types/tasks";
 
 export type AnalyzeUploadedTaskJobInput = {
   taskId: string;
   userId: string;
   forcedPrimaryFileId?: string | null;
+  seedAnalysis?: TaskAnalysisSnapshot | null;
 };
 
 const ANALYZE_JOB_MAX_RUNTIME_MS = 45 * 60 * 1000;
@@ -58,18 +60,12 @@ export async function runAnalyzeUploadedTaskPipeline(
       analyzeUploadedTaskWithOpenAI({
         files,
         specialRequirements: taskSummary.specialRequirements ?? "",
-        forcedPrimaryFileId: input.forcedPrimaryFileId ?? null
+        forcedPrimaryFileId: input.forcedPrimaryFileId ?? null,
+        seedAnalysis: input.seedAnalysis ?? null
       }),
       ANALYZE_JOB_MAX_RUNTIME_MS,
       "MODEL_ANALYSIS_TIMEOUT"
     );
-
-    if (
-      !analyzed.analysis.needsUserConfirmation &&
-      (!analyzed.outline?.sections.length || !isMeaningfulOutline(analyzed.outline))
-    ) {
-      throw new Error("MODEL_RETURNED_EMPTY_OUTLINE");
-    }
 
     const persisted = await persistTaskModelAnalysis({
       taskId: input.taskId,
@@ -93,6 +89,34 @@ export async function runAnalyzeUploadedTaskPipeline(
     };
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);
+    const partialAnalysis =
+      error &&
+      typeof error === "object" &&
+      "partialAnalysis" in error &&
+      error.partialAnalysis &&
+      typeof error.partialAnalysis === "object"
+        ? (error.partialAnalysis as TaskAnalysisSnapshot)
+        : null;
+
+    if (partialAnalysis) {
+      try {
+        await persistTaskPartialModelAnalysis({
+          taskId: input.taskId,
+          userId: input.userId,
+          analysis: partialAnalysis
+        });
+      } catch (partialPersistError) {
+        console.error("[analysis-inline] failed-to-persist-partial-analysis", {
+          taskId: input.taskId,
+          userId: input.userId,
+          reason,
+          partialPersistError:
+            partialPersistError instanceof Error
+              ? partialPersistError.message
+              : String(partialPersistError)
+        });
+      }
+    }
 
     try {
       await markTaskAnalysisFailed({

@@ -166,7 +166,7 @@ function makeFailedInlineResult(
       ...succeeded.taskSummary,
       status: "created",
       analysisStatus: "failed",
-      analysisErrorMessage: "MODEL_ANALYSIS_INCOMPLETE_AFTER_RETRY",
+      analysisErrorMessage: "MODEL_REQUIREMENTS_INCOMPLETE_AFTER_RETRY",
       latestOutlineVersionId: null,
       analysisSnapshot: null
     },
@@ -254,7 +254,7 @@ describe("analysis retry route", () => {
       citationStyle: null,
       specialRequirements: "",
       analysisStatus: "failed",
-      analysisErrorMessage: "MODEL_ANALYSIS_INCOMPLETE_AFTER_RETRY"
+      analysisErrorMessage: "MODEL_REQUIREMENTS_INCOMPLETE_AFTER_RETRY"
     });
 
     saveTaskFileRecords([
@@ -315,7 +315,7 @@ describe("analysis retry route", () => {
     );
   });
 
-  it("returns a readable failed payload when retry still fails", async () => {
+  it("returns 422 when retry still cannot get a complete outline", async () => {
     saveTaskSummary({
       id: "task-retry-failed",
       userId: "user-1",
@@ -324,7 +324,7 @@ describe("analysis retry route", () => {
       citationStyle: null,
       specialRequirements: "",
       analysisStatus: "failed",
-      analysisErrorMessage: "MODEL_ANALYSIS_INCOMPLETE_AFTER_RETRY"
+      analysisErrorMessage: "MODEL_OUTLINE_INCOMPLETE_AFTER_RETRY"
     });
 
     saveTaskFileRecords([
@@ -362,7 +362,8 @@ describe("analysis retry route", () => {
             taskSummary: {
               ...makeFailedInlineResult().taskSummary,
               id: "task-retry-failed",
-              specialRequirements: ""
+              specialRequirements: "",
+              analysisErrorMessage: "MODEL_OUTLINE_INCOMPLETE_AFTER_RETRY"
             }
           })
         )
@@ -370,10 +371,70 @@ describe("analysis retry route", () => {
     );
     const payload = await response.json();
 
-    expect(response.status).toBe(502);
+    expect(response.status).toBe(422);
     expect(payload.analysisStatus).toBe("failed");
-    expect(String(payload.message)).toContain("模型");
+    expect(String(payload.message)).toContain("大纲结构不完整");
     expect(payload.outline).toBeNull();
+  });
+
+  it("returns 400 when retry starts before the files are model-ready", async () => {
+    saveTaskSummary({
+      id: "task-retry-input-not-ready",
+      userId: "user-1",
+      status: "created",
+      targetWordCount: null,
+      citationStyle: null,
+      specialRequirements: "",
+      analysisStatus: "failed",
+      analysisErrorMessage: "MODEL_INPUT_NOT_READY"
+    });
+
+    saveTaskFileRecords([
+      {
+        id: "file-1",
+        taskId: "task-retry-input-not-ready",
+        userId: "user-1",
+        originalFilename: "brief.pdf",
+        storagePath: "tmp/brief.pdf",
+        extractedText: "[pdf transport-only: brief.pdf]",
+        role: "unknown",
+        isPrimary: false,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      }
+    ]);
+
+    const response = await handleTaskAnalysisRetryRequest(
+      new Request("http://localhost/api/tasks/task-retry-input-not-ready/analysis/retry", {
+        method: "POST"
+      }),
+      { taskId: "task-retry-input-not-ready" },
+      {
+        isPersistenceReady: () => true,
+        requireUser: async () => makeUser(),
+        runInlineFirstOutline: vi.fn().mockResolvedValue(
+          makeFailedInlineResult({
+            task: {
+              id: "task-retry-input-not-ready",
+              status: "created",
+              targetWordCount: null,
+              citationStyle: null,
+              specialRequirements: ""
+            },
+            taskSummary: {
+              ...makeFailedInlineResult().taskSummary,
+              id: "task-retry-input-not-ready",
+              specialRequirements: "",
+              analysisErrorMessage: "MODEL_INPUT_NOT_READY"
+            }
+          })
+        )
+      } as never
+    );
+    const payload = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(String(payload.message)).toContain("文件完整交给分析模型");
   });
 
   it("rejects retry when there are no uploaded files", async () => {

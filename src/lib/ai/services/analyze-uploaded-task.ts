@@ -1,6 +1,7 @@
 import type { OutlineScaffold, OutlineSection } from "@/src/lib/ai/prompts/generate-outline";
+import { buildGenerateOutlinePrompt } from "@/src/lib/ai/prompts/generate-outline";
 import { isMeaningfulOutline } from "@/src/lib/ai/outline-quality";
-import { buildAnalyzeUploadedTaskInstruction } from "@/src/lib/ai/prompts/analyze-uploaded-task";
+import { buildAnalyzeUploadedTaskRequirementsInstruction } from "@/src/lib/ai/prompts/analyze-uploaded-task";
 import { requestOpenAITextResponse, safeParseJSON } from "@/src/lib/ai/openai-client";
 import type { TaskAnalysisSnapshot } from "@/src/types/tasks";
 
@@ -9,7 +10,9 @@ export type ModelReadyTaskFile = {
   originalFilename: string;
   extractedText: string;
   contentType?: string;
+  extractionMethod?: string;
   openaiFileId?: string | null;
+  openaiUploadStatus?: "pending" | "uploaded" | "failed";
   rawBody?: Buffer | null;
 };
 
@@ -17,6 +20,7 @@ type AnalyzeUploadedTaskInput = {
   files: ModelReadyTaskFile[];
   specialRequirements: string;
   forcedPrimaryFileId?: string | null;
+  seedAnalysis?: TaskAnalysisSnapshot | null;
 };
 
 type AnalyzeUploadedTaskResult = {
@@ -24,223 +28,275 @@ type AnalyzeUploadedTaskResult = {
   outline: OutlineScaffold | null;
 };
 
-type AnalyzeAttemptDiagnostics = {
-  attempt: 1 | 2;
-  responseLength: number;
-  repairedResponseLength: number | null;
-  parseSource: "direct" | "repair" | "none";
-};
-
 type AnalyzeServiceError = Error & {
   code?: string;
   missingFields?: string[];
-  diagnostics?: AnalyzeAttemptDiagnostics[];
+  partialAnalysis?: TaskAnalysisSnapshot;
 };
 
-const ANALYZE_TASK_TEXT_FORMAT = {
+type ParsedRequirements = Partial<TaskAnalysisSnapshot>;
+
+type ParsedOutline = {
+  articleTitle?: string;
+  sections?: OutlineSection[];
+};
+
+const REQUIREMENTS_TEXT_FORMAT = {
   type: "json_schema",
-  name: "task_analysis_result",
+  name: "task_requirements_result",
   strict: true,
   schema: {
     type: "object",
     additionalProperties: false,
-    required: ["analysis", "outline"],
+    required: [
+      "chosenTaskFileId",
+      "supportingFileIds",
+      "ignoredFileIds",
+      "needsUserConfirmation",
+      "reasoning",
+      "targetWordCount",
+      "citationStyle",
+      "topic",
+      "chapterCount",
+      "mustCover",
+      "gradingFocus",
+      "appliedSpecialRequirements",
+      "usedDefaultWordCount",
+      "usedDefaultCitationStyle",
+      "warnings"
+    ],
     properties: {
-      analysis: {
-        type: "object",
-        additionalProperties: false,
-        required: [
-          "chosenTaskFileId",
-          "supportingFileIds",
-          "ignoredFileIds",
-          "needsUserConfirmation",
-          "reasoning",
-          "targetWordCount",
-          "citationStyle",
-          "topic",
-          "chapterCount",
-          "mustCover",
-          "gradingFocus",
-          "appliedSpecialRequirements",
-          "usedDefaultWordCount",
-          "usedDefaultCitationStyle",
-          "warnings"
-        ],
-        properties: {
-          chosenTaskFileId: { type: ["string", "null"] },
-          supportingFileIds: { type: "array", items: { type: "string" } },
-          ignoredFileIds: { type: "array", items: { type: "string" } },
-          needsUserConfirmation: { type: "boolean" },
-          reasoning: { type: "string" },
-          targetWordCount: { type: "number" },
-          citationStyle: { type: "string" },
-          topic: { type: ["string", "null"] },
-          chapterCount: { type: ["number", "null"] },
-          mustCover: { type: "array", items: { type: "string" } },
-          gradingFocus: { type: "array", items: { type: "string" } },
-          appliedSpecialRequirements: { type: "string" },
-          usedDefaultWordCount: { type: "boolean" },
-          usedDefaultCitationStyle: { type: "boolean" },
-          warnings: { type: "array", items: { type: "string" } }
-        }
-      },
-      outline: {
-        anyOf: [
-          {
-            type: "null"
-          },
-          {
-            type: "object",
-            additionalProperties: false,
-            required: ["articleTitle", "sections"],
-            properties: {
-              articleTitle: { type: "string" },
-              sections: {
-                type: "array",
-                items: {
-                  type: "object",
-                  additionalProperties: false,
-                  required: ["title", "summary", "bulletPoints"],
-                  properties: {
-                    title: { type: "string" },
-                    summary: { type: "string" },
-                    bulletPoints: { type: "array", items: { type: "string" } }
-                  }
-                }
-              }
+      chosenTaskFileId: { type: ["string", "null"] },
+      supportingFileIds: { type: "array", items: { type: "string" } },
+      ignoredFileIds: { type: "array", items: { type: "string" } },
+      needsUserConfirmation: { type: "boolean" },
+      reasoning: { type: "string" },
+      targetWordCount: { type: "number" },
+      citationStyle: { type: "string" },
+      topic: { type: "string" },
+      chapterCount: { type: ["number", "null"] },
+      mustCover: { type: "array", items: { type: "string" } },
+      gradingFocus: { type: "array", items: { type: "string" } },
+      appliedSpecialRequirements: { type: "string" },
+      usedDefaultWordCount: { type: "boolean" },
+      usedDefaultCitationStyle: { type: "boolean" },
+      warnings: { type: "array", items: { type: "string" } }
+    }
+  }
+} as const;
+
+const OUTLINE_TEXT_FORMAT = {
+  type: "json_schema",
+  name: "task_outline_result",
+  strict: true,
+  schema: {
+    type: "object",
+    additionalProperties: false,
+    required: ["articleTitle", "sections"],
+    properties: {
+      articleTitle: { type: "string" },
+      sections: {
+        type: "array",
+        items: {
+          type: "object",
+          additionalProperties: false,
+          required: ["title", "summary", "bulletPoints"],
+          properties: {
+            title: { type: "string" },
+            summary: { type: "string" },
+            bulletPoints: {
+              type: "array",
+              items: { type: "string" }
             }
           }
-        ]
+        }
       }
     }
   }
 } as const;
 
-type ParsedResult = {
-  analysis?: Partial<TaskAnalysisSnapshot> | null;
-  outline?: {
-    articleTitle?: string;
-    sections?: OutlineSection[];
-  } | null;
-};
-
 export async function analyzeUploadedTaskWithOpenAI(
   input: AnalyzeUploadedTaskInput
 ): Promise<AnalyzeUploadedTaskResult> {
-  const firstAttempt = await runAnalysisAttempt(input, 1);
+  ensureModelInputsReady(input.files);
+
+  const seededAnalysis = canReuseSeedAnalysis(input.seedAnalysis, input.forcedPrimaryFileId)
+    ? input.seedAnalysis
+    : null;
+  const requirements =
+    seededAnalysis ??
+    (await runRequirementsStage({
+      files: input.files,
+      specialRequirements: input.specialRequirements,
+      forcedPrimaryFileId: input.forcedPrimaryFileId
+    }));
+
+  if (requirements.needsUserConfirmation) {
+    return {
+      analysis: requirements,
+      outline: null
+    };
+  }
 
   try {
-    return normalizeAnalyzeUploadedTaskResult(input, firstAttempt.parsed);
+    const outline = await runOutlineStage({
+      analysis: requirements,
+      specialRequirements: input.specialRequirements
+    });
+
+    return {
+      analysis: {
+        ...requirements,
+        topic: requirements.topic ?? outline.articleTitle
+      },
+      outline
+    };
   } catch (error) {
-    if (!isRetryableModelAnalysisError(error)) {
+    const normalized = error as AnalyzeServiceError;
+    normalized.partialAnalysis = normalized.partialAnalysis ?? requirements;
+    throw normalized;
+  }
+}
+
+async function runRequirementsStage(input: {
+  files: ModelReadyTaskFile[];
+  specialRequirements: string;
+  forcedPrimaryFileId?: string | null;
+}) {
+  const firstAttempt = await requestRequirementsAttempt(input);
+
+  try {
+    return normalizeAnalysis(firstAttempt, input);
+  } catch (error) {
+    if (!isRequirementsIncompleteError(error)) {
       throw error;
     }
 
-    const secondAttempt = await runAnalysisAttempt(input, 2, firstAttempt.rawText);
+    const secondAttempt = await requestRequirementsAttempt(input, firstAttempt.rawText);
 
     try {
-      return normalizeAnalyzeUploadedTaskResult(input, secondAttempt.parsed);
+      return normalizeAnalysis(secondAttempt, input);
     } catch (secondError) {
-      if (!isRetryableModelAnalysisError(secondError)) {
+      if (!isRequirementsIncompleteError(secondError)) {
         throw secondError;
       }
 
       throw createModelAnalysisError(
-        mapAfterRetryCode(secondError.message),
-        secondError.missingFields,
-        [firstAttempt.diagnostics, secondAttempt.diagnostics]
+        "MODEL_REQUIREMENTS_INCOMPLETE_AFTER_RETRY",
+        secondError.missingFields
       );
     }
   }
 }
 
-function normalizeAnalyzeUploadedTaskResult(
-  input: AnalyzeUploadedTaskInput,
-  parsed: ParsedResult | null
-) {
-  const analysis = normalizeAnalysis(parsed?.analysis, input, parsed?.outline?.articleTitle);
-  const outline = normalizeOutline(parsed?.outline, analysis);
+async function runOutlineStage(input: {
+  analysis: TaskAnalysisSnapshot;
+  specialRequirements: string;
+}) {
+  const firstAttempt = await requestOutlineAttempt(input);
 
-  if (!analysis.needsUserConfirmation && !outline) {
-    throw createModelAnalysisError("MODEL_RETURNED_EMPTY_OUTLINE");
-  }
-
-  return {
-    analysis,
-    outline
-  };
-}
-
-async function runAnalysisAttempt(
-  input: AnalyzeUploadedTaskInput,
-  attempt: 1 | 2,
-  previousRawText?: string
-) {
-  const response = await requestAnalysisResponse(
-    buildAnalysisContent(input, {
-      retry: attempt === 2,
-      previousRawText
-    })
-  );
-  const directParsed = parseAnalyzeUploadedTaskResult(response.output_text);
-  const repaired = directParsed
-    ? { parsed: directParsed, repairedText: null }
-    : await repairAnalyzeUploadedTaskResult(response.output_text);
-  const parsed = directParsed ?? repaired.parsed;
-
-  return {
-    rawText: response.output_text,
-    parsed,
-    diagnostics: {
-      attempt,
-      responseLength: response.output_text.length,
-      repairedResponseLength: repaired.repairedText?.length ?? null,
-      parseSource: directParsed ? "direct" : parsed ? "repair" : "none"
-    } satisfies AnalyzeAttemptDiagnostics
-  };
-}
-
-async function requestAnalysisResponse(inputContent: Array<Record<string, unknown>>) {
   try {
-    return await requestOpenAITextResponse({
-      input: [
-        {
-          role: "user",
-          content: inputContent
-        }
-      ],
-      reasoningEffort: "medium",
-      textFormat: ANALYZE_TASK_TEXT_FORMAT as unknown as Record<string, unknown>
-    });
+    return normalizeOutline(firstAttempt, input.analysis);
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    if (!message.includes("status 400")) {
+    if (!isOutlineIncompleteError(error)) {
       throw error;
     }
 
-    return requestOpenAITextResponse({
-      input: [
-        {
-          role: "user",
-          content: inputContent
-        }
-      ],
-      reasoningEffort: "medium"
-    });
+    const secondAttempt = await requestOutlineAttempt(input, firstAttempt.rawText);
+
+    try {
+      return normalizeOutline(secondAttempt, input.analysis);
+    } catch (secondError) {
+      if (!isOutlineIncompleteError(secondError)) {
+        throw secondError;
+      }
+
+      throw createModelAnalysisError(
+        "MODEL_OUTLINE_INCOMPLETE_AFTER_RETRY",
+        secondError.missingFields,
+        input.analysis
+      );
+    }
   }
 }
 
-function buildAnalysisContent(
-  input: AnalyzeUploadedTaskInput,
-  options?: {
-    retry?: boolean;
-    previousRawText?: string;
+async function requestRequirementsAttempt(
+  input: {
+    files: ModelReadyTaskFile[];
+    specialRequirements: string;
+    forcedPrimaryFileId?: string | null;
+  },
+  previousRawText?: string
+) {
+  try {
+    const response = await requestOpenAITextResponse({
+      input: [
+        {
+          role: "user",
+          content: buildRequirementsContent(input, previousRawText)
+        }
+      ],
+      reasoningEffort: "medium",
+      textFormat: REQUIREMENTS_TEXT_FORMAT as unknown as Record<string, unknown>
+    });
+
+    return {
+      parsed: safeParseJSON<ParsedRequirements>(response.output_text),
+      rawText: response.output_text
+    };
+  } catch (error) {
+    throw mapOpenAIServiceError(error);
   }
+}
+
+async function requestOutlineAttempt(
+  input: {
+    analysis: TaskAnalysisSnapshot;
+    specialRequirements: string;
+  },
+  previousRawText?: string
+) {
+  const prompt = buildGenerateOutlinePrompt({
+    topic: input.analysis.topic || "Untitled Topic",
+    targetWordCount: input.analysis.targetWordCount,
+    citationStyle: input.analysis.citationStyle,
+    chapterCountOverride: input.analysis.chapterCount,
+    mustAnswer: input.analysis.mustCover,
+    gradingPriorities: input.analysis.gradingFocus,
+    specialRequirements: input.analysis.appliedSpecialRequirements || input.specialRequirements,
+    feedback: previousRawText
+      ? "The previous outline response was incomplete. Return a complete JSON outline with all required fields."
+      : undefined
+  });
+
+  try {
+    const response = await requestOpenAITextResponse({
+      input: prompt,
+      reasoningEffort: "medium",
+      textFormat: OUTLINE_TEXT_FORMAT as unknown as Record<string, unknown>
+    });
+
+    return {
+      parsed: safeParseJSON<ParsedOutline>(response.output_text),
+      rawText: response.output_text
+    };
+  } catch (error) {
+    throw mapOpenAIServiceError(error);
+  }
+}
+
+function buildRequirementsContent(
+  input: {
+    files: ModelReadyTaskFile[];
+    specialRequirements: string;
+    forcedPrimaryFileId?: string | null;
+  },
+  previousRawText?: string
 ) {
   const content: Array<Record<string, unknown>> = [
     {
       type: "input_text",
-      text: buildAnalyzeUploadedTaskInstruction({
+      text: buildAnalyzeUploadedTaskRequirementsInstruction({
         specialRequirements: input.specialRequirements,
         forcedPrimaryFileId: input.forcedPrimaryFileId
       })
@@ -262,17 +318,26 @@ function buildAnalysisContent(
           "RAW_EXTRACTED_TEXT_OMITTED: Original PDF file is attached below. Read the PDF directly."
         ].join("\n")
       });
-    } else {
       content.push({
         type: "input_text",
-        text: [
-          ...fileContextHeader,
-          "RAW_EXTRACTED_TEXT_START",
-          file.extractedText || "(no extracted text available)",
-          "RAW_EXTRACTED_TEXT_END"
-        ].join("\n")
+        text: `PDF_FILE_CONTEXT: This PDF belongs to FILE_ID ${file.id} (${file.originalFilename}).`
       });
+      content.push({
+        type: "input_file",
+        file_id: file.openaiFileId
+      });
+      continue;
     }
+
+    content.push({
+      type: "input_text",
+      text: [
+        ...fileContextHeader,
+        "RAW_EXTRACTED_TEXT_START",
+        file.extractedText || "(no extracted text available)",
+        "RAW_EXTRACTED_TEXT_END"
+      ].join("\n")
+    });
 
     if (file.rawBody && isImageFile(file)) {
       content.push({
@@ -283,30 +348,20 @@ function buildAnalysisContent(
         type: "input_image",
         image_url: `data:${file.contentType || "image/png"};base64,${file.rawBody.toString("base64")}`
       });
-    } else if (shouldUsePdfFileInput) {
-      content.push({
-        type: "input_text",
-        text: `PDF_FILE_CONTEXT: This PDF belongs to FILE_ID ${file.id} (${file.originalFilename}).`
-      });
-      content.push({
-        type: "input_file",
-        file_id: file.openaiFileId
-      });
     }
   }
 
-  if (options?.retry) {
+  if (previousRawText) {
     content.push({
       type: "input_text",
       text: [
         "RETRY_INSTRUCTION:",
-        "- Your previous response was incomplete or invalid for this workflow.",
+        "- Your previous requirements response was incomplete.",
         "- Return complete JSON with all required fields.",
-        "- Do not omit any required analysis fields.",
-        "- If you cannot determine a value, explicitly apply the instructed defaults.",
+        "- Do not omit required analysis fields.",
         "",
         "PREVIOUS_RESPONSE_SNIPPET_START",
-        (options.previousRawText ?? "(empty)").slice(0, 2400),
+        previousRawText.slice(0, 2400),
         "PREVIOUS_RESPONSE_SNIPPET_END"
       ].join("\n")
     });
@@ -315,161 +370,109 @@ function buildAnalysisContent(
   return content;
 }
 
-function parseAnalyzeUploadedTaskResult(text: string) {
-  return safeParseJSON<ParsedResult>(text);
-}
+function ensureModelInputsReady(files: ModelReadyTaskFile[]) {
+  const brokenPdf = files.find((file) => {
+    return isPdfTransportOnly(file) && !file.openaiFileId;
+  });
 
-async function repairAnalyzeUploadedTaskResult(rawText: string) {
-  try {
-    const repairPrompt = [
-      "Repair the following task analysis response into valid JSON.",
-      "Return ONLY valid JSON.",
-      "",
-      "Required structure:",
-      "{",
-      '  "analysis": {',
-      '    "chosenTaskFileId": "<string or null>",',
-      '    "supportingFileIds": ["<string>"],',
-      '    "ignoredFileIds": ["<string>"],',
-      '    "needsUserConfirmation": <boolean>,',
-      '    "reasoning": "<string>",',
-      '    "targetWordCount": <number>,',
-      '    "citationStyle": "<string>",',
-      '    "topic": "<string>",',
-      '    "chapterCount": <number or null>,',
-      '    "mustCover": ["<string>"],',
-      '    "gradingFocus": ["<string>"],',
-      '    "appliedSpecialRequirements": "<string>",',
-      '    "usedDefaultWordCount": <boolean>,',
-      '    "usedDefaultCitationStyle": <boolean>,',
-      '    "warnings": ["<string>"]',
-      "  },",
-      '  "outline": {',
-      '    "articleTitle": "<string>",',
-      '    "sections": [',
-      '      { "title": "<string>", "summary": "<string>", "bulletPoints": ["<string>"] }',
-      "    ]",
-      "  } | null",
-      "}",
-      "",
-      "RAW_RESPONSE:",
-      rawText
-    ].join("\n");
-
-    const repaired = await requestOpenAITextResponse({
-      input: repairPrompt,
-      reasoningEffort: "medium",
-      textFormat: ANALYZE_TASK_TEXT_FORMAT as unknown as Record<string, unknown>
-    });
-
-    return {
-      parsed: parseAnalyzeUploadedTaskResult(repaired.output_text),
-      repairedText: repaired.output_text
-    };
-  } catch {
-    return {
-      parsed: null,
-      repairedText: null
-    };
+  if (brokenPdf) {
+    throw createModelAnalysisError("MODEL_INPUT_NOT_READY");
   }
 }
 
 function normalizeAnalysis(
-  raw: Partial<TaskAnalysisSnapshot> | null | undefined,
-  input: AnalyzeUploadedTaskInput,
-  outlineTitle?: string
+  rawResponse: {
+    parsed: ParsedRequirements | null;
+    rawText: string;
+  },
+  input: {
+    files: ModelReadyTaskFile[];
+    specialRequirements: string;
+    forcedPrimaryFileId?: string | null;
+  }
 ): TaskAnalysisSnapshot {
+  const raw = rawResponse.parsed;
+
   if (!raw) {
-    throw createModelAnalysisError("MODEL_ANALYSIS_INCOMPLETE", ["analysis"]);
+    throw createModelAnalysisError("MODEL_REQUIREMENTS_INCOMPLETE", ["analysis"]);
   }
 
   const validIds = new Set(input.files.map((file) => file.id));
   const chosenTaskFileId =
-    typeof raw?.chosenTaskFileId === "string" && validIds.has(raw.chosenTaskFileId)
+    typeof raw.chosenTaskFileId === "string" && validIds.has(raw.chosenTaskFileId)
       ? raw.chosenTaskFileId
       : input.forcedPrimaryFileId && validIds.has(input.forcedPrimaryFileId)
         ? input.forcedPrimaryFileId
         : null;
 
-  const supportingFileIds = normalizeIds(raw?.supportingFileIds, validIds).filter(
+  const supportingFileIds = normalizeIds(raw.supportingFileIds, validIds).filter(
     (id) => id !== chosenTaskFileId
   );
-  const ignoredFileIds = normalizeIds(raw?.ignoredFileIds, validIds).filter(
+  const ignoredFileIds = normalizeIds(raw.ignoredFileIds, validIds).filter(
     (id) => id !== chosenTaskFileId && !supportingFileIds.includes(id)
   );
-  const explicitWordCount =
-    typeof raw?.targetWordCount === "number" && raw.targetWordCount > 0
+  const targetWordCount =
+    typeof raw.targetWordCount === "number" && raw.targetWordCount > 0
       ? Math.round(raw.targetWordCount)
       : null;
-  const explicitCitationStyle =
-    typeof raw?.citationStyle === "string" && raw.citationStyle.trim()
+  const citationStyle =
+    typeof raw.citationStyle === "string" && raw.citationStyle.trim()
       ? raw.citationStyle.trim()
       : null;
   const usedDefaultWordCount =
-    typeof raw?.usedDefaultWordCount === "boolean" ? raw.usedDefaultWordCount : null;
+    typeof raw.usedDefaultWordCount === "boolean" ? raw.usedDefaultWordCount : null;
   const usedDefaultCitationStyle =
-    typeof raw?.usedDefaultCitationStyle === "boolean" ? raw.usedDefaultCitationStyle : null;
+    typeof raw.usedDefaultCitationStyle === "boolean" ? raw.usedDefaultCitationStyle : null;
 
   const missingFields: string[] = [];
-  if (explicitWordCount === null) missingFields.push("targetWordCount");
-  if (explicitCitationStyle === null) missingFields.push("citationStyle");
+  if (targetWordCount === null) missingFields.push("targetWordCount");
+  if (citationStyle === null) missingFields.push("citationStyle");
   if (usedDefaultWordCount === null) missingFields.push("usedDefaultWordCount");
   if (usedDefaultCitationStyle === null) missingFields.push("usedDefaultCitationStyle");
 
   if (missingFields.length > 0) {
-    throw createModelAnalysisError("MODEL_ANALYSIS_INCOMPLETE", missingFields);
+    throw createModelAnalysisError("MODEL_REQUIREMENTS_INCOMPLETE", missingFields);
   }
-
-  const normalizedWordCount = explicitWordCount as number;
-  const normalizedCitationStyle = explicitCitationStyle as string;
-  const normalizedUsedDefaultWordCount = usedDefaultWordCount as boolean;
-  const normalizedUsedDefaultCitationStyle = usedDefaultCitationStyle as boolean;
 
   return {
     chosenTaskFileId,
     supportingFileIds,
     ignoredFileIds,
-    needsUserConfirmation: Boolean(raw?.needsUserConfirmation) || !chosenTaskFileId,
+    needsUserConfirmation: Boolean(raw.needsUserConfirmation) || !chosenTaskFileId,
     reasoning:
-      typeof raw?.reasoning === "string" && raw.reasoning.trim()
+      typeof raw.reasoning === "string" && raw.reasoning.trim()
         ? raw.reasoning.trim()
         : "The model analyzed the uploaded materials.",
-    targetWordCount: normalizedWordCount,
-    citationStyle: normalizedCitationStyle,
+    targetWordCount: targetWordCount as number,
+    citationStyle: citationStyle as string,
     topic:
-      typeof raw?.topic === "string" && raw.topic.trim()
-        ? raw.topic.trim()
-        : outlineTitle?.trim() || null,
+      typeof raw.topic === "string" && raw.topic.trim() ? raw.topic.trim() : null,
     chapterCount:
-      typeof raw?.chapterCount === "number" && raw.chapterCount > 0
+      typeof raw.chapterCount === "number" && raw.chapterCount > 0
         ? Math.round(raw.chapterCount)
         : null,
-    mustCover: normalizeStrings(raw?.mustCover),
-    gradingFocus: normalizeStrings(raw?.gradingFocus),
+    mustCover: normalizeStrings(raw.mustCover),
+    gradingFocus: normalizeStrings(raw.gradingFocus),
     appliedSpecialRequirements:
-      typeof raw?.appliedSpecialRequirements === "string"
+      typeof raw.appliedSpecialRequirements === "string"
         ? raw.appliedSpecialRequirements
         : input.specialRequirements,
-    usedDefaultWordCount: normalizedUsedDefaultWordCount,
-    usedDefaultCitationStyle: normalizedUsedDefaultCitationStyle,
-    warnings: normalizeStrings(raw?.warnings)
+    usedDefaultWordCount: usedDefaultWordCount as boolean,
+    usedDefaultCitationStyle: usedDefaultCitationStyle as boolean,
+    warnings: normalizeStrings(raw.warnings)
   };
 }
 
 function normalizeOutline(
-  raw: ParsedResult["outline"],
+  rawResponse: {
+    parsed: ParsedOutline | null;
+    rawText: string;
+  },
   analysis: TaskAnalysisSnapshot
-): OutlineScaffold | null {
-  if (analysis.needsUserConfirmation) {
-    return null;
-  }
-
-  if (
-    !raw?.articleTitle ||
-    !Array.isArray(raw.sections) ||
-    raw.sections.length === 0
-  ) {
-    return null;
+): OutlineScaffold {
+  const raw = rawResponse.parsed;
+  if (!raw?.articleTitle || !Array.isArray(raw.sections) || raw.sections.length === 0) {
+    throw createModelAnalysisError("MODEL_OUTLINE_INCOMPLETE", ["outline"]);
   }
 
   const sections = raw.sections
@@ -488,7 +491,7 @@ function normalizeOutline(
     );
 
   if (sections.length === 0) {
-    return null;
+    throw createModelAnalysisError("MODEL_OUTLINE_INCOMPLETE", ["sections"]);
   }
 
   const outline = {
@@ -498,42 +501,70 @@ function normalizeOutline(
     sections,
     chineseMirrorPending: true,
     chineseMirror: null
-  };
+  } satisfies OutlineScaffold;
 
-  return isMeaningfulOutline(outline) ? outline : null;
-}
-
-function isRetryableModelAnalysisError(error: unknown): error is AnalyzeServiceError {
-  const message = error instanceof Error ? error.message : String(error);
-  return (
-    message === "MODEL_ANALYSIS_INCOMPLETE" ||
-    message === "MODEL_RETURNED_EMPTY_OUTLINE"
-  );
-}
-
-function mapAfterRetryCode(code: string) {
-  switch (code) {
-    case "MODEL_ANALYSIS_INCOMPLETE":
-      return "MODEL_ANALYSIS_INCOMPLETE_AFTER_RETRY";
-    case "MODEL_RETURNED_EMPTY_OUTLINE":
-      return "MODEL_RETURNED_EMPTY_OUTLINE_AFTER_RETRY";
-    default:
-      return code;
+  if (!isMeaningfulOutline(outline)) {
+    throw createModelAnalysisError("MODEL_OUTLINE_INCOMPLETE", ["outline"]);
   }
+
+  return outline;
+}
+
+function canReuseSeedAnalysis(
+  analysis: TaskAnalysisSnapshot | null | undefined,
+  forcedPrimaryFileId?: string | null
+) {
+  if (!analysis) {
+    return false;
+  }
+
+  if (forcedPrimaryFileId && analysis.chosenTaskFileId !== forcedPrimaryFileId) {
+    return false;
+  }
+
+  return true;
+}
+
+function isRequirementsIncompleteError(error: unknown): error is AnalyzeServiceError {
+  const message = error instanceof Error ? error.message : String(error);
+  return message === "MODEL_REQUIREMENTS_INCOMPLETE";
+}
+
+function isOutlineIncompleteError(error: unknown): error is AnalyzeServiceError {
+  const message = error instanceof Error ? error.message : String(error);
+  return message === "MODEL_OUTLINE_INCOMPLETE";
+}
+
+function mapOpenAIServiceError(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error);
+
+  if (message === "OpenAI request timed out") {
+    return createModelAnalysisError("MODEL_ANALYSIS_TIMEOUT");
+  }
+
+  if (
+    message.startsWith("OpenAI request failed with status") ||
+    message.includes("fetch failed") ||
+    message.includes("network")
+  ) {
+    return createModelAnalysisError("UPSTREAM_MODEL_UNAVAILABLE");
+  }
+
+  return error instanceof Error ? error : new Error(String(error));
 }
 
 function createModelAnalysisError(
   code: string,
   missingFields?: string[],
-  diagnostics?: AnalyzeAttemptDiagnostics[]
+  partialAnalysis?: TaskAnalysisSnapshot
 ) {
   const error = new Error(code) as AnalyzeServiceError;
   error.code = code;
   if (missingFields?.length) {
     error.missingFields = missingFields;
   }
-  if (diagnostics?.length) {
-    error.diagnostics = diagnostics;
+  if (partialAnalysis) {
+    error.partialAnalysis = partialAnalysis;
   }
   return error;
 }
@@ -553,9 +584,23 @@ function normalizeStrings(value: unknown) {
     return [];
   }
 
-  return [...new Set(value.filter((item): item is string => typeof item === "string"))].map(
-    (item) => item.trim()
-  ).filter(Boolean);
+  return [...new Set(value.filter((item): item is string => typeof item === "string"))]
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function isPdfTransportOnly(
+  file: Pick<
+    ModelReadyTaskFile,
+    "originalFilename" | "contentType" | "extractionMethod" | "extractedText"
+  >
+) {
+  return (
+    (file.contentType === "application/pdf" ||
+      file.originalFilename.toLowerCase().endsWith(".pdf")) &&
+    (file.extractionMethod === "transport_only_pdf" ||
+      file.extractedText.startsWith("[pdf transport-only:"))
+  );
 }
 
 function isPdfFile(file: Pick<ModelReadyTaskFile, "originalFilename" | "contentType">) {

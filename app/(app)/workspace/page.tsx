@@ -43,5 +43,9 @@ export default async function WorkspacePage() {
     throw error;
   }
 
-  return <WorkspacePageClient initialQuota={wallet.rechargeQuota} />;
+  return (
+    <WorkspacePageClient
+      initialQuota={wallet.rechargeQuota}
+    />
+  );
 }

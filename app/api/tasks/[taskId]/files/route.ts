@@ -4,6 +4,7 @@ import { extractTextFromImageWithVision } from "@/src/lib/ai/services/extract-te
 import { requireCurrentSessionUser } from "@/src/lib/auth/current-user";
 import { detectSupportedFileKind } from "@/src/lib/files/file-kind";
 import { shouldUseSupabasePersistence } from "@/src/lib/persistence/runtime-mode";
+import { resolveInlineAnalysisFailure } from "@/src/lib/tasks/inline-analysis-failure";
 import { runInlineFirstOutline } from "@/src/lib/tasks/inline-first-outline";
 import {
   getOwnedTaskSummary,
@@ -14,7 +15,6 @@ import {
   toSessionTaskHumanizePayload,
   toSessionTaskPayload
 } from "@/src/lib/tasks/session-task";
-import type { TaskAnalysisSnapshot } from "@/src/types/tasks";
 import type { SessionUser } from "@/src/types/auth";
 
 export const maxDuration = 300;
@@ -240,6 +240,11 @@ export async function handleTaskFileUploadRequest(
       );
     }
 
+    const failure = resolveInlineAnalysisFailure(
+      result.taskSummary.analysisErrorMessage,
+      result.analysis
+    );
+
     return NextResponse.json(
       {
         ok: false,
@@ -253,9 +258,9 @@ export async function handleTaskFileUploadRequest(
         ruleCard: result.ruleCard,
         outline: result.outline,
         humanize: result.humanize,
-        message: mapInlineFailureMessage(result.taskSummary.analysisErrorMessage, result.analysis)
+        message: failure.message
       },
-      { status: 502 }
+      { status: failure.status }
     );
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error);
@@ -314,38 +319,4 @@ export async function POST(request: Request, context: RouteContext) {
 async function extractTextFromUploadLazily(file: File) {
   const { extractTextFromUpload } = await import("@/src/lib/files/extract-text");
   return extractTextFromUpload(file);
-}
-
-function mapInlineFailureMessage(
-  analysisErrorMessage: string | null | undefined,
-  analysis: TaskAnalysisSnapshot | null
-) {
-  const warning = analysis?.warnings?.find((item) => item.startsWith("analysis_failed:"));
-  const code =
-    analysisErrorMessage?.trim() ||
-    warning?.replace("analysis_failed:", "")?.trim() ||
-    "";
-
-  if (
-    code === "MODEL_ANALYSIS_INCOMPLETE" ||
-    code === "MODEL_ANALYSIS_INCOMPLETE_AFTER_RETRY" ||
-    code === "MODEL_RETURNED_EMPTY_OUTLINE" ||
-    code === "MODEL_RETURNED_EMPTY_OUTLINE_AFTER_RETRY"
-  ) {
-    return "系统已经读到你上传的文件，但模型这次返回内容不完整。请直接再试一次，不用重新上传。";
-  }
-
-  if (code === "MODEL_ANALYSIS_TIMEOUT") {
-    return "系统已经开始分析你上传的文件，但这次处理时间过长。请直接再试一次，不用重新上传。";
-  }
-
-  if (code === "INLINE_ANALYSIS_DID_NOT_FINISH") {
-    return "这次分析没有正常完成。你可以直接再试一次，不用重新上传文件。";
-  }
-
-  if (code.startsWith("OpenAI request failed with status")) {
-    return "模型服务暂时不稳定，请稍后再试。";
-  }
-
-  return "系统分析失败了，请直接再试一次，不用重新上传文件。";
 }

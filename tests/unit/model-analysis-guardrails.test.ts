@@ -24,64 +24,52 @@ describe("model analysis guardrails", () => {
     requestOpenAITextResponseMock.mockReset();
   });
 
-  it("retries once when the first model response is incomplete, then succeeds", async () => {
+  it("retries requirements analysis once, then uses the completed requirements to generate the outline", async () => {
     requestOpenAITextResponseMock
       .mockResolvedValueOnce({
         output_text: JSON.stringify({
-          analysis: {
-            chosenTaskFileId: "file-1",
-            supportingFileIds: [],
-            ignoredFileIds: [],
-            needsUserConfirmation: false,
-            reasoning: "First response missed required fields.",
-            topic: "Finance Risk Governance in ASEAN Banks",
-            chapterCount: 6,
-            mustCover: [],
-            gradingFocus: [],
-            appliedSpecialRequirements: "",
-            warnings: []
-          },
-          outline: {
-            articleTitle: "Finance Risk Governance in ASEAN Banks",
-            sections: [
-              {
-                title: "Introduction",
-                summary: "Introduce the governance problem and essay focus.",
-                bulletPoints: ["Context", "Problem", "Argument"]
-              }
-            ]
-          }
+          chosenTaskFileId: "file-1",
+          supportingFileIds: [],
+          ignoredFileIds: [],
+          needsUserConfirmation: false,
+          reasoning: "First response missed required fields.",
+          topic: "Finance Risk Governance in ASEAN Banks",
+          chapterCount: 6,
+          mustCover: [],
+          gradingFocus: [],
+          appliedSpecialRequirements: "",
+          warnings: []
         })
       })
       .mockResolvedValueOnce({
         output_text: JSON.stringify({
-          analysis: {
-            chosenTaskFileId: "file-1",
-            supportingFileIds: [],
-            ignoredFileIds: [],
-            needsUserConfirmation: false,
-            reasoning: "The second response is complete.",
-            targetWordCount: 2750,
-            citationStyle: "Harvard",
-            topic: "Finance Risk Governance in ASEAN Banks",
-            chapterCount: 6,
-            mustCover: ["ASEAN banking risk"],
-            gradingFocus: ["Critical analysis"],
-            appliedSpecialRequirements: "",
-            usedDefaultWordCount: false,
-            usedDefaultCitationStyle: false,
-            warnings: []
-          },
-          outline: {
-            articleTitle: "Finance Risk Governance in ASEAN Banks",
-            sections: [
-              {
-                title: "Introduction",
-                summary: "Introduce the governance problem and essay focus.",
-                bulletPoints: ["Context", "Problem", "Argument"]
-              }
-            ]
-          }
+          chosenTaskFileId: "file-1",
+          supportingFileIds: [],
+          ignoredFileIds: [],
+          needsUserConfirmation: false,
+          reasoning: "The second response is complete.",
+          targetWordCount: 2750,
+          citationStyle: "Harvard",
+          topic: "Finance Risk Governance in ASEAN Banks",
+          chapterCount: 6,
+          mustCover: ["ASEAN banking risk"],
+          gradingFocus: ["Critical analysis"],
+          appliedSpecialRequirements: "",
+          usedDefaultWordCount: false,
+          usedDefaultCitationStyle: false,
+          warnings: []
+        })
+      })
+      .mockResolvedValueOnce({
+        output_text: JSON.stringify({
+          articleTitle: "Finance Risk Governance in ASEAN Banks",
+          sections: [
+            {
+              title: "Introduction",
+              summary: "Introduce the governance problem and essay focus.",
+              bulletPoints: ["Context", "Problem", "Argument"]
+            }
+          ]
         })
       });
 
@@ -98,19 +86,23 @@ describe("model analysis guardrails", () => {
 
     expect(result.analysis.targetWordCount).toBe(2750);
     expect(result.analysis.citationStyle).toBe("Harvard");
-    expect(requestOpenAITextResponseMock).toHaveBeenCalledTimes(2);
+    expect(result.outline?.articleTitle).toBe("Finance Risk Governance in ASEAN Banks");
+    expect(requestOpenAITextResponseMock).toHaveBeenCalledTimes(3);
     expect(requestOpenAITextResponseMock.mock.calls[0]?.[0]).toMatchObject({
       reasoningEffort: "medium"
     });
     expect(requestOpenAITextResponseMock.mock.calls[1]?.[0]).toMatchObject({
       reasoningEffort: "medium"
     });
+    expect(requestOpenAITextResponseMock.mock.calls[2]?.[0]).toMatchObject({
+      reasoningEffort: "medium"
+    });
   });
 
   it("uses the model's outline title when the response omits a separate topic field", async () => {
-    requestOpenAITextResponseMock.mockResolvedValue({
-      output_text: JSON.stringify({
-        analysis: {
+    requestOpenAITextResponseMock
+      .mockResolvedValueOnce({
+        output_text: JSON.stringify({
           chosenTaskFileId: "file-1",
           supportingFileIds: [],
           ignoredFileIds: [],
@@ -126,17 +118,18 @@ describe("model analysis guardrails", () => {
           usedDefaultWordCount: false,
           usedDefaultCitationStyle: false,
           warnings: []
-        },
-        outline: {
-          articleTitle: "Finance Risk Governance in ASEAN Banks",
-          sections: [
-            {
-              title: "Introduction",
-              summary: "Introduce the governance problem and essay focus.",
-              bulletPoints: ["Context", "Problem", "Argument"]
-            }
-          ]
-        }
+        })
+      })
+      .mockResolvedValueOnce({
+      output_text: JSON.stringify({
+        articleTitle: "Finance Risk Governance in ASEAN Banks",
+        sections: [
+          {
+            title: "Introduction",
+            summary: "Introduce the governance problem and essay focus.",
+            bulletPoints: ["Context", "Problem", "Argument"]
+          }
+        ]
       })
     });
 
@@ -158,56 +151,32 @@ describe("model analysis guardrails", () => {
     requestOpenAITextResponseMock
       .mockResolvedValueOnce({
         output_text: JSON.stringify({
-          analysis: {
-            chosenTaskFileId: "file-1",
-            supportingFileIds: [],
-            ignoredFileIds: [],
-            needsUserConfirmation: false,
-            reasoning: "The first response is incomplete.",
-            topic: "Finance Risk Governance in ASEAN Banks",
-            chapterCount: 6,
-            mustCover: [],
-            gradingFocus: [],
-            appliedSpecialRequirements: "",
-            warnings: []
-          },
-          outline: {
-            articleTitle: "Finance Risk Governance in ASEAN Banks",
-            sections: [
-              {
-                title: "Introduction",
-                summary: "Introduce the governance problem and essay focus.",
-                bulletPoints: ["Context", "Problem", "Argument"]
-              }
-            ]
-          }
+          chosenTaskFileId: "file-1",
+          supportingFileIds: [],
+          ignoredFileIds: [],
+          needsUserConfirmation: false,
+          reasoning: "The first response is incomplete.",
+          topic: "Finance Risk Governance in ASEAN Banks",
+          chapterCount: 6,
+          mustCover: [],
+          gradingFocus: [],
+          appliedSpecialRequirements: "",
+          warnings: []
         })
       })
       .mockResolvedValueOnce({
         output_text: JSON.stringify({
-          analysis: {
-            chosenTaskFileId: "file-1",
-            supportingFileIds: [],
-            ignoredFileIds: [],
-            needsUserConfirmation: false,
-            reasoning: "The retry response is still incomplete.",
-            topic: "Finance Risk Governance in ASEAN Banks",
-            chapterCount: 6,
-            mustCover: [],
-            gradingFocus: [],
-            appliedSpecialRequirements: "",
-            warnings: []
-          },
-          outline: {
-            articleTitle: "Finance Risk Governance in ASEAN Banks",
-            sections: [
-              {
-                title: "Introduction",
-                summary: "Introduce the governance problem and essay focus.",
-                bulletPoints: ["Context", "Problem", "Argument"]
-              }
-            ]
-          }
+          chosenTaskFileId: "file-1",
+          supportingFileIds: [],
+          ignoredFileIds: [],
+          needsUserConfirmation: false,
+          reasoning: "The retry response is still incomplete.",
+          topic: "Finance Risk Governance in ASEAN Banks",
+          chapterCount: 6,
+          mustCover: [],
+          gradingFocus: [],
+          appliedSpecialRequirements: "",
+          warnings: []
         })
       });
 
@@ -222,13 +191,80 @@ describe("model analysis guardrails", () => {
           }
         ]
       })
-    ).rejects.toThrow("MODEL_ANALYSIS_INCOMPLETE_AFTER_RETRY");
+    ).rejects.toThrow("MODEL_REQUIREMENTS_INCOMPLETE_AFTER_RETRY");
+  });
+
+  it("fails fast when a transport-only pdf did not get an OpenAI file id", async () => {
+    await expect(
+      analyzeUploadedTaskWithOpenAI({
+        specialRequirements: "",
+        files: [
+          {
+            id: "pdf-1",
+            originalFilename: "assignment.pdf",
+            extractedText: "[pdf transport-only: assignment.pdf]",
+            contentType: "application/pdf",
+            openaiFileId: null
+          }
+        ]
+      })
+    ).rejects.toThrow("MODEL_INPUT_NOT_READY");
+
+    expect(requestOpenAITextResponseMock).not.toHaveBeenCalled();
+  });
+
+  it("keeps the successful requirements analysis and only fails the outline stage when the outline stays incomplete", async () => {
+    requestOpenAITextResponseMock
+      .mockResolvedValueOnce({
+        output_text: JSON.stringify({
+          chosenTaskFileId: "file-1",
+          supportingFileIds: [],
+          ignoredFileIds: [],
+          needsUserConfirmation: false,
+          reasoning: "The task brief is clear.",
+          targetWordCount: 2750,
+          citationStyle: "Harvard",
+          topic: "Finance Risk Governance in ASEAN Banks",
+          chapterCount: 6,
+          mustCover: ["ASEAN banking risk"],
+          gradingFocus: ["Critical analysis"],
+          appliedSpecialRequirements: "",
+          usedDefaultWordCount: false,
+          usedDefaultCitationStyle: false,
+          warnings: []
+        })
+      })
+      .mockResolvedValueOnce({
+        output_text: JSON.stringify({
+          articleTitle: "",
+          sections: []
+        })
+      })
+      .mockResolvedValueOnce({
+        output_text: JSON.stringify({
+          articleTitle: "",
+          sections: []
+        })
+      });
+
+    await expect(
+      analyzeUploadedTaskWithOpenAI({
+        specialRequirements: "",
+        files: [
+          {
+            id: "file-1",
+            originalFilename: "assignment.txt",
+            extractedText: "Assignment brief text."
+          }
+        ]
+      })
+    ).rejects.toThrow("MODEL_OUTLINE_INCOMPLETE_AFTER_RETRY");
   });
 
   it("uses native PDF file input instead of raw extracted text when openai_file_id exists", async () => {
-    requestOpenAITextResponseMock.mockResolvedValue({
-      output_text: JSON.stringify({
-        analysis: {
+    requestOpenAITextResponseMock
+      .mockResolvedValueOnce({
+        output_text: JSON.stringify({
           chosenTaskFileId: "pdf-1",
           supportingFileIds: [],
           ignoredFileIds: [],
@@ -244,17 +280,18 @@ describe("model analysis guardrails", () => {
           usedDefaultWordCount: false,
           usedDefaultCitationStyle: false,
           warnings: []
-        },
-        outline: {
-          articleTitle: "Finance Risk Governance in ASEAN Banks",
-          sections: [
-            {
-              title: "Introduction",
-              summary: "Introduce the governance problem and essay focus.",
-              bulletPoints: ["Context", "Problem", "Argument"]
-            }
-          ]
-        }
+        })
+      })
+      .mockResolvedValueOnce({
+      output_text: JSON.stringify({
+        articleTitle: "Finance Risk Governance in ASEAN Banks",
+        sections: [
+          {
+            title: "Introduction",
+            summary: "Introduce the governance problem and essay focus.",
+            bulletPoints: ["Context", "Problem", "Argument"]
+          }
+        ]
       })
     });
 

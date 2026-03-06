@@ -236,6 +236,22 @@ export async function persistTaskModelAnalysis(input: {
   requireFormalPersistence();
 }
 
+export async function persistTaskPartialModelAnalysis(input: {
+  taskId: string;
+  userId: string;
+  analysis: TaskAnalysisSnapshot;
+}) {
+  if (shouldUseSupabasePersistence()) {
+    return persistTaskPartialModelAnalysisWithSupabase(input);
+  }
+
+  if (shouldUseLocalTestPersistence()) {
+    return persistTaskPartialModelAnalysisLocally(input);
+  }
+
+  requireFormalPersistence();
+}
+
 export async function markTaskAnalysisFailed(input: {
   taskId: string;
   userId: string;
@@ -634,6 +650,93 @@ async function persistTaskModelAnalysisWithSupabase(input: {
       : buildRuleCardFromAnalysis(input.analysis, input.outline),
     outline: input.outline
   };
+}
+
+async function persistTaskPartialModelAnalysisLocally(input: {
+  taskId: string;
+  userId: string;
+  analysis: TaskAnalysisSnapshot;
+}) {
+  const task = getTaskSummary(input.taskId);
+
+  if (!task || task.userId !== input.userId) {
+    throw new Error("TASK_NOT_FOUND");
+  }
+
+  const currentFiles = listTaskFiles(input.taskId);
+  const resolvedTopic = input.analysis.topic ?? task.topic ?? null;
+  const nextFiles = currentFiles.map((file) => ({
+    ...file,
+    role: resolveRoleFromAnalysis(file.id, input.analysis),
+    isPrimary: file.id === input.analysis.chosenTaskFileId,
+    updatedAt: new Date().toISOString()
+  }));
+
+  replaceTaskFiles(input.taskId, nextFiles);
+
+  patchTaskSummary(input.taskId, {
+    primaryRequirementFileId: input.analysis.chosenTaskFileId,
+    targetWordCount: input.analysis.targetWordCount,
+    citationStyle: input.analysis.citationStyle,
+    topic: resolvedTopic,
+    requestedChapterCount: input.analysis.chapterCount,
+    analysisSnapshot: input.analysis,
+    analysisModel: normalizeAnalysisModel("gpt-5.2"),
+    analysisErrorMessage: null,
+    analysisStartedAt: task.analysisStartedAt ?? new Date().toISOString()
+  });
+}
+
+async function persistTaskPartialModelAnalysisWithSupabase(input: {
+  taskId: string;
+  userId: string;
+  analysis: TaskAnalysisSnapshot;
+}) {
+  const client = createSupabaseAdminClient();
+  const ownedTask = await getOwnedTaskSummary(input.taskId, input.userId);
+
+  if (!ownedTask) {
+    throw new Error("TASK_NOT_FOUND");
+  }
+
+  const files = await listTaskFilesWithSupabase(input.taskId, input.userId);
+  const resolvedTopic = input.analysis.topic ?? ownedTask.topic ?? null;
+
+  for (const file of files) {
+    const { error } = await client
+      .from("task_files")
+      .update({
+        role: resolveRoleFromAnalysis(file.id, input.analysis),
+        is_primary: file.id === input.analysis.chosenTaskFileId
+      })
+      .eq("id", file.id)
+      .eq("task_id", input.taskId)
+      .eq("user_id", input.userId);
+
+    if (error) {
+      throw new Error(`保存部分分析结果失败：${error.message}`);
+    }
+  }
+
+  const { error } = await client
+    .from("writing_tasks")
+    .update({
+      primary_requirement_file_id: input.analysis.chosenTaskFileId,
+      target_word_count: input.analysis.targetWordCount,
+      citation_style: input.analysis.citationStyle,
+      topic: resolvedTopic,
+      requested_chapter_count: input.analysis.chapterCount,
+      analysis_snapshot: input.analysis,
+      analysis_model: normalizeAnalysisModel("gpt-5.2"),
+      analysis_error_message: null,
+      analysis_started_at: ownedTask.analysisStartedAt ?? new Date().toISOString()
+    })
+    .eq("id", input.taskId)
+    .eq("user_id", input.userId);
+
+  if (error) {
+    throw new Error(`保存部分分析结果失败：${error.message}`);
+  }
 }
 
 async function listTaskFilesWithSupabase(taskId: string, userId: string) {

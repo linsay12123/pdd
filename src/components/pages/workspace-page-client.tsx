@@ -42,6 +42,7 @@ import Link from "next/link";
 
 type WorkspacePageClientProps = {
   initialQuota: number;
+  initialActiveTask?: WorkspaceTaskState | null;
 };
 
 type NoticeState = {
@@ -71,14 +72,17 @@ const MAX_UPLOAD_FILE_COUNT = 10;
 const MAX_UPLOAD_FILE_BYTES = 25 * 1024 * 1024;
 const MAX_UPLOAD_FILE_MB = MAX_UPLOAD_FILE_BYTES / (1024 * 1024);
 
-export function WorkspacePageClient({ initialQuota }: WorkspacePageClientProps) {
-  const [step, setStep] = useState(1);
+export function WorkspacePageClient({
+  initialQuota,
+  initialActiveTask = null
+}: WorkspacePageClientProps) {
+  const [step, setStep] = useState(() => deriveInitialStep(initialActiveTask));
   const [files, setFiles] = useState<File[]>([]);
   const [requirements, setRequirements] = useState("");
   const [outlineFeedback, setOutlineFeedback] = useState("");
   const [quota, setQuota] = useState(initialQuota);
   const [notice, setNotice] = useState<NoticeState | null>(null);
-  const [activeTask, setActiveTask] = useState<WorkspaceTaskState | null>(null);
+  const [activeTask, setActiveTask] = useState<WorkspaceTaskState | null>(initialActiveTask);
   const [selectedPrimaryFileId, setSelectedPrimaryFileId] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isConfirmingPrimaryFile, setIsConfirmingPrimaryFile] = useState(false);
@@ -1351,4 +1355,23 @@ export function WorkspacePageClient({ initialQuota }: WorkspacePageClientProps) 
       </div>
     </div>
   );
+}
+
+function deriveInitialStep(task: WorkspaceTaskState | null) {
+  if (!task) {
+    return 1;
+  }
+
+  if (
+    task.task.status === "drafting" ||
+    task.task.status === "adjusting_word_count" ||
+    task.task.status === "verifying_references" ||
+    task.task.status === "exporting" ||
+    task.task.status === "deliverable_ready" ||
+    task.task.status === "humanizing"
+  ) {
+    return 3;
+  }
+
+  return 2;
 }

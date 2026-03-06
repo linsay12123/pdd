@@ -1,4 +1,4 @@
-export function buildAnalyzeUploadedTaskInstruction(input: {
+function buildSharedPolicyLines(input: {
   specialRequirements: string;
   forcedPrimaryFileId?: string | null;
 }) {
@@ -7,37 +7,6 @@ export function buildAnalyzeUploadedTaskInstruction(input: {
     "Read every uploaded file provided in this request before deciding anything.",
     "The application has NOT interpreted the files for you. Treat any extracted text as raw transport only.",
     "You must decide the task requirements yourself from the materials.",
-    "",
-    "Return ONLY valid JSON with this exact structure:",
-    "{",
-    '  "analysis": {',
-    '    "chosenTaskFileId": "<file id or null>",',
-    '    "supportingFileIds": ["<file id>"],',
-    '    "ignoredFileIds": ["<file id>"],',
-    '    "needsUserConfirmation": <true or false>,',
-    '    "reasoning": "<brief explanation>",',
-    '    "targetWordCount": <number>,',
-    '    "citationStyle": "<string>",',
-    '    "topic": "<string>",',
-    '    "chapterCount": <number or null>,',
-    '    "mustCover": ["<item>"],',
-    '    "gradingFocus": ["<item>"],',
-    '    "appliedSpecialRequirements": "<string>",',
-    '    "usedDefaultWordCount": <true or false>,',
-    '    "usedDefaultCitationStyle": <true or false>,',
-    '    "warnings": ["<warning>"]',
-    "  },",
-    '  "outline": {',
-    '    "articleTitle": "<English article title>",',
-    '    "sections": [',
-    '      {',
-    '        "title": "<short English section title>",',
-    '        "summary": "<English sentence explaining what this section will cover>",',
-    '        "bulletPoints": ["<specific point>", "<specific point>"]',
-    "      }",
-    "    ]",
-    "  } | null",
-    "}",
     "",
     "Rules:",
     "- Hard requirements stated in the task brief override everything else.",
@@ -68,5 +37,76 @@ export function buildAnalyzeUploadedTaskInstruction(input: {
     );
   }
 
-  return lines.join("\n");
+  return lines;
+}
+
+export function buildAnalyzeUploadedTaskRequirementsInstruction(input: {
+  specialRequirements: string;
+  forcedPrimaryFileId?: string | null;
+}) {
+  return [
+    ...buildSharedPolicyLines(input),
+    "",
+    "Return ONLY valid JSON with this exact structure:",
+    "{",
+    '  "chosenTaskFileId": "<file id or null>",',
+    '  "supportingFileIds": ["<file id>"],',
+    '  "ignoredFileIds": ["<file id>"],',
+    '  "needsUserConfirmation": <true or false>,',
+    '  "reasoning": "<brief explanation>",',
+    '  "targetWordCount": <number>,',
+    '  "citationStyle": "<string>",',
+    '  "topic": "<string or empty string>",',
+    '  "chapterCount": <number or null>,',
+    '  "mustCover": ["<item>"],',
+    '  "gradingFocus": ["<item>"],',
+    '  "appliedSpecialRequirements": "<string>",',
+    '  "usedDefaultWordCount": <true or false>,',
+    '  "usedDefaultCitationStyle": <true or false>,',
+    '  "warnings": ["<warning>"]',
+    "}",
+    "",
+    "Do NOT generate the outline in this step.",
+    "Only extract the writing requirements and file classification."
+  ].join("\n");
+}
+
+export function buildAnalyzeUploadedTaskInstruction(input: {
+  specialRequirements: string;
+  forcedPrimaryFileId?: string | null;
+}) {
+  return [
+    ...buildSharedPolicyLines(input),
+    "",
+    "Return ONLY valid JSON with this exact structure:",
+    "{",
+    '  "analysis": {',
+    '    "chosenTaskFileId": "<file id or null>",',
+    '    "supportingFileIds": ["<file id>"],',
+    '    "ignoredFileIds": ["<file id>"],',
+    '    "needsUserConfirmation": <true or false>,',
+    '    "reasoning": "<brief explanation>",',
+    '    "targetWordCount": <number>,',
+    '    "citationStyle": "<string>",',
+    '    "topic": "<string>",',
+    '    "chapterCount": <number or null>,',
+    '    "mustCover": ["<item>"],',
+    '    "gradingFocus": ["<item>"],',
+    '    "appliedSpecialRequirements": "<string>",',
+    '    "usedDefaultWordCount": <true or false>,',
+    '    "usedDefaultCitationStyle": <true or false>,',
+    '    "warnings": ["<warning>"]',
+    "  },",
+    '  "outline": {',
+    '    "articleTitle": "<English article title>",',
+    '    "sections": [',
+    '      {',
+    '        "title": "<short English section title>",',
+    '        "summary": "<English sentence explaining what this section will cover>",',
+    '        "bulletPoints": ["<specific point>", "<specific point>"]',
+    "      }",
+    "    ]",
+    "  } | null",
+    "}"
+  ].join("\n");
 }

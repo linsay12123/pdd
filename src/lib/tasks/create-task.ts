@@ -96,7 +96,6 @@ async function createTaskWithSupabase(
     targetWordCount: null,
     citationStyle: null,
     specialRequirements: input.specialRequirements,
-    analysisStatus: "pending",
     analysisModel: null,
     analysisRetryCount: 0,
     analysisErrorMessage: null,
