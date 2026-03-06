@@ -1,6 +1,8 @@
 import type { TriggerRunRuntimeState } from "@/src/lib/trigger/run-state";
 import {
   normalizeAnalysisModel,
+  TRIGGER_DEPLOYMENT_UNAVAILABLE_REASON,
+  TRIGGER_STARTUP_STALLED_REASON,
   TRIGGER_RUNTIME_UNAVAILABLE_REASON
 } from "@/src/lib/tasks/analysis-runtime-cleanup";
 import type { TaskSummary } from "@/src/types/tasks";
@@ -22,6 +24,7 @@ type StartTaskAnalysisRunInput = {
   userId: string;
   source: "upload" | "confirm_primary" | "manual_retry";
   forcedPrimaryFileId?: string | null;
+  checkCurrentDeploymentReady?: () => Promise<{ ok: boolean; detail: string }>;
   enqueueTaskAnalysis: (input: AnalysisTriggerInput) => Promise<string | null>;
   getTriggerRunState: (runId: string) => Promise<TriggerRuntimeSnapshot>;
   markTaskAnalysisPending: (input: {
@@ -51,6 +54,7 @@ type StartTaskAnalysisRunResult =
       autoRecovered: boolean;
       analysisRetryCount: number;
       analysisModel: string;
+      detail: string | null;
     }
   | {
       ok: false;
@@ -60,6 +64,7 @@ type StartTaskAnalysisRunResult =
       autoRecovered: boolean;
       analysisRetryCount: number;
       analysisModel: string;
+      detail: string | null;
     };
 
 export async function startTaskAnalysisRun(
@@ -67,6 +72,32 @@ export async function startTaskAnalysisRun(
 ): Promise<StartTaskAnalysisRunResult> {
   const analysisModel = normalizeAnalysisModel(input.task.analysisModel ?? "gpt-5.2");
   const firstAttemptRetryCount = computeFirstAttemptRetryCount(input.task, input.source);
+
+  if (input.checkCurrentDeploymentReady) {
+    const deployment = await input.checkCurrentDeploymentReady();
+    if (!deployment.ok) {
+      await input.markTaskAnalysisFailed({
+        taskId: input.task.id,
+        userId: input.userId,
+        reason: TRIGGER_DEPLOYMENT_UNAVAILABLE_REASON,
+        analysisRetryCount: firstAttemptRetryCount
+      });
+
+      return {
+        ok: false,
+        reason: TRIGGER_DEPLOYMENT_UNAVAILABLE_REASON,
+        triggerRunId: null,
+        runtime: {
+          state: "pending_version",
+          status: "PENDING_VERSION"
+        },
+        autoRecovered: false,
+        analysisRetryCount: firstAttemptRetryCount,
+        analysisModel,
+        detail: deployment.detail
+      };
+    }
+  }
 
   const firstAttempt = await enqueueAndInspectRun({
     taskId: input.task.id,
@@ -97,59 +128,27 @@ export async function startTaskAnalysisRun(
       runtime: normalizeAcceptedRuntime(firstAttempt.runtime),
       autoRecovered: false,
       analysisRetryCount: firstAttemptRetryCount,
-      analysisModel
-    };
-  }
-
-  const recoveredRetryCount = firstAttemptRetryCount + 1;
-  const recoveredAttempt = await enqueueAndInspectRun({
-    taskId: input.task.id,
-    userId: input.userId,
-    forcedPrimaryFileId: input.forcedPrimaryFileId ?? null,
-    analysisRetryCount: recoveredRetryCount,
-    source: input.source,
-    enqueueTaskAnalysis: input.enqueueTaskAnalysis,
-    getTriggerRunState: input.getTriggerRunState,
-    startupProbeAttempts: input.startupProbeAttempts,
-    startupProbeDelayMs: input.startupProbeDelayMs,
-    sleepImpl: input.sleepImpl
-  });
-
-  if (recoveredAttempt.accepted) {
-    await input.markTaskAnalysisPending({
-      taskId: input.task.id,
-      userId: input.userId,
-      primaryRequirementFileId: input.forcedPrimaryFileId,
-      triggerRunId: recoveredAttempt.triggerRunId,
       analysisModel,
-      analysisRetryCount: recoveredRetryCount
-    });
-
-    return {
-      ok: true,
-      triggerRunId: recoveredAttempt.triggerRunId,
-      runtime: normalizeAcceptedRuntime(recoveredAttempt.runtime),
-      autoRecovered: true,
-      analysisRetryCount: recoveredRetryCount,
-      analysisModel
+      detail: firstAttempt.detail
     };
   }
 
   await input.markTaskAnalysisFailed({
     taskId: input.task.id,
     userId: input.userId,
-    reason: recoveredAttempt.reason ?? TRIGGER_RUNTIME_UNAVAILABLE_REASON,
-    analysisRetryCount: recoveredRetryCount
+    reason: firstAttempt.reason ?? TRIGGER_RUNTIME_UNAVAILABLE_REASON,
+    analysisRetryCount: firstAttemptRetryCount
   });
 
   return {
     ok: false,
-    reason: recoveredAttempt.reason ?? TRIGGER_RUNTIME_UNAVAILABLE_REASON,
-    triggerRunId: recoveredAttempt.triggerRunId,
-    runtime: recoveredAttempt.runtime,
-    autoRecovered: true,
-    analysisRetryCount: recoveredRetryCount,
-    analysisModel
+    reason: firstAttempt.reason ?? TRIGGER_RUNTIME_UNAVAILABLE_REASON,
+    triggerRunId: firstAttempt.triggerRunId,
+    runtime: firstAttempt.runtime,
+    autoRecovered: false,
+    analysisRetryCount: firstAttemptRetryCount,
+    analysisModel,
+    detail: firstAttempt.detail
   };
 }
 
@@ -209,7 +208,8 @@ async function enqueueAndInspectRun(input: {
     triggerRunId,
     runtime: normalizeRuntimeSnapshot(runtime.runtime),
     accepted: runtime.accepted,
-    reason: runtime.reason
+    reason: runtime.reason,
+    detail: runtime.detail
   };
 }
 
@@ -269,11 +269,12 @@ async function confirmRunStartup(input: {
   accepted: boolean;
   runtime: TriggerRuntimeSnapshot;
   reason: string | null;
+  detail: string | null;
 }> {
   const attempts =
     Number.isFinite(input.startupProbeAttempts) && (input.startupProbeAttempts ?? 0) > 0
       ? Number(input.startupProbeAttempts)
-      : 4;
+      : 6;
   const delayMs =
     Number.isFinite(input.startupProbeDelayMs) && (input.startupProbeDelayMs ?? 0) >= 0
       ? Number(input.startupProbeDelayMs)
@@ -296,18 +297,14 @@ async function confirmRunStartup(input: {
     );
     const normalizedRuntime = normalizeRuntimeSnapshot(runtime);
 
-    // 一旦已经看到 Trigger 明确返回过 pending_version，就不要让后续的 unknown
-    // 把这条线索冲掉。这里的 pending_version 只表示“后台正在把这一轮接上”，
-    // 不是“这条任务已经坏了”。
-    if (!(normalizedRuntime.state === "unknown" && lastRuntime.state === "pending_version")) {
-      lastRuntime = normalizedRuntime;
-    }
+    lastRuntime = normalizedRuntime;
 
     if (isAcceptedStartupState(lastRuntime.state)) {
       return {
         accepted: true,
         runtime: lastRuntime,
-        reason: null
+        reason: null,
+        detail: "后台任务已经真正开始执行。"
       };
     }
 
@@ -319,12 +316,19 @@ async function confirmRunStartup(input: {
   return {
     accepted: false,
     runtime: lastRuntime,
-    reason: TRIGGER_RUNTIME_UNAVAILABLE_REASON
+    reason:
+      lastRuntime.state === "pending_version"
+        ? TRIGGER_DEPLOYMENT_UNAVAILABLE_REASON
+        : TRIGGER_STARTUP_STALLED_REASON,
+    detail:
+      lastRuntime.state === "pending_version"
+        ? "后台当前没有可执行版本，任务一直停在等待接版本。"
+        : "后台任务没有在启动窗口内真正开始执行。"
   };
 }
 
 function isAcceptedStartupState(state: TriggerRunRuntimeState) {
-  return state === "active" || state === "pending_version";
+  return state === "active";
 }
 
 function sleep(ms: number) {

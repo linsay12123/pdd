@@ -100,8 +100,26 @@ export async function requestTaskFileUpload({
   } | null;
 
   if (!response.ok) {
+    if (isTaskWorkflowPayload(payload)) {
+      return payload;
+    }
+
     throw new Error(payload?.message ?? "上传文件失败，请稍后再试");
   }
 
   return payload as TaskWorkflowPayload;
+}
+
+function isTaskWorkflowPayload(value: unknown): value is TaskWorkflowPayload {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+
+  const candidate = value as Partial<TaskWorkflowPayload>;
+  return Boolean(
+    candidate.task &&
+      Array.isArray(candidate.files) &&
+      typeof candidate.analysisStatus === "string" &&
+      candidate.analysisProgress
+  );
 }

@@ -503,6 +503,7 @@ async function persistTaskModelAnalysisLocally(input: {
     analysisStatus: "succeeded",
     analysisModel: "gpt-5.2",
     analysisErrorMessage: null,
+    analysisTriggerRunId: null,
     analysisStartedAt: task.analysisStartedAt ?? new Date().toISOString(),
     analysisCompletedAt: new Date().toISOString()
   });
@@ -593,6 +594,7 @@ async function persistTaskModelAnalysisWithSupabase(input: {
       analysis_status: "succeeded",
       analysis_model: normalizeAnalysisModel("gpt-5.2"),
       analysis_error_message: null,
+      analysis_trigger_run_id: null,
       analysis_started_at: ownedTask.analysisStartedAt ?? new Date().toISOString(),
       analysis_completed_at: new Date().toISOString()
     })
@@ -621,6 +623,7 @@ async function persistTaskModelAnalysisWithSupabase(input: {
       analysisStatus: "succeeded",
       analysisModel: normalizeAnalysisModel("gpt-5.2"),
       analysisErrorMessage: null,
+      analysisTriggerRunId: null,
       analysisStartedAt: ownedTask.analysisStartedAt ?? new Date().toISOString(),
       analysisCompletedAt: new Date().toISOString()
     },

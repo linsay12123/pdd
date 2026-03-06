@@ -4,18 +4,185 @@ vi.mock("server-only", () => ({}));
 
 import { handleTaskAnalysisRetryRequest } from "../../app/api/tasks/[taskId]/analysis/retry/route";
 import {
-  getTaskSummary,
   resetTaskFileStore,
   resetTaskStore,
   saveTaskFileRecords,
   saveTaskSummary
 } from "../../src/lib/tasks/repository";
+import type { InlineFirstOutlineResult } from "../../src/lib/tasks/inline-first-outline";
 
 function makeUser() {
   return {
     id: "user-1",
     email: "user-1@example.com",
     role: "user" as const
+  };
+}
+
+function makeSucceededInlineResult(
+  overrides: Partial<InlineFirstOutlineResult> = {}
+): InlineFirstOutlineResult {
+  return {
+    task: {
+      id: "task-1",
+      status: "awaiting_outline_approval",
+      targetWordCount: 1800,
+      citationStyle: "Harvard",
+      specialRequirements: "Focus on finance."
+    },
+    taskSummary: {
+      id: "task-1",
+      userId: "user-1",
+      status: "awaiting_outline_approval",
+      targetWordCount: 1800,
+      citationStyle: "Harvard",
+      specialRequirements: "Focus on finance.",
+      analysisStatus: "succeeded",
+      analysisModel: "gpt-5.2",
+      analysisRetryCount: 1,
+      analysisRequestedAt: new Date().toISOString(),
+      analysisStartedAt: new Date().toISOString(),
+      analysisCompletedAt: new Date().toISOString(),
+      analysisErrorMessage: null,
+      analysisTriggerRunId: null,
+      analysisSnapshot: {
+        chosenTaskFileId: "file-1",
+        supportingFileIds: [],
+        ignoredFileIds: [],
+        needsUserConfirmation: false,
+        reasoning: "The uploaded brief explicitly requires a Harvard-style finance essay.",
+        targetWordCount: 1800,
+        citationStyle: "Harvard",
+        topic: "Finance Risk Management",
+        chapterCount: 4,
+        mustCover: ["Risk identification", "Control framework"],
+        gradingFocus: ["Critical analysis"],
+        appliedSpecialRequirements: "Focus on finance.",
+        usedDefaultWordCount: false,
+        usedDefaultCitationStyle: false,
+        warnings: []
+      },
+      latestOutlineVersionId: "outline-1",
+      primaryRequirementFileId: "file-1"
+    },
+    files: [
+      {
+        id: "file-1",
+        taskId: "task-1",
+        userId: "user-1",
+        originalFilename: "assignment.txt",
+        storagePath: "tmp/assignment.txt",
+        extractedText: "Assignment brief text.",
+        role: "requirement",
+        isPrimary: true,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      }
+    ],
+    classification: {
+      primaryRequirementFileId: "file-1",
+      backgroundFileIds: [],
+      irrelevantFileIds: [],
+      needsUserConfirmation: false,
+      reasoning: "The uploaded brief explicitly requires a Harvard-style finance essay."
+    },
+    analysisStatus: "succeeded",
+    analysisProgress: {
+      requestedAt: new Date().toISOString(),
+      startedAt: new Date().toISOString(),
+      completedAt: new Date().toISOString(),
+      elapsedSeconds: 2,
+      maxWaitSeconds: 600,
+      canRetry: false
+    },
+    analysisRuntime: {
+      state: "not_applicable",
+      status: null,
+      detail: "首版大纲这一步已经在当前请求里直接完成，不再走后台排队。",
+      autoRecovered: false,
+      runId: null
+    },
+    analysis: {
+      chosenTaskFileId: "file-1",
+      supportingFileIds: [],
+      ignoredFileIds: [],
+      needsUserConfirmation: false,
+      reasoning: "The uploaded brief explicitly requires a Harvard-style finance essay.",
+      targetWordCount: 1800,
+      citationStyle: "Harvard",
+      topic: "Finance Risk Management",
+      chapterCount: 4,
+      mustCover: ["Risk identification", "Control framework"],
+      gradingFocus: ["Critical analysis"],
+      appliedSpecialRequirements: "Focus on finance.",
+      usedDefaultWordCount: false,
+      usedDefaultCitationStyle: false,
+      warnings: []
+    },
+    ruleCard: {
+      topic: "Finance Risk Management",
+      targetWordCount: 1800,
+      citationStyle: "Harvard",
+      chapterCountOverride: 4,
+      mustAnswer: ["Risk identification", "Control framework"],
+      gradingPriorities: ["Critical analysis"],
+      specialRequirements: "Focus on finance."
+    },
+    outline: {
+      articleTitle: "Finance Risk Management in Modern Banking",
+      targetWordCount: 1800,
+      citationStyle: "Harvard",
+      chineseMirrorPending: true,
+      sections: [
+        {
+          title: "Introduction",
+          summary: "Introduce the finance risk management problem and essay scope.",
+          bulletPoints: ["Define the scope", "Set the academic focus", "State the argument"]
+        }
+      ]
+    },
+    humanize: {
+      status: "idle",
+      provider: "undetectable",
+      requestedAt: null,
+      completedAt: null,
+      errorMessage: null
+    },
+    ...overrides
+  };
+}
+
+function makeFailedInlineResult(
+  overrides: Partial<InlineFirstOutlineResult> = {}
+): InlineFirstOutlineResult {
+  const succeeded = makeSucceededInlineResult();
+  return {
+    ...succeeded,
+    task: {
+      ...succeeded.task,
+      status: "created"
+    },
+    taskSummary: {
+      ...succeeded.taskSummary,
+      status: "created",
+      analysisStatus: "failed",
+      analysisErrorMessage: "MODEL_ANALYSIS_INCOMPLETE_AFTER_RETRY",
+      latestOutlineVersionId: null,
+      analysisSnapshot: null
+    },
+    analysisStatus: "failed",
+    analysisProgress: {
+      requestedAt: new Date().toISOString(),
+      startedAt: new Date().toISOString(),
+      completedAt: new Date().toISOString(),
+      elapsedSeconds: 5,
+      maxWaitSeconds: 600,
+      canRetry: true
+    },
+    analysis: null,
+    ruleCard: null,
+    outline: null,
+    ...overrides
   };
 }
 
@@ -29,61 +196,7 @@ describe("analysis retry route", () => {
     resetTaskFileStore();
   });
 
-  it("accepts retry when pending analysis has timed out", async () => {
-    saveTaskSummary({
-      id: "task-timeout",
-      userId: "user-1",
-      status: "created",
-      targetWordCount: null,
-      citationStyle: null,
-      specialRequirements: "",
-      analysisStatus: "pending",
-      analysisRequestedAt: new Date(Date.now() - 11 * 60 * 1000).toISOString()
-    });
-
-    saveTaskFileRecords([
-      {
-        id: "file-1",
-        taskId: "task-timeout",
-        userId: "user-1",
-        originalFilename: "brief.txt",
-        storagePath: "tmp/brief.txt",
-        extractedText: "brief",
-        role: "unknown",
-        isPrimary: false
-      }
-    ]);
-
-    const enqueueTaskAnalysis = vi.fn(async () => "run-1");
-    const response = await handleTaskAnalysisRetryRequest(
-      new Request("http://localhost/api/tasks/task-timeout/analysis/retry", {
-        method: "POST"
-      }),
-      { taskId: "task-timeout" },
-      {
-        isPersistenceReady: () => true,
-        requireUser: async () => makeUser(),
-        enqueueTaskAnalysis,
-        getTriggerRunState: async () => ({ state: "active", status: "QUEUED" }),
-        startupProbeAttempts: 1
-      }
-    );
-    const payload = await response.json();
-
-    expect(response.status).toBe(202);
-    expect(payload.analysisStatus).toBe("pending");
-    expect(payload.analysisProgress.canRetry).toBe(false);
-    expect(enqueueTaskAnalysis).toHaveBeenCalledWith(
-      expect.objectContaining({
-        taskId: "task-timeout",
-        userId: "user-1",
-        forcedPrimaryFileId: null
-      })
-    );
-    expect(getTaskSummary("task-timeout")?.analysisStatus).toBe("pending");
-  });
-
-  it("does not enqueue another run when previous analysis run is still active", async () => {
+  it("returns pending when a legacy background run is still active", async () => {
     saveTaskSummary({
       id: "task-active-run",
       userId: "user-1",
@@ -105,11 +218,13 @@ describe("analysis retry route", () => {
         storagePath: "tmp/brief.txt",
         extractedText: "brief",
         role: "unknown",
-        isPrimary: false
+        isPrimary: false,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
       }
     ]);
 
-    const enqueueTaskAnalysis = vi.fn(async () => "run-should-not-be-used");
+    const runInlineFirstOutline = vi.fn();
     const response = await handleTaskAnalysisRetryRequest(
       new Request("http://localhost/api/tasks/task-active-run/analysis/retry", {
         method: "POST"
@@ -119,336 +234,151 @@ describe("analysis retry route", () => {
         isPersistenceReady: () => true,
         requireUser: async () => makeUser(),
         getTriggerRunState: async () => ({ state: "active", status: "EXECUTING" }),
-        enqueueTaskAnalysis
-      }
+        runInlineFirstOutline
+      } as never
     );
     const payload = await response.json();
 
     expect(response.status).toBe(202);
     expect(payload.analysisStatus).toBe("pending");
-    expect(String(payload.message)).toContain("避免重复排队");
-    expect(payload.analysisProgress.canRetry).toBe(false);
-    expect(enqueueTaskAnalysis).not.toHaveBeenCalled();
+    expect(String(payload.message)).toContain("避免重复处理");
+    expect(runInlineFirstOutline).not.toHaveBeenCalled();
   });
 
-  it("allows retry enqueue when previous run state is unknown", async () => {
+  it("returns the regenerated outline directly when retry succeeds", async () => {
     saveTaskSummary({
-      id: "task-unknown-run-state",
+      id: "task-retry-success",
       userId: "user-1",
       status: "created",
       targetWordCount: null,
       citationStyle: null,
       specialRequirements: "",
-      analysisStatus: "pending",
-      analysisRequestedAt: new Date(Date.now() - 11 * 60 * 1000).toISOString(),
-      analysisTriggerRunId: "run-unknown-1"
+      analysisStatus: "failed",
+      analysisErrorMessage: "MODEL_ANALYSIS_INCOMPLETE_AFTER_RETRY"
     });
 
     saveTaskFileRecords([
       {
         id: "file-1",
-        taskId: "task-unknown-run-state",
+        taskId: "task-retry-success",
         userId: "user-1",
         originalFilename: "brief.txt",
         storagePath: "tmp/brief.txt",
         extractedText: "brief",
         role: "unknown",
-        isPrimary: false
+        isPrimary: false,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
       }
     ]);
 
-    const enqueueTaskAnalysis = vi.fn(async () => "run-unknown-retry-1");
-    const getTriggerRunState = vi
-      .fn()
-      .mockResolvedValueOnce({ state: "unknown", status: null })
-      .mockResolvedValueOnce({ state: "active", status: "QUEUED" });
+    const runInlineFirstOutline = vi.fn().mockResolvedValue(
+      makeSucceededInlineResult({
+        task: {
+          id: "task-retry-success",
+          status: "awaiting_outline_approval",
+          targetWordCount: 1800,
+          citationStyle: "Harvard",
+          specialRequirements: ""
+        },
+        taskSummary: {
+          ...makeSucceededInlineResult().taskSummary,
+          id: "task-retry-success",
+          specialRequirements: "",
+          status: "awaiting_outline_approval"
+        }
+      })
+    );
+
     const response = await handleTaskAnalysisRetryRequest(
-      new Request("http://localhost/api/tasks/task-unknown-run-state/analysis/retry", {
+      new Request("http://localhost/api/tasks/task-retry-success/analysis/retry", {
         method: "POST"
       }),
-      { taskId: "task-unknown-run-state" },
+      { taskId: "task-retry-success" },
       {
         isPersistenceReady: () => true,
         requireUser: async () => makeUser(),
-        getTriggerRunState,
-        enqueueTaskAnalysis,
-        startupProbeAttempts: 1
-      }
+        runInlineFirstOutline
+      } as never
     );
     const payload = await response.json();
 
-    expect(response.status).toBe(202);
-    expect(payload.analysisStatus).toBe("pending");
-    expect(payload.analysisRuntime.runId).toBe("run-unknown-retry-1");
-    expect(String(payload.message)).toContain("已重新提交后台分析");
-    expect(enqueueTaskAnalysis).toHaveBeenCalledWith(
+    expect(response.status).toBe(200);
+    expect(payload.analysisStatus).toBe("succeeded");
+    expect(payload.outline?.articleTitle).toContain("Finance");
+    expect(runInlineFirstOutline).toHaveBeenCalledWith(
       expect.objectContaining({
-        taskId: "task-unknown-run-state",
-        userId: "user-1"
+        taskId: "task-retry-success",
+        userId: "user-1",
+        source: "manual_retry"
       })
     );
   });
 
-  it("does not allow retry during the startup grace window just because runtime is pending_version", async () => {
+  it("returns a readable failed payload when retry still fails", async () => {
     saveTaskSummary({
-      id: "task-pending-version",
-      userId: "user-1",
-      status: "created",
-      targetWordCount: null,
-      citationStyle: null,
-      specialRequirements: "",
-      analysisStatus: "pending",
-      analysisModel: "gpt-5.2",
-      analysisRetryCount: 1,
-      analysisRequestedAt: new Date(Date.now() - 60 * 1000).toISOString(),
-      analysisTriggerRunId: "run-pending-version-1"
-    });
-
-    saveTaskFileRecords([
-      {
-        id: "file-1",
-        taskId: "task-pending-version",
-        userId: "user-1",
-        originalFilename: "brief.txt",
-        storagePath: "tmp/brief.txt",
-        extractedText: "brief",
-        role: "unknown",
-        isPrimary: false
-      }
-    ]);
-
-    const response = await handleTaskAnalysisRetryRequest(
-      new Request("http://localhost/api/tasks/task-pending-version/analysis/retry", {
-        method: "POST"
-      }),
-      { taskId: "task-pending-version" },
-      {
-        isPersistenceReady: () => true,
-        requireUser: async () => makeUser(),
-        getTriggerRunState: async () => ({
-          state: "pending_version",
-          status: "PENDING_VERSION"
-        }),
-        enqueueTaskAnalysis: async () => "run-retried-from-pending-version"
-      }
-    );
-    const payload = await response.json();
-
-    expect(response.status).toBe(409);
-    expect(String(payload.message)).toContain("还在处理中");
-    expect(getTaskSummary("task-pending-version")?.analysisRetryCount).toBe(1);
-  });
-
-  it("rejects retry when pending analysis has not timed out", async () => {
-    saveTaskSummary({
-      id: "task-pending",
-      userId: "user-1",
-      status: "created",
-      targetWordCount: null,
-      citationStyle: null,
-      specialRequirements: "",
-      analysisStatus: "pending",
-      analysisRequestedAt: new Date(Date.now() - 2 * 60 * 1000).toISOString()
-    });
-
-    saveTaskFileRecords([
-      {
-        id: "file-1",
-        taskId: "task-pending",
-        userId: "user-1",
-        originalFilename: "brief.txt",
-        storagePath: "tmp/brief.txt",
-        extractedText: "brief",
-        role: "unknown",
-        isPrimary: false
-      }
-    ]);
-
-    const response = await handleTaskAnalysisRetryRequest(
-      new Request("http://localhost/api/tasks/task-pending/analysis/retry", {
-        method: "POST"
-      }),
-      { taskId: "task-pending" },
-      {
-        isPersistenceReady: () => true,
-        requireUser: async () => makeUser(),
-        enqueueTaskAnalysis: async () => "run-2"
-      }
-    );
-    const payload = await response.json();
-
-    expect(response.status).toBe(409);
-    expect(String(payload.message)).toContain("还在处理中");
-  });
-
-  it("keeps retry pending when the new run is still pending_version", async () => {
-    saveTaskSummary({
-      id: "task-failed",
+      id: "task-retry-failed",
       userId: "user-1",
       status: "created",
       targetWordCount: null,
       citationStyle: null,
       specialRequirements: "",
       analysisStatus: "failed",
-      analysisModel: "gpt-5.2",
-      analysisRetryCount: 0,
-      analysisErrorMessage: "MODEL_ANALYSIS_TIMEOUT"
+      analysisErrorMessage: "MODEL_ANALYSIS_INCOMPLETE_AFTER_RETRY"
     });
 
     saveTaskFileRecords([
       {
         id: "file-1",
-        taskId: "task-failed",
+        taskId: "task-retry-failed",
         userId: "user-1",
         originalFilename: "brief.txt",
         storagePath: "tmp/brief.txt",
         extractedText: "brief",
         role: "unknown",
-        isPrimary: false
+        isPrimary: false,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
       }
     ]);
 
-    const getTriggerRunState = vi
-      .fn()
-      .mockResolvedValueOnce({ state: "pending_version", status: "PENDING_VERSION" });
     const response = await handleTaskAnalysisRetryRequest(
-      new Request("http://localhost/api/tasks/task-failed/analysis/retry", {
+      new Request("http://localhost/api/tasks/task-retry-failed/analysis/retry", {
         method: "POST"
       }),
-      { taskId: "task-failed" },
+      { taskId: "task-retry-failed" },
       {
         isPersistenceReady: () => true,
         requireUser: async () => makeUser(),
-        getTriggerRunState,
-        enqueueTaskAnalysis: async () => "run-3",
-        startupProbeAttempts: 1
-      }
+        runInlineFirstOutline: vi.fn().mockResolvedValue(
+          makeFailedInlineResult({
+            task: {
+              id: "task-retry-failed",
+              status: "created",
+              targetWordCount: null,
+              citationStyle: null,
+              specialRequirements: ""
+            },
+            taskSummary: {
+              ...makeFailedInlineResult().taskSummary,
+              id: "task-retry-failed",
+              specialRequirements: ""
+            }
+          })
+        )
+      } as never
     );
     const payload = await response.json();
 
-    expect(response.status).toBe(202);
-    expect(String(payload.message)).toContain("已重新提交后台分析");
-    expect(getTaskSummary("task-failed")?.analysisRetryCount).toBe(1);
-    expect(getTaskSummary("task-failed")?.analysisErrorMessage).toBeNull();
-    expect(getTaskSummary("task-failed")?.analysisModel).toBe("gpt-5.2");
+    expect(response.status).toBe(502);
+    expect(payload.analysisStatus).toBe("failed");
+    expect(String(payload.message)).toContain("模型");
+    expect(payload.outline).toBeNull();
   });
 
-  it("accepts retry only after pending_version becomes active during startup confirmation", async () => {
+  it("rejects retry when there are no uploaded files", async () => {
     saveTaskSummary({
-      id: "task-failed-active-after-pending-version",
-      userId: "user-1",
-      status: "created",
-      targetWordCount: null,
-      citationStyle: null,
-      specialRequirements: "",
-      analysisStatus: "failed",
-      analysisModel: "gpt-5.2",
-      analysisRetryCount: 0,
-      analysisErrorMessage: "MODEL_ANALYSIS_TIMEOUT"
-    });
-
-    saveTaskFileRecords([
-      {
-        id: "file-1",
-        taskId: "task-failed-active-after-pending-version",
-        userId: "user-1",
-        originalFilename: "brief.txt",
-        storagePath: "tmp/brief.txt",
-        extractedText: "brief",
-        role: "unknown",
-        isPrimary: false
-      }
-    ]);
-
-    const getTriggerRunState = vi
-      .fn()
-      .mockResolvedValueOnce({ state: "pending_version", status: "PENDING_VERSION" })
-      .mockResolvedValueOnce({ state: "active", status: "QUEUED" });
-    const response = await handleTaskAnalysisRetryRequest(
-      new Request(
-        "http://localhost/api/tasks/task-failed-active-after-pending-version/analysis/retry",
-        {
-          method: "POST"
-        }
-      ),
-      { taskId: "task-failed-active-after-pending-version" },
-      {
-        isPersistenceReady: () => true,
-        requireUser: async () => makeUser(),
-        getTriggerRunState,
-        enqueueTaskAnalysis: async () => "run-3",
-        startupProbeAttempts: 2
-      }
-    );
-    const payload = await response.json();
-
-    expect(response.status).toBe(202);
-    expect(payload.analysisStatus).toBe("pending");
-    expect(payload.analysisRuntime.runId).toBe("run-3");
-    expect(getTaskSummary("task-failed-active-after-pending-version")?.analysisRetryCount).toBe(1);
-    expect(getTaskSummary("task-failed-active-after-pending-version")?.analysisErrorMessage).toBeNull();
-  });
-
-  it("returns 503 when a failed task retries but startup confirmation never reaches a valid state", async () => {
-    saveTaskSummary({
-      id: "task-failed-runtime-bad",
-      userId: "user-1",
-      status: "created",
-      targetWordCount: null,
-      citationStyle: null,
-      specialRequirements: "",
-      analysisStatus: "failed",
-      analysisErrorMessage: "TRIGGER_STARTUP_STALLED"
-    });
-
-    saveTaskFileRecords([
-      {
-        id: "file-1",
-        taskId: "task-failed-runtime-bad",
-        userId: "user-1",
-        originalFilename: "brief.txt",
-        storagePath: "tmp/brief.txt",
-        extractedText: "brief",
-        role: "unknown",
-        isPrimary: false
-      }
-    ]);
-
-    const getTriggerRunState = vi
-      .fn()
-      .mockResolvedValueOnce({ state: "unknown", status: null })
-      .mockResolvedValueOnce({ state: "missing", status: null })
-      .mockResolvedValueOnce({ state: "terminal", status: "FAILED" })
-      .mockResolvedValueOnce({ state: "unknown", status: null })
-      .mockResolvedValueOnce({ state: "missing", status: null })
-      .mockResolvedValueOnce({ state: "terminal", status: "FAILED" })
-      .mockResolvedValueOnce({ state: "unknown", status: null })
-      .mockResolvedValueOnce({ state: "missing", status: null });
-
-    const response = await handleTaskAnalysisRetryRequest(
-      new Request("http://localhost/api/tasks/task-failed-runtime-bad/analysis/retry", {
-        method: "POST"
-      }),
-      { taskId: "task-failed-runtime-bad" },
-      {
-        isPersistenceReady: () => true,
-        requireUser: async () => makeUser(),
-        getTriggerRunState,
-        enqueueTaskAnalysis: vi
-          .fn()
-          .mockResolvedValueOnce("run-failed-runtime-bad-0")
-          .mockResolvedValueOnce("run-failed-runtime-bad-1")
-      }
-    );
-    const payload = await response.json();
-
-    expect(response.status).toBe(503);
-    expect(String(payload.message)).toContain("线上后台环境确实有问题");
-  });
-
-  it("returns 502 when trigger run id is missing", async () => {
-    saveTaskSummary({
-      id: "task-missing-run-id",
+      id: "task-no-files",
       userId: "user-1",
       status: "created",
       targetWordCount: null,
@@ -457,34 +387,19 @@ describe("analysis retry route", () => {
       analysisStatus: "failed"
     });
 
-    saveTaskFileRecords([
-      {
-        id: "file-1",
-        taskId: "task-missing-run-id",
-        userId: "user-1",
-        originalFilename: "brief.txt",
-        storagePath: "tmp/brief.txt",
-        extractedText: "brief",
-        role: "unknown",
-        isPrimary: false
-      }
-    ]);
-
     const response = await handleTaskAnalysisRetryRequest(
-      new Request("http://localhost/api/tasks/task-missing-run-id/analysis/retry", {
+      new Request("http://localhost/api/tasks/task-no-files/analysis/retry", {
         method: "POST"
       }),
-      { taskId: "task-missing-run-id" },
+      { taskId: "task-no-files" },
       {
         isPersistenceReady: () => true,
-        requireUser: async () => makeUser(),
-        enqueueTaskAnalysis: async () => null
-      }
+        requireUser: async () => makeUser()
+      } as never
     );
     const payload = await response.json();
 
-    expect(response.status).toBe(502);
-    expect(String(payload.message)).toContain("后台重试任务启动失败");
+    expect(response.status).toBe(409);
+    expect(String(payload.message)).toContain("没有可用文件");
   });
-
 });

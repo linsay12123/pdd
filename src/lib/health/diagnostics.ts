@@ -283,6 +283,14 @@ async function checkTriggerRuntime() {
       };
     }
 
+    if (statuses.length > 0 && statuses.every((status) => status === "PENDING_VERSION")) {
+      return {
+        ok: true,
+        detail:
+          "Trigger Runtime 可访问，但最近看到的都是旧的 Pending version 记录。当前首版大纲已经不依赖这条后台排队链。"
+      };
+    }
+
     const latestStableStatus = statuses.find((status) => status !== "PENDING_VERSION") ?? "unknown";
     return {
       ok: true,

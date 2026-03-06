@@ -276,6 +276,10 @@ function mapAnalysisFailureMessage(input: {
     return "这次后台分析没有真正启动成功。你可以直接点“一键重试分析”，不用重新上传文件。";
   }
 
+  if (code === "INLINE_ANALYSIS_DID_NOT_FINISH") {
+    return "这次分析没有正常完成。你可以直接点“一键重试分析”，不用重新上传文件。";
+  }
+
   if (code === "MODEL_ANALYSIS_TIMEOUT") {
     return "系统已经开始分析你上传的文件，但本次处理超过等待上限。请直接点“一键重试分析”，不用重新上传。";
   }

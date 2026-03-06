@@ -300,7 +300,7 @@ export function WorkspacePageClient({ initialQuota }: WorkspacePageClientProps) 
     setIsRetryingAnalysis(true);
     setNotice({
       tone: "info",
-      text: "已提交重试请求，系统正在后台重新分析。"
+      text: "系统正在重新分析这批文件，请稍等。"
     });
 
     try {
@@ -401,11 +401,13 @@ export function WorkspacePageClient({ initialQuota }: WorkspacePageClientProps) 
       setSelectedPrimaryFileId(result.classification.primaryRequirementFileId ?? "");
       setNotice({
         tone:
-          result.analysisStatus === "pending"
-            ? "info"
-            : result.classification.needsUserConfirmation
+          result.analysisStatus === "failed"
+            ? "error"
+            : result.analysisStatus === "pending"
               ? "info"
-              : "success",
+              : result.classification.needsUserConfirmation
+                ? "info"
+                : "success",
         text: result.message
       });
       setStep(2);
@@ -440,7 +442,7 @@ export function WorkspacePageClient({ initialQuota }: WorkspacePageClientProps) 
     setIsConfirmingPrimaryFile(true);
     setNotice({
       tone: "info",
-      text: "系统已收到你的主任务文件确认，正在后台重新分析并生成新大纲。"
+      text: "系统已收到你的主任务文件确认，正在重新分析并生成新大纲。"
     });
 
     try {
@@ -465,7 +467,7 @@ export function WorkspacePageClient({ initialQuota }: WorkspacePageClientProps) 
       );
       setSelectedPrimaryFileId(result.primaryRequirementFileId);
       setNotice({
-        tone: result.analysisStatus === "pending" ? "info" : "success",
+        tone: result.analysisStatus === "failed" ? "error" : result.analysisStatus === "pending" ? "info" : "success",
         text: result.message
       });
     } catch (error) {

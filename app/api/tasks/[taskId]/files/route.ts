@@ -1,27 +1,15 @@
 import { NextResponse } from "next/server";
-import { tasks } from "@trigger.dev/sdk/v3";
 import { uploadOpenAIUserFile } from "@/src/lib/ai/openai-file-client";
 import { extractTextFromImageWithVision } from "@/src/lib/ai/services/extract-text-from-image";
 import { requireCurrentSessionUser } from "@/src/lib/auth/current-user";
 import { detectSupportedFileKind } from "@/src/lib/files/file-kind";
 import { shouldUseSupabasePersistence } from "@/src/lib/persistence/runtime-mode";
-import { buildAnalysisProgressPayload } from "@/src/lib/tasks/analysis-progress";
-import { startTaskAnalysisRun } from "@/src/lib/tasks/start-task-analysis-run";
+import { runInlineFirstOutline } from "@/src/lib/tasks/inline-first-outline";
 import {
   getOwnedTaskSummary,
-  listTaskFilesForWorkflow,
-  markTaskAnalysisFailed,
-  markTaskAnalysisPending,
   saveTaskFiles,
   updateTaskFileOpenAIMetadata
 } from "@/src/lib/tasks/save-task-files";
-import { getInvalidTriggerKeyReason } from "@/src/lib/trigger/key-guard";
-import {
-  resolveTriggerRunState,
-  type TriggerRunRuntimeState
-} from "@/src/lib/trigger/run-state";
-import { TRIGGER_DEPLOYMENT_UNAVAILABLE_REASON } from "@/src/lib/tasks/analysis-runtime-cleanup";
-import type { TaskWorkflowClassificationPayload } from "@/src/lib/tasks/request-task-file-upload";
 import {
   toSessionTaskHumanizePayload,
   toSessionTaskPayload
@@ -29,7 +17,7 @@ import {
 import type { TaskAnalysisSnapshot } from "@/src/types/tasks";
 import type { SessionUser } from "@/src/types/auth";
 
-export const maxDuration = 60;
+export const maxDuration = 300;
 
 type RouteContext = {
   params: Promise<{
@@ -37,25 +25,12 @@ type RouteContext = {
   }>;
 };
 
-type EnqueueAnalyzeTaskInput = {
-  taskId: string;
-  userId: string;
-  forcedPrimaryFileId?: string | null;
-  idempotencyKey: string;
-};
-
 type TaskFileUploadRouteDependencies = {
   requireUser?: () => Promise<SessionUser>;
   isPersistenceReady?: () => boolean;
-  getTriggerRunState?: (
-    runId: string
-  ) => Promise<{ state: TriggerRunRuntimeState; status: string | null }>;
-  enqueueTaskAnalysis?: (input: EnqueueAnalyzeTaskInput) => Promise<string | null>;
+  runInlineFirstOutline?: typeof runInlineFirstOutline;
   maxFileCount?: number;
   maxFileBytes?: number;
-  startupProbeAttempts?: number;
-  startupProbeDelayMs?: number;
-  sleepImpl?: (ms: number) => Promise<void>;
 };
 
 const DEFAULT_MAX_FILE_COUNT = 10;
@@ -68,8 +43,6 @@ export async function handleTaskFileUploadRequest(
   },
   dependencies: TaskFileUploadRouteDependencies = {}
 ) {
-  let resolvedUserId: string | null = null;
-  let taskIdForFailure: string | null = null;
   const requestStartedAt = Date.now();
 
   try {
@@ -83,35 +56,7 @@ export async function handleTaskFileUploadRequest(
       );
     }
 
-    if (!process.env.TRIGGER_SECRET_KEY?.trim()) {
-      return NextResponse.json(
-        {
-          ok: false,
-          message: "后台任务密钥还没配置好，暂时不能启动上传分析。"
-        },
-        { status: 503 }
-      );
-    }
-
-    const invalidTriggerKeyReason = getInvalidTriggerKeyReason({
-      triggerSecretKey: process.env.TRIGGER_SECRET_KEY,
-      nodeEnv: process.env.NODE_ENV,
-      vercelEnv: process.env.VERCEL_ENV
-    });
-    if (invalidTriggerKeyReason === "dev_key_in_production") {
-      return NextResponse.json(
-        {
-          ok: false,
-          message:
-            "当前是生产环境，但后台任务密钥还是开发版（tr_dev_）。请先换成生产密钥（通常是 tr_prod_）再上传。"
-        },
-        { status: 503 }
-      );
-    }
-
     const user = await (dependencies.requireUser ?? requireCurrentSessionUser)();
-    resolvedUserId = user.id;
-    taskIdForFailure = params.taskId;
     const task = await getOwnedTaskSummary(params.taskId, user.id);
 
     if (!task) {
@@ -269,72 +214,48 @@ export async function handleTaskFileUploadRequest(
       }))
     });
 
-    const dispatchResult = await startTaskAnalysisRun({
-      task,
+    const result = await (dependencies.runInlineFirstOutline ?? runInlineFirstOutline)({
+      taskId: params.taskId,
       userId: user.id,
-      source: "upload",
-      enqueueTaskAnalysis: dependencies.enqueueTaskAnalysis ?? enqueueAnalyzeTaskWithTrigger,
-      getTriggerRunState: dependencies.getTriggerRunState ?? getTriggerRunState,
-      markTaskAnalysisPending,
-      markTaskAnalysisFailed,
-      startupProbeAttempts: dependencies.startupProbeAttempts,
-      startupProbeDelayMs: dependencies.startupProbeDelayMs,
-      sleepImpl: dependencies.sleepImpl
+      source: "upload"
     });
 
-    if (!dispatchResult.ok) {
+    if (result.analysisStatus === "succeeded") {
       return NextResponse.json(
         {
-          ok: false,
-          message:
-            dispatchResult.reason === TRIGGER_DEPLOYMENT_UNAVAILABLE_REASON
-              ? "文件已经收到了，但这次后台分析任务一直没真正接上可执行版本，所以没有开工。请直接再试一次；如果连续失败，再检查后台发布。"
-              : "文件已经收到了，但系统刚发出的后台分析任务连续两次都没真正启动起来。说明当前线上后台环境有问题，请稍后再试。"
+          ok: true,
+          task: result.task,
+          files: result.files,
+          classification: result.classification,
+          analysisStatus: result.analysisStatus,
+          analysisProgress: result.analysisProgress,
+          analysisRuntime: result.analysisRuntime,
+          analysis: result.analysis,
+          ruleCard: result.ruleCard,
+          outline: result.outline,
+          humanize: result.humanize,
+          message: "文件已上传，系统已经完成分析并生成第一版大纲。"
         },
-        { status: 503 }
+        { status: 201 }
       );
     }
 
-    const refreshedTask = await getOwnedTaskSummary(params.taskId, user.id);
-    const refreshedFiles = await listTaskFilesForWorkflow(params.taskId, user.id);
-    const analysisProgress = buildAnalysisProgressPayload({
-      status: "pending",
-      requestedAt: refreshedTask?.analysisRequestedAt ?? null,
-      startedAt: refreshedTask?.analysisStartedAt ?? null,
-      completedAt: refreshedTask?.analysisCompletedAt ?? null
-    });
-
     return NextResponse.json(
       {
-        ok: true,
-        task: toSessionTaskPayload(refreshedTask ?? task),
-        files: refreshedFiles,
-        classification: buildClassificationFromAnalysis(
-          refreshedTask?.analysisSnapshot ?? null
-        ),
-        analysisStatus: "pending",
-        analysisProgress,
-        analysisRuntime: {
-          state: dispatchResult.runtime.state,
-          status: dispatchResult.runtime.status,
-          detail:
-            dispatchResult.runtime.state === "unknown"
-              ? "后台任务已受理，系统正在确认这一轮是否已经真正开始执行。"
-              : dispatchResult.autoRecovered
-                ? "第一张后台任务编号没有真正启动，系统刚刚已经自动换了一张新的后台编号。"
-                : "后台任务已受理，正在排队或准备执行。",
-          autoRecovered: dispatchResult.autoRecovered,
-          runId: dispatchResult.triggerRunId
-        },
-        analysis: refreshedTask?.analysisSnapshot ?? null,
-        ruleCard: null,
-        outline: null,
-        humanize: toSessionTaskHumanizePayload(refreshedTask ?? task),
-        message: dispatchResult.autoRecovered
-          ? "文件已上传。第一张后台任务没有真正启动，系统已经自动换了一张新的编号并继续分析。"
-          : "文件已上传，系统正在后台分析并生成第一版大纲。"
+        ok: false,
+        task: result.task,
+        files: result.files,
+        classification: result.classification,
+        analysisStatus: result.analysisStatus,
+        analysisProgress: result.analysisProgress,
+        analysisRuntime: result.analysisRuntime,
+        analysis: result.analysis,
+        ruleCard: result.ruleCard,
+        outline: result.outline,
+        humanize: result.humanize,
+        message: mapInlineFailureMessage(result.taskSummary.analysisErrorMessage, result.analysis)
       },
-      { status: 202 }
+      { status: 502 }
     );
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error);
@@ -362,18 +283,6 @@ export async function handleTaskFileUploadRequest(
       );
     }
 
-    if (resolvedUserId && taskIdForFailure) {
-      try {
-        await markTaskAnalysisFailed({
-          taskId: taskIdForFailure,
-          userId: resolvedUserId,
-          reason: errorMessage
-        });
-      } catch (persistError) {
-        console.error("[file-upload] 记录分析失败状态失败:", persistError);
-      }
-    }
-
     if (
       errorMessage.startsWith("OpenAI file upload failed with status") ||
       errorMessage.startsWith("OpenAI request failed with status")
@@ -382,21 +291,6 @@ export async function handleTaskFileUploadRequest(
         {
           ok: false,
           message: "模型服务暂时不稳定，请稍后再试一次。"
-        },
-        { status: 502 }
-      );
-    }
-
-    if (
-      errorMessage.includes("trigger") ||
-      errorMessage.includes("queue") ||
-      errorMessage.includes("TRIGGER") ||
-      errorMessage === "TRIGGER_RUN_ID_MISSING"
-    ) {
-      return NextResponse.json(
-        {
-          ok: false,
-          message: "文件已上传，但后台分析任务启动失败。请稍后重试一次。"
         },
         { status: 502 }
       );
@@ -422,38 +316,36 @@ async function extractTextFromUploadLazily(file: File) {
   return extractTextFromUpload(file);
 }
 
-function buildClassificationFromAnalysis(
+function mapInlineFailureMessage(
+  analysisErrorMessage: string | null | undefined,
   analysis: TaskAnalysisSnapshot | null
-): TaskWorkflowClassificationPayload {
-  return {
-    primaryRequirementFileId: analysis?.chosenTaskFileId ?? null,
-    backgroundFileIds: analysis?.supportingFileIds ?? [],
-    irrelevantFileIds: analysis?.ignoredFileIds ?? [],
-    needsUserConfirmation: analysis?.needsUserConfirmation ?? false,
-    reasoning: analysis?.reasoning ?? "系统正在分析全部文件。"
-  };
-}
+) {
+  const warning = analysis?.warnings?.find((item) => item.startsWith("analysis_failed:"));
+  const code =
+    analysisErrorMessage?.trim() ||
+    warning?.replace("analysis_failed:", "")?.trim() ||
+    "";
 
-async function enqueueAnalyzeTaskWithTrigger(input: EnqueueAnalyzeTaskInput) {
-  const run = await tasks.trigger(
-    "analyze-uploaded-task",
-    {
-      taskId: input.taskId,
-      userId: input.userId,
-      forcedPrimaryFileId: input.forcedPrimaryFileId ?? null
-    },
-    {
-      queue: "task-analysis",
-      concurrencyKey: `task-analysis-${input.taskId}`,
-      idempotencyKey: input.idempotencyKey
-    }
-  );
+  if (
+    code === "MODEL_ANALYSIS_INCOMPLETE" ||
+    code === "MODEL_ANALYSIS_INCOMPLETE_AFTER_RETRY" ||
+    code === "MODEL_RETURNED_EMPTY_OUTLINE" ||
+    code === "MODEL_RETURNED_EMPTY_OUTLINE_AFTER_RETRY"
+  ) {
+    return "系统已经读到你上传的文件，但模型这次返回内容不完整。请直接再试一次，不用重新上传。";
+  }
 
-  return typeof run?.id === "string" ? run.id : null;
-}
+  if (code === "MODEL_ANALYSIS_TIMEOUT") {
+    return "系统已经开始分析你上传的文件，但这次处理时间过长。请直接再试一次，不用重新上传。";
+  }
 
-async function getTriggerRunState(
-  runId: string
-): Promise<{ state: TriggerRunRuntimeState; status: string | null }> {
-  return resolveTriggerRunState(runId);
+  if (code === "INLINE_ANALYSIS_DID_NOT_FINISH") {
+    return "这次分析没有正常完成。你可以直接再试一次，不用重新上传文件。";
+  }
+
+  if (code.startsWith("OpenAI request failed with status")) {
+    return "模型服务暂时不稳定，请稍后再试。";
+  }
+
+  return "系统分析失败了，请直接再试一次，不用重新上传文件。";
 }

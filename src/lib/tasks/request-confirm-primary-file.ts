@@ -29,8 +29,27 @@ export async function requestConfirmPrimaryFile({
   } | null;
 
   if (!response.ok) {
+    if (isConfirmPrimaryPayload(payload)) {
+      return payload;
+    }
+
     throw new Error(payload?.message ?? "确认主任务文件失败，请稍后再试");
   }
 
   return payload as ConfirmPrimaryFilePayload;
+}
+
+function isConfirmPrimaryPayload(value: unknown): value is ConfirmPrimaryFilePayload {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+
+  const candidate = value as Partial<ConfirmPrimaryFilePayload>;
+  return Boolean(
+    candidate.task &&
+      Array.isArray(candidate.files) &&
+      typeof candidate.analysisStatus === "string" &&
+      candidate.analysisProgress &&
+      typeof candidate.primaryRequirementFileId === "string"
+  );
 }
