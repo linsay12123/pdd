@@ -63,7 +63,9 @@ describe("analysis retry route", () => {
       {
         isPersistenceReady: () => true,
         requireUser: async () => makeUser(),
-        enqueueTaskAnalysis
+        enqueueTaskAnalysis,
+        getTriggerRunState: async () => ({ state: "active", status: "QUEUED" }),
+        startupProbeAttempts: 1
       }
     );
     const payload = await response.json();
@@ -156,6 +158,10 @@ describe("analysis retry route", () => {
     ]);
 
     const enqueueTaskAnalysis = vi.fn(async () => "run-unknown-retry-1");
+    const getTriggerRunState = vi
+      .fn()
+      .mockResolvedValueOnce({ state: "unknown", status: null })
+      .mockResolvedValueOnce({ state: "active", status: "QUEUED" });
     const response = await handleTaskAnalysisRetryRequest(
       new Request("http://localhost/api/tasks/task-unknown-run-state/analysis/retry", {
         method: "POST"
@@ -164,8 +170,9 @@ describe("analysis retry route", () => {
       {
         isPersistenceReady: () => true,
         requireUser: async () => makeUser(),
-        getTriggerRunState: async () => ({ state: "unknown", status: null }),
-        enqueueTaskAnalysis
+        getTriggerRunState,
+        enqueueTaskAnalysis,
+        startupProbeAttempts: 1
       }
     );
     const payload = await response.json();
@@ -182,7 +189,7 @@ describe("analysis retry route", () => {
     );
   });
 
-  it("allows immediate retry when previous run is pending_version but a fresh run can start", async () => {
+  it("does not allow retry during the startup grace window just because runtime is pending_version", async () => {
     saveTaskSummary({
       id: "task-pending-version",
       userId: "user-1",
@@ -193,7 +200,6 @@ describe("analysis retry route", () => {
       analysisStatus: "pending",
       analysisModel: "gpt-5.2",
       analysisRetryCount: 1,
-      analysisErrorMessage: "STALE_TRIGGER_RUN",
       analysisRequestedAt: new Date(Date.now() - 60 * 1000).toISOString(),
       analysisTriggerRunId: "run-pending-version-1"
     });
@@ -211,10 +217,6 @@ describe("analysis retry route", () => {
       }
     ]);
 
-    const getTriggerRunState = vi
-      .fn()
-      .mockResolvedValueOnce({ state: "pending_version", status: "PENDING_VERSION" })
-      .mockResolvedValueOnce({ state: "active", status: "QUEUED" });
     const response = await handleTaskAnalysisRetryRequest(
       new Request("http://localhost/api/tasks/task-pending-version/analysis/retry", {
         method: "POST"
@@ -223,71 +225,18 @@ describe("analysis retry route", () => {
       {
         isPersistenceReady: () => true,
         requireUser: async () => makeUser(),
-        getTriggerRunState,
+        getTriggerRunState: async () => ({
+          state: "pending_version",
+          status: "PENDING_VERSION"
+        }),
         enqueueTaskAnalysis: async () => "run-retried-from-pending-version"
       }
     );
     const payload = await response.json();
 
-    expect(response.status).toBe(202);
-    expect(payload.analysisStatus).toBe("pending");
-    expect(payload.analysisRuntime.runId).toBe("run-retried-from-pending-version");
-    expect(String(payload.message)).toContain("已重新提交后台分析");
-    expect(getTriggerRunState).toHaveBeenCalledTimes(2);
-    expect(getTaskSummary("task-pending-version")?.analysisRetryCount).toBe(2);
-    expect(getTaskSummary("task-pending-version")?.analysisErrorMessage).toBeNull();
-    expect(getTaskSummary("task-pending-version")?.analysisModel).toBe("gpt-5.2");
-  });
-
-  it("returns 503 with an environment problem message when a fresh retry run is still broken", async () => {
-    saveTaskSummary({
-      id: "task-pending-version-still-bad",
-      userId: "user-1",
-      status: "created",
-      targetWordCount: null,
-      citationStyle: null,
-      specialRequirements: "",
-      analysisStatus: "pending",
-      analysisRequestedAt: new Date(Date.now() - 60 * 1000).toISOString(),
-      analysisTriggerRunId: "run-pending-version-old"
-    });
-
-    saveTaskFileRecords([
-      {
-        id: "file-1",
-        taskId: "task-pending-version-still-bad",
-        userId: "user-1",
-        originalFilename: "brief.txt",
-        storagePath: "tmp/brief.txt",
-        extractedText: "brief",
-        role: "unknown",
-        isPrimary: false
-      }
-    ]);
-
-    const getTriggerRunState = vi
-      .fn()
-      .mockResolvedValueOnce({ state: "pending_version", status: "PENDING_VERSION" })
-      .mockResolvedValueOnce({ state: "pending_version", status: "PENDING_VERSION" })
-      .mockResolvedValueOnce({ state: "pending_version", status: "PENDING_VERSION" });
-    const response = await handleTaskAnalysisRetryRequest(
-      new Request("http://localhost/api/tasks/task-pending-version-still-bad/analysis/retry", {
-        method: "POST"
-      }),
-      { taskId: "task-pending-version-still-bad" },
-      {
-        isPersistenceReady: () => true,
-        requireUser: async () => makeUser(),
-        getTriggerRunState,
-        enqueueTaskAnalysis: async () => "run-pending-version-new"
-      }
-    );
-    const payload = await response.json();
-
-    expect(response.status).toBe(503);
-    expect(String(payload.message)).toContain("当前线上后台环境确实有问题");
-    expect(String(payload.message)).not.toContain("版本没部署");
-    expect(getTriggerRunState).toHaveBeenCalledTimes(3);
+    expect(response.status).toBe(409);
+    expect(String(payload.message)).toContain("还在处理中");
+    expect(getTaskSummary("task-pending-version")?.analysisRetryCount).toBe(1);
   });
 
   it("rejects retry when pending analysis has not timed out", async () => {
@@ -359,6 +308,9 @@ describe("analysis retry route", () => {
       }
     ]);
 
+    const getTriggerRunState = vi
+      .fn()
+      .mockResolvedValueOnce({ state: "pending_version", status: "PENDING_VERSION" });
     const response = await handleTaskAnalysisRetryRequest(
       new Request("http://localhost/api/tasks/task-failed/analysis/retry", {
         method: "POST"
@@ -367,16 +319,76 @@ describe("analysis retry route", () => {
       {
         isPersistenceReady: () => true,
         requireUser: async () => makeUser(),
-        enqueueTaskAnalysis: async () => "run-3"
+        getTriggerRunState,
+        enqueueTaskAnalysis: async () => "run-3",
+        startupProbeAttempts: 1
       }
     );
     const payload = await response.json();
 
     expect(response.status).toBe(202);
     expect(payload.analysisStatus).toBe("pending");
+    expect(payload.analysisRuntime.runId).toBe("run-3");
     expect(getTaskSummary("task-failed")?.analysisRetryCount).toBe(1);
     expect(getTaskSummary("task-failed")?.analysisErrorMessage).toBeNull();
     expect(getTaskSummary("task-failed")?.analysisModel).toBe("gpt-5.2");
+  });
+
+  it("returns 503 when a failed task retries but startup confirmation never reaches a valid state", async () => {
+    saveTaskSummary({
+      id: "task-failed-runtime-bad",
+      userId: "user-1",
+      status: "created",
+      targetWordCount: null,
+      citationStyle: null,
+      specialRequirements: "",
+      analysisStatus: "failed",
+      analysisErrorMessage: "TRIGGER_STARTUP_STALLED"
+    });
+
+    saveTaskFileRecords([
+      {
+        id: "file-1",
+        taskId: "task-failed-runtime-bad",
+        userId: "user-1",
+        originalFilename: "brief.txt",
+        storagePath: "tmp/brief.txt",
+        extractedText: "brief",
+        role: "unknown",
+        isPrimary: false
+      }
+    ]);
+
+    const getTriggerRunState = vi
+      .fn()
+      .mockResolvedValueOnce({ state: "unknown", status: null })
+      .mockResolvedValueOnce({ state: "missing", status: null })
+      .mockResolvedValueOnce({ state: "terminal", status: "FAILED" })
+      .mockResolvedValueOnce({ state: "unknown", status: null })
+      .mockResolvedValueOnce({ state: "missing", status: null })
+      .mockResolvedValueOnce({ state: "terminal", status: "FAILED" })
+      .mockResolvedValueOnce({ state: "unknown", status: null })
+      .mockResolvedValueOnce({ state: "missing", status: null });
+
+    const response = await handleTaskAnalysisRetryRequest(
+      new Request("http://localhost/api/tasks/task-failed-runtime-bad/analysis/retry", {
+        method: "POST"
+      }),
+      { taskId: "task-failed-runtime-bad" },
+      {
+        isPersistenceReady: () => true,
+        requireUser: async () => makeUser(),
+        getTriggerRunState,
+        enqueueTaskAnalysis: vi
+          .fn()
+          .mockResolvedValueOnce("run-failed-runtime-bad-0")
+          .mockResolvedValueOnce("run-failed-runtime-bad-1")
+      }
+    );
+    const payload = await response.json();
+
+    expect(response.status).toBe(503);
+    expect(String(payload.message)).toContain("线上后台环境确实有问题");
   });
 
   it("returns 502 when trigger run id is missing", async () => {

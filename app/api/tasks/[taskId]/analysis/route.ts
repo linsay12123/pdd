@@ -20,7 +20,10 @@ import {
 import type { OutlineScaffold } from "@/src/lib/ai/prompts/generate-outline";
 import type { TaskAnalysisSnapshot } from "@/src/types/tasks";
 import type { SessionUser } from "@/src/types/auth";
-import { STALE_TRIGGER_RUN_REASON } from "@/src/lib/tasks/analysis-runtime-cleanup";
+import {
+  STALE_TRIGGER_RUN_REASON,
+  TRIGGER_STARTUP_STALLED_REASON
+} from "@/src/lib/tasks/analysis-runtime-cleanup";
 import {
   resolveTriggerRunState,
   type TriggerRunRuntimeState
@@ -48,6 +51,8 @@ type AnalysisRouteDependencies = {
     runId: string
   ) => Promise<{ state: TriggerRunRuntimeState; status: string | null }>;
 };
+
+const ANALYSIS_STARTUP_GRACE_SECONDS = 3 * 60;
 
 export async function handleTaskAnalysisStatusRequest(
   _request: Request,
@@ -94,11 +99,11 @@ export async function handleTaskAnalysisStatusRequest(
     if (analysisStatus === "pending") {
       analysisRuntime = await resolveAnalysisRuntime(task, dependencies);
 
-      if (shouldRepairBrokenPendingRun(task, analysisRuntime.state)) {
+      if (shouldFailStalledStartup(task, analysisRuntime.state)) {
         await (dependencies.markTaskAnalysisFailed ?? markTaskAnalysisFailed)({
           taskId: params.taskId,
           userId: user.id,
-          reason: STALE_TRIGGER_RUN_REASON
+          reason: TRIGGER_STARTUP_STALLED_REASON
         });
 
         task = (await getOwnedTaskSummary(params.taskId, user.id)) ?? task;
@@ -111,7 +116,7 @@ export async function handleTaskAnalysisStatusRequest(
           completedAt: task.analysisCompletedAt ?? null
         });
         analysisRuntime = buildDefaultAnalysisRuntime(task, analysisStatus);
-      } else if (canRetryPendingVersionImmediately(task, analysisRuntime.state)) {
+      } else if (analysisProgress.canRetry) {
         analysisProgress = {
           ...analysisProgress,
           canRetry: true
@@ -267,6 +272,10 @@ function mapAnalysisFailureMessage(input: {
     return "这条旧的后台任务编号已经坏了。请直接点“一键重试分析”，系统会换一条新的后台任务编号，不用重新上传文件。";
   }
 
+  if (code === TRIGGER_STARTUP_STALLED_REASON) {
+    return "这次后台分析没有真正启动成功。你可以直接点“一键重试分析”，不用重新上传文件。";
+  }
+
   if (code === "MODEL_ANALYSIS_TIMEOUT") {
     return "系统已经开始分析你上传的文件，但本次处理超过等待上限。请直接点“一键重试分析”，不用重新上传。";
   }
@@ -307,10 +316,6 @@ function mapAnalysisMessage(input: {
     return input.analysis?.needsUserConfirmation
       ? "模型已阅读全部材料，但它认为主任务文件还需要你确认。"
       : "文件分析已完成，第一版大纲已就绪。";
-  }
-
-  if (input.analysisRuntime.state === "pending_version") {
-    return "这条旧的后台任务编号已经坏了。请直接点“一键重试分析”，系统会换一条新的后台任务编号，不用重新上传文件。";
   }
 
   if (input.analysisProgress.canRetry) {
@@ -377,7 +382,7 @@ function mapRunStateDetail(state: TriggerRunRuntimeState) {
     case "active":
       return "后台任务正在执行中。";
     case "pending_version":
-      return "这条后台任务编号已经失效，系统会把它当成旧坏号处理。";
+      return "后台任务正在启动中，系统正在等这一轮正式接上。";
     case "terminal":
       return "上一轮后台任务已经结束，但任务状态还停在分析中。";
     case "missing":
@@ -387,25 +392,36 @@ function mapRunStateDetail(state: TriggerRunRuntimeState) {
   }
 }
 
-function canRetryPendingVersionImmediately(
-  task: { analysisStartedAt?: string | null },
-  runtimeState: AnalysisRuntimePayload["state"]
-) {
-  return Boolean(task.analysisStartedAt) && runtimeState === "pending_version";
-}
-
-function shouldRepairBrokenPendingRun(
-  task: { analysisStartedAt?: string | null; analysisTriggerRunId?: string | null },
+function shouldFailStalledStartup(
+  task: {
+    analysisRequestedAt?: string | null;
+    analysisStartedAt?: string | null;
+    analysisTriggerRunId?: string | null;
+  },
   runtimeState: AnalysisRuntimePayload["state"]
 ) {
   if (task.analysisStartedAt || !task.analysisTriggerRunId?.trim()) {
     return false;
   }
 
+  const requestedAt = task.analysisRequestedAt?.trim();
+  if (!requestedAt) {
+    return false;
+  }
+
+  const elapsedSeconds = Math.max(
+    0,
+    Math.floor((Date.now() - new Date(requestedAt).getTime()) / 1000)
+  );
+  if (elapsedSeconds < ANALYSIS_STARTUP_GRACE_SECONDS) {
+    return false;
+  }
+
   return (
     runtimeState === "pending_version" ||
     runtimeState === "missing" ||
-    runtimeState === "terminal"
+    runtimeState === "terminal" ||
+    runtimeState === "unknown"
   );
 }
 

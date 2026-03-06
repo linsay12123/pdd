@@ -265,7 +265,7 @@ describe("task analysis status route", () => {
     expect(String(payload.message)).not.toContain("重试一次上传");
   });
 
-  it("repairs a stale old run into a failed-but-retriable task instead of pretending it is still pending", async () => {
+  it("keeps pending_version inside the startup grace window as pending", async () => {
     process.env.TRIGGER_SECRET_KEY = "tr_prod_example";
     process.env.VERCEL_ENV = "production";
 
@@ -277,7 +277,7 @@ describe("task analysis status route", () => {
       citationStyle: null,
       specialRequirements: "",
       analysisStatus: "pending",
-      analysisRequestedAt: new Date(Date.now() - 3 * 60 * 1000).toISOString(),
+      analysisRequestedAt: new Date(Date.now() - 2 * 60 * 1000).toISOString(),
       analysisTriggerRunId: "run-pending-version"
     });
 
@@ -296,15 +296,53 @@ describe("task analysis status route", () => {
     const payload = await response.json();
 
     expect(response.status).toBe(200);
+    expect(payload.analysisStatus).toBe("pending");
+    expect(payload.analysisRuntime.state).toBe("pending_version");
+    expect(String(payload.message)).toContain("后台分析");
+    expect(payload.analysisProgress.canRetry).toBe(false);
+    expect(getTaskSummary("task-pending-version")?.analysisTriggerRunId).toBe("run-pending-version");
+    expect(getTaskSummary("task-pending-version")?.analysisErrorMessage).toBeUndefined();
+  });
+
+  it("marks startup stalled after the grace window when pending_version still never really starts", async () => {
+    process.env.TRIGGER_SECRET_KEY = "tr_prod_example";
+    process.env.VERCEL_ENV = "production";
+
+    saveTaskSummary({
+      id: "task-pending-version-stalled",
+      userId: "user-1",
+      status: "created",
+      targetWordCount: null,
+      citationStyle: null,
+      specialRequirements: "",
+      analysisStatus: "pending",
+      analysisRequestedAt: new Date(Date.now() - 4 * 60 * 1000).toISOString(),
+      analysisTriggerRunId: "run-pending-version-stalled"
+    });
+
+    const response = await handleTaskAnalysisStatusRequest(
+      new Request("http://localhost/api/tasks/task-pending-version-stalled/analysis"),
+      { taskId: "task-pending-version-stalled" },
+      {
+        isPersistenceReady: () => true,
+        requireUser: async () => makeUser(),
+        getTriggerRunState: async () => ({
+          state: "pending_version",
+          status: "PENDING_VERSION"
+        })
+      }
+    );
+    const payload = await response.json();
+
+    expect(response.status).toBe(200);
     expect(payload.analysisStatus).toBe("failed");
     expect(payload.analysisRuntime.state).toBe("not_applicable");
-    expect(String(payload.message)).toContain("旧");
-    expect(String(payload.message)).toContain("一键重试分析");
-    expect(String(payload.message)).not.toContain("重新部署");
-    expect(String(payload.message)).not.toContain("生产环境还没准备好");
+    expect(String(payload.message)).toContain("没有真正启动成功");
     expect(payload.analysisProgress.canRetry).toBe(true);
-    expect(getTaskSummary("task-pending-version")?.analysisTriggerRunId).toBeNull();
-    expect(getTaskSummary("task-pending-version")?.analysisErrorMessage).toBe("STALE_TRIGGER_RUN");
+    expect(getTaskSummary("task-pending-version-stalled")?.analysisTriggerRunId).toBeNull();
+    expect(getTaskSummary("task-pending-version-stalled")?.analysisErrorMessage).toBe(
+      "TRIGGER_STARTUP_STALLED"
+    );
   });
 
   it("uses analysis_error_message as the main failed hint even when snapshot warnings are empty", async () => {

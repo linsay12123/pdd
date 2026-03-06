@@ -37,6 +37,9 @@ type StartTaskAnalysisRunInput = {
     userId: string;
     reason: string;
   }) => Promise<unknown>;
+  startupProbeAttempts?: number;
+  startupProbeDelayMs?: number;
+  sleepImpl?: (ms: number) => Promise<void>;
 };
 
 type StartTaskAnalysisRunResult =
@@ -72,10 +75,13 @@ export async function startTaskAnalysisRun(
     analysisRetryCount: firstAttemptRetryCount,
     source: input.source,
     enqueueTaskAnalysis: input.enqueueTaskAnalysis,
-    getTriggerRunState: input.getTriggerRunState
+    getTriggerRunState: input.getTriggerRunState,
+    startupProbeAttempts: input.startupProbeAttempts,
+    startupProbeDelayMs: input.startupProbeDelayMs,
+    sleepImpl: input.sleepImpl
   });
 
-  if (!isClearlyBrokenFreshRun(firstAttempt.runtime.state)) {
+  if (firstAttempt.accepted) {
     await input.markTaskAnalysisPending({
       taskId: input.task.id,
       userId: input.userId,
@@ -103,10 +109,13 @@ export async function startTaskAnalysisRun(
     analysisRetryCount: recoveredRetryCount,
     source: input.source,
     enqueueTaskAnalysis: input.enqueueTaskAnalysis,
-    getTriggerRunState: input.getTriggerRunState
+    getTriggerRunState: input.getTriggerRunState,
+    startupProbeAttempts: input.startupProbeAttempts,
+    startupProbeDelayMs: input.startupProbeDelayMs,
+    sleepImpl: input.sleepImpl
   });
 
-  if (!isClearlyBrokenFreshRun(recoveredAttempt.runtime.state)) {
+  if (recoveredAttempt.accepted) {
     await input.markTaskAnalysisPending({
       taskId: input.task.id,
       userId: input.userId,
@@ -167,6 +176,9 @@ async function enqueueAndInspectRun(input: {
   source: StartTaskAnalysisRunInput["source"];
   enqueueTaskAnalysis: StartTaskAnalysisRunInput["enqueueTaskAnalysis"];
   getTriggerRunState: StartTaskAnalysisRunInput["getTriggerRunState"];
+  startupProbeAttempts?: number;
+  startupProbeDelayMs?: number;
+  sleepImpl?: (ms: number) => Promise<void>;
 }) {
   const triggerRunId = await input.enqueueTaskAnalysis({
     taskId: input.taskId,
@@ -184,16 +196,18 @@ async function enqueueAndInspectRun(input: {
     throw new Error("TRIGGER_RUN_ID_MISSING");
   }
 
-  const runtime = await input.getTriggerRunState(triggerRunId).catch(
-    (): TriggerRuntimeSnapshot => ({
-      state: "unknown",
-      status: null
-    })
-  );
+  const runtime = await confirmRunStartup({
+    runId: triggerRunId,
+    getTriggerRunState: input.getTriggerRunState,
+    startupProbeAttempts: input.startupProbeAttempts,
+    startupProbeDelayMs: input.startupProbeDelayMs,
+    sleepImpl: input.sleepImpl
+  });
 
   return {
     triggerRunId,
-    runtime: normalizeRuntimeSnapshot(runtime)
+    runtime: normalizeRuntimeSnapshot(runtime.runtime),
+    accepted: runtime.accepted
   };
 }
 
@@ -215,7 +229,7 @@ function sanitizeKeyPart(value: string) {
 }
 
 function normalizeAcceptedRuntime(runtime: TriggerRuntimeSnapshot): TriggerRuntimeSnapshot {
-  if (runtime.state === "unknown") {
+  if (runtime.state === "pending_version") {
     return runtime;
   }
 
@@ -223,10 +237,6 @@ function normalizeAcceptedRuntime(runtime: TriggerRuntimeSnapshot): TriggerRunti
     state: "active",
     status: runtime.status ?? "QUEUED"
   };
-}
-
-function isClearlyBrokenFreshRun(state: TriggerRunRuntimeState) {
-  return state === "pending_version" || state === "missing" || state === "terminal";
 }
 
 function normalizeRuntimeSnapshot(
@@ -249,4 +259,65 @@ function normalizeRuntimeSnapshot(
     state: "unknown",
     status: null
   };
+}
+
+async function confirmRunStartup(input: {
+  runId: string;
+  getTriggerRunState: StartTaskAnalysisRunInput["getTriggerRunState"];
+  startupProbeAttempts?: number;
+  startupProbeDelayMs?: number;
+  sleepImpl?: (ms: number) => Promise<void>;
+}): Promise<{ accepted: boolean; runtime: TriggerRuntimeSnapshot }> {
+  const attempts =
+    Number.isFinite(input.startupProbeAttempts) && (input.startupProbeAttempts ?? 0) > 0
+      ? Number(input.startupProbeAttempts)
+      : 4;
+  const delayMs =
+    Number.isFinite(input.startupProbeDelayMs) && (input.startupProbeDelayMs ?? 0) >= 0
+      ? Number(input.startupProbeDelayMs)
+      : process.env.NODE_ENV === "test"
+        ? 0
+        : 2_000;
+  const sleepImpl = input.sleepImpl ?? sleep;
+
+  let lastRuntime: TriggerRuntimeSnapshot = {
+    state: "unknown",
+    status: null
+  };
+
+  for (let index = 0; index < attempts; index += 1) {
+    const runtime = await input.getTriggerRunState(input.runId).catch(
+      (): TriggerRuntimeSnapshot => ({
+        state: "unknown",
+        status: null
+      })
+    );
+    lastRuntime = normalizeRuntimeSnapshot(runtime);
+
+    if (isAcceptedStartupState(lastRuntime.state)) {
+      return {
+        accepted: true,
+        runtime: lastRuntime
+      };
+    }
+
+    if (index < attempts - 1 && delayMs > 0) {
+      await sleepImpl(delayMs);
+    }
+  }
+
+  return {
+    accepted: false,
+    runtime: lastRuntime
+  };
+}
+
+function isAcceptedStartupState(state: TriggerRunRuntimeState) {
+  return state === "active" || state === "pending_version";
+}
+
+function sleep(ms: number) {
+  return new Promise<void>((resolve) => {
+    setTimeout(resolve, ms);
+  });
 }

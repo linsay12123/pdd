@@ -44,6 +44,9 @@ type ConfirmPrimaryRouteDependencies = {
     forcedPrimaryFileId?: string | null;
     idempotencyKey: string;
   }) => Promise<string | null>;
+  startupProbeAttempts?: number;
+  startupProbeDelayMs?: number;
+  sleepImpl?: (ms: number) => Promise<void>;
 };
 
 export async function handleConfirmPrimaryFileRequest(
@@ -125,7 +128,10 @@ export async function handleConfirmPrimaryFileRequest(
       enqueueTaskAnalysis: dependencies.enqueueTaskAnalysis ?? enqueueAnalyzeTaskWithTrigger,
       getTriggerRunState: dependencies.getTriggerRunState ?? getTriggerRunState,
       markTaskAnalysisPending,
-      markTaskAnalysisFailed
+      markTaskAnalysisFailed,
+      startupProbeAttempts: dependencies.startupProbeAttempts,
+      startupProbeDelayMs: dependencies.startupProbeDelayMs,
+      sleepImpl: dependencies.sleepImpl
     });
 
     if (!dispatchResult.ok) {
@@ -162,8 +168,10 @@ export async function handleConfirmPrimaryFileRequest(
           detail:
             dispatchResult.runtime.state === "unknown"
               ? "后台重分析任务已受理，系统正在确认这一轮是否已经真正开始执行。"
+              : dispatchResult.runtime.state === "pending_version"
+                ? "后台重分析任务已受理，这一轮正在启动中。"
               : dispatchResult.autoRecovered
-                ? "第一张后台任务编号已经坏了，系统刚刚已经自动换了一张新的后台编号。"
+                ? "第一张后台任务编号没有真正启动，系统刚刚已经自动换了一张新的后台编号。"
                 : "后台重分析任务已受理，正在排队或准备执行。",
           autoRecovered: dispatchResult.autoRecovered,
           runId: dispatchResult.triggerRunId
@@ -174,7 +182,7 @@ export async function handleConfirmPrimaryFileRequest(
         humanize: toSessionTaskHumanizePayload(refreshedTask ?? task),
         primaryRequirementFileId: fileId,
         message: dispatchResult.autoRecovered
-          ? "主任务文件已确认。第一张后台任务编号刚刚失效，系统已经自动换了一张新的编号并继续分析。"
+          ? "主任务文件已确认。第一张后台任务没有真正启动，系统已经自动换了一张新的编号并继续分析。"
           : "主任务文件已确认，系统正在后台重新分析并生成新大纲。"
       },
       { status: 202 }

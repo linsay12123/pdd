@@ -44,6 +44,9 @@ type TaskAnalysisRetryRouteDependencies = {
     runId: string
   ) => Promise<{ state: TriggerRunRuntimeState; status: string | null }>;
   enqueueTaskAnalysis?: (input: EnqueueAnalyzeTaskInput) => Promise<string | null>;
+  startupProbeAttempts?: number;
+  startupProbeDelayMs?: number;
+  sleepImpl?: (ms: number) => Promise<void>;
 };
 
 export async function handleTaskAnalysisRetryRequest(
@@ -127,8 +130,7 @@ export async function handleTaskAnalysisRetryRequest(
       : null;
     const canRetry =
       currentStatus === "failed" ||
-      currentProgress.canRetry ||
-      currentRuntime?.state === "pending_version";
+      currentProgress.canRetry;
 
     if (!canRetry) {
       return NextResponse.json(
@@ -192,7 +194,10 @@ export async function handleTaskAnalysisRetryRequest(
       enqueueTaskAnalysis: dependencies.enqueueTaskAnalysis ?? enqueueAnalyzeTaskWithTrigger,
       getTriggerRunState: dependencies.getTriggerRunState ?? getTriggerRunState,
       markTaskAnalysisPending,
-      markTaskAnalysisFailed
+      markTaskAnalysisFailed,
+      startupProbeAttempts: dependencies.startupProbeAttempts,
+      startupProbeDelayMs: dependencies.startupProbeDelayMs,
+      sleepImpl: dependencies.sleepImpl
     });
 
     if (!dispatchResult.ok) {
@@ -235,8 +240,10 @@ export async function handleTaskAnalysisRetryRequest(
           detail:
             dispatchResult.runtime.state === "unknown"
               ? "后台重试任务已受理，系统正在确认这一轮是否已经真正开始执行。"
-              : dispatchResult.autoRecovered
-                ? "第一张后台任务编号已经坏了，系统刚刚已经自动换了一张新的后台编号。"
+              : dispatchResult.runtime.state === "pending_version"
+                ? "后台重试任务已受理，这一轮正在启动中。"
+                : dispatchResult.autoRecovered
+                  ? "第一张后台任务编号没有真正启动，系统刚刚已经自动换了一张新的后台编号。"
                 : "后台重试任务已受理，正在排队或准备执行。",
           autoRecovered: dispatchResult.autoRecovered,
           runId: dispatchResult.triggerRunId
@@ -246,7 +253,7 @@ export async function handleTaskAnalysisRetryRequest(
         outline: null,
         humanize: toSessionTaskHumanizePayload(refreshedTask ?? task),
         message: dispatchResult.autoRecovered
-          ? "系统已经重新发起分析，并且自动跳过了一张坏掉的后台任务编号。"
+          ? "系统已经重新发起分析，并且自动跳过了一张没真正启动起来的后台任务编号。"
           : "已重新提交后台分析，系统正在重新生成第一版大纲。"
       },
       { status: 202 }

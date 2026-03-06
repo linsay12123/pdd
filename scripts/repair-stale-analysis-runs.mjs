@@ -49,11 +49,11 @@ let repaired = 0;
 let skipped = 0;
 
 for (const row of rows) {
-  const shouldRepair = force ? true : await isPendingVersionRun(row.analysis_trigger_run_id);
+  const shouldRepair = force ? true : await isClearlyStaleRun(row.analysis_trigger_run_id);
 
   if (!shouldRepair) {
     skipped += 1;
-    console.log(`跳过 ${row.id}：这条后台编号不是 PENDING_VERSION。`);
+    console.log(`跳过 ${row.id}：这条后台编号目前看起来还像正常启动中的记录。`);
     continue;
   }
 
@@ -120,14 +120,15 @@ async function loadCandidateTasks() {
   return Array.isArray(data) ? data : [];
 }
 
-async function isPendingVersionRun(runId) {
+async function isClearlyStaleRun(runId) {
   if (!runId || !triggerSecretKey) {
     return false;
   }
 
   try {
     const run = await runs.retrieve(runId);
-    return run?.status === "PENDING_VERSION";
+    const status = typeof run?.status === "string" ? run.status : null;
+    return status !== "PENDING_VERSION" && status !== "QUEUED" && status !== "DEQUEUED";
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     if (message.toLowerCase().includes("not found")) {

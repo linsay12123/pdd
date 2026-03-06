@@ -635,8 +635,7 @@ export function WorkspacePageClient({ initialQuota }: WorkspacePageClientProps) 
   };
   const showAnalysisRetryButton =
     analysisStatus === "failed" ||
-    (analysisStatus === "pending" &&
-      (analysisProgress.canRetry || analysisRuntime.state === "pending_version"));
+    (analysisStatus === "pending" && analysisProgress.canRetry);
   const hasOutline = outlineSections.length > 0;
   const needsPrimaryFileConfirmation = Boolean(
     analysisStatus === "succeeded" &&
@@ -851,11 +850,6 @@ export function WorkspacePageClient({ initialQuota }: WorkspacePageClientProps) 
                     <p className="text-xs text-brand-700 mt-2">
                       后台运行态：{analysisRuntime.detail}
                     </p>
-                    {analysisRuntime.state === "pending_version" && (
-                      <p className="text-xs text-red-200 mt-3">
-                        这条后台任务编号已经失效了。你可以直接点下面的“一键重试分析”，系统会换一条新的后台编号，不用重新上传文件。
-                      </p>
-                    )}
                     {showAnalysisRetryButton && (
                       <div className="mt-4 flex items-center gap-3">
                         <Button

@@ -52,6 +52,9 @@ type TaskFileUploadRouteDependencies = {
   enqueueTaskAnalysis?: (input: EnqueueAnalyzeTaskInput) => Promise<string | null>;
   maxFileCount?: number;
   maxFileBytes?: number;
+  startupProbeAttempts?: number;
+  startupProbeDelayMs?: number;
+  sleepImpl?: (ms: number) => Promise<void>;
 };
 
 const DEFAULT_MAX_FILE_COUNT = 10;
@@ -272,7 +275,10 @@ export async function handleTaskFileUploadRequest(
       enqueueTaskAnalysis: dependencies.enqueueTaskAnalysis ?? enqueueAnalyzeTaskWithTrigger,
       getTriggerRunState: dependencies.getTriggerRunState ?? getTriggerRunState,
       markTaskAnalysisPending,
-      markTaskAnalysisFailed
+      markTaskAnalysisFailed,
+      startupProbeAttempts: dependencies.startupProbeAttempts,
+      startupProbeDelayMs: dependencies.startupProbeDelayMs,
+      sleepImpl: dependencies.sleepImpl
     });
 
     if (!dispatchResult.ok) {
@@ -311,8 +317,10 @@ export async function handleTaskFileUploadRequest(
           detail:
             dispatchResult.runtime.state === "unknown"
               ? "后台任务已受理，系统正在确认这一轮是否已经真正开始执行。"
+              : dispatchResult.runtime.state === "pending_version"
+                ? "后台任务已受理，这一轮正在启动中。"
               : dispatchResult.autoRecovered
-                ? "第一张后台任务编号已经坏了，系统刚刚已经自动换了一张新的后台编号。"
+                ? "第一张后台任务编号没有真正启动，系统刚刚已经自动换了一张新的后台编号。"
                 : "后台任务已受理，正在排队或准备执行。",
           autoRecovered: dispatchResult.autoRecovered,
           runId: dispatchResult.triggerRunId
@@ -322,7 +330,7 @@ export async function handleTaskFileUploadRequest(
         outline: null,
         humanize: toSessionTaskHumanizePayload(refreshedTask ?? task),
         message: dispatchResult.autoRecovered
-          ? "文件已上传。第一张后台任务编号刚刚失效，系统已经自动换了一张新的编号并继续分析。"
+          ? "文件已上传。第一张后台任务没有真正启动，系统已经自动换了一张新的编号并继续分析。"
           : "文件已上传，系统正在后台分析并生成第一版大纲。"
       },
       { status: 202 }

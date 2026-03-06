@@ -163,7 +163,9 @@ describe("task file async analysis routes", () => {
       {
         isPersistenceReady: () => true,
         requireUser: async () => makeUser(),
-        enqueueTaskAnalysis
+        enqueueTaskAnalysis,
+        getTriggerRunState: async () => ({ state: "active", status: "QUEUED" }),
+        startupProbeAttempts: 1
       }
     );
     const payload = await response.json();
@@ -184,9 +186,9 @@ describe("task file async analysis routes", () => {
     expect(listTaskFiles("task-1")).toHaveLength(1);
   });
 
-  it("auto-recovers immediately when the first fresh upload run id is already broken", async () => {
+  it("treats pending_version as normal startup and keeps the first fresh upload run", async () => {
     saveTaskSummary({
-      id: "task-upload-auto-recover",
+      id: "task-upload-starting",
       userId: "user-1",
       status: "created",
       targetWordCount: null,
@@ -200,21 +202,17 @@ describe("task file async analysis routes", () => {
       new File(["Assignment brief text."], "assignment.txt", { type: "text/plain" })
     );
 
-    const enqueueTaskAnalysis = vi
-      .fn()
-      .mockResolvedValueOnce("run-upload-bad-0")
-      .mockResolvedValueOnce("run-upload-good-1");
+    const enqueueTaskAnalysis = vi.fn().mockResolvedValueOnce("run-upload-pending-version-0");
     const getTriggerRunState = vi
       .fn()
-      .mockResolvedValueOnce({ state: "pending_version", status: "PENDING_VERSION" })
-      .mockResolvedValueOnce({ state: "active", status: "QUEUED" });
+      .mockResolvedValueOnce({ state: "pending_version", status: "PENDING_VERSION" });
 
     const response = await handleTaskFileUploadRequest(
-      new Request("http://localhost/api/tasks/task-upload-auto-recover/files", {
+      new Request("http://localhost/api/tasks/task-upload-starting/files", {
         method: "POST",
         body: formData
       }),
-      { taskId: "task-upload-auto-recover" },
+      { taskId: "task-upload-starting" },
       {
         isPersistenceReady: () => true,
         requireUser: async () => makeUser(),
@@ -226,17 +224,14 @@ describe("task file async analysis routes", () => {
 
     expect(response.status).toBe(202);
     expect(payload.analysisStatus).toBe("pending");
-    expect(payload.analysisRuntime.runId).toBe("run-upload-good-1");
-    expect(payload.analysisRuntime.autoRecovered).toBe(true);
-    expect(enqueueTaskAnalysis).toHaveBeenCalledTimes(2);
-    expect(getTriggerRunState).toHaveBeenCalledTimes(2);
-    expect(enqueueTaskAnalysis.mock.calls[0]?.[0]?.idempotencyKey).not.toBe(
-      enqueueTaskAnalysis.mock.calls[1]?.[0]?.idempotencyKey
-    );
-    expect(getTaskSummary("task-upload-auto-recover")?.analysisRetryCount).toBe(1);
+    expect(payload.analysisRuntime.runId).toBe("run-upload-pending-version-0");
+    expect(payload.analysisRuntime.autoRecovered).toBe(false);
+    expect(enqueueTaskAnalysis).toHaveBeenCalledTimes(1);
+    expect(getTriggerRunState).toHaveBeenCalledTimes(1);
+    expect(getTaskSummary("task-upload-starting")?.analysisRetryCount).toBe(0);
   });
 
-  it("fails fast when even the recovered upload run is still broken", async () => {
+  it("fails fast only when startup confirmation never sees an accepted runtime state", async () => {
     saveTaskSummary({
       id: "task-upload-runtime-bad",
       userId: "user-1",
@@ -258,8 +253,8 @@ describe("task file async analysis routes", () => {
       .mockResolvedValueOnce("run-upload-bad-1");
     const getTriggerRunState = vi
       .fn()
-      .mockResolvedValueOnce({ state: "pending_version", status: "PENDING_VERSION" })
-      .mockResolvedValueOnce({ state: "pending_version", status: "PENDING_VERSION" });
+      .mockResolvedValueOnce({ state: "unknown", status: null })
+      .mockResolvedValueOnce({ state: "missing", status: null });
 
     const response = await handleTaskFileUploadRequest(
       new Request("http://localhost/api/tasks/task-upload-runtime-bad/files", {
@@ -271,7 +266,8 @@ describe("task file async analysis routes", () => {
         isPersistenceReady: () => true,
         requireUser: async () => makeUser(),
         enqueueTaskAnalysis,
-        getTriggerRunState
+        getTriggerRunState,
+        startupProbeAttempts: 1
       } as never
     );
     const payload = await response.json();
@@ -345,7 +341,9 @@ describe("task file async analysis routes", () => {
       {
         isPersistenceReady: () => true,
         requireUser: async () => makeUser(),
-        enqueueTaskAnalysis: async () => "run-upload-task-3"
+        enqueueTaskAnalysis: async () => "run-upload-task-3",
+        getTriggerRunState: async () => ({ state: "active", status: "QUEUED" }),
+        startupProbeAttempts: 1
       }
     );
     const payload = await response.json();
@@ -383,7 +381,9 @@ describe("task file async analysis routes", () => {
       {
         isPersistenceReady: () => true,
         requireUser: async () => makeUser(),
-        enqueueTaskAnalysis: async () => "run-upload-task-4"
+        enqueueTaskAnalysis: async () => "run-upload-task-4",
+        getTriggerRunState: async () => ({ state: "active", status: "QUEUED" }),
+        startupProbeAttempts: 1
       }
     );
 
@@ -404,7 +404,9 @@ describe("task file async analysis routes", () => {
       {
         isPersistenceReady: () => true,
         requireUser: async () => makeUser(),
-        enqueueTaskAnalysis
+        enqueueTaskAnalysis,
+        getTriggerRunState: async () => ({ state: "active", status: "QUEUED" }),
+        startupProbeAttempts: 1
       }
     );
     const payload = await response.json();
@@ -423,9 +425,9 @@ describe("task file async analysis routes", () => {
     expect(getTaskSummary("task-4")?.primaryRequirementFileId).toBe(chosenFileId);
   });
 
-  it("auto-recovers immediately when confirm-primary gets a broken fresh run id", async () => {
+  it("treats pending_version as normal startup when confirm-primary launches a fresh run", async () => {
     saveTaskSummary({
-      id: "task-confirm-auto-recover",
+      id: "task-confirm-starting",
       userId: "user-1",
       status: "awaiting_primary_file_confirmation",
       targetWordCount: null,
@@ -436,7 +438,7 @@ describe("task file async analysis routes", () => {
     saveTaskFileRecords([
       {
         id: "file-1",
-        taskId: "task-confirm-auto-recover",
+        taskId: "task-confirm-starting",
         userId: "user-1",
         originalFilename: "brief-a.txt",
         storagePath: "tmp/brief-a.txt",
@@ -448,22 +450,20 @@ describe("task file async analysis routes", () => {
 
     const enqueueTaskAnalysis = vi
       .fn()
-      .mockResolvedValueOnce("run-confirm-bad-0")
-      .mockResolvedValueOnce("run-confirm-good-1");
+      .mockResolvedValueOnce("run-confirm-pending-version-0");
     const getTriggerRunState = vi
       .fn()
-      .mockResolvedValueOnce({ state: "pending_version", status: "PENDING_VERSION" })
-      .mockResolvedValueOnce({ state: "active", status: "QUEUED" });
+      .mockResolvedValueOnce({ state: "pending_version", status: "PENDING_VERSION" });
 
     const response = await handleConfirmPrimaryFileRequest(
-      new Request("http://localhost/api/tasks/task-confirm-auto-recover/files/confirm-primary", {
+      new Request("http://localhost/api/tasks/task-confirm-starting/files/confirm-primary", {
         method: "POST",
         body: JSON.stringify({ fileId: "file-1" }),
         headers: {
           "content-type": "application/json"
         }
       }),
-      { taskId: "task-confirm-auto-recover" },
+      { taskId: "task-confirm-starting" },
       {
         isPersistenceReady: () => true,
         requireUser: async () => makeUser(),
@@ -475,13 +475,10 @@ describe("task file async analysis routes", () => {
 
     expect(response.status).toBe(202);
     expect(payload.analysisStatus).toBe("pending");
-    expect(payload.analysisRuntime.runId).toBe("run-confirm-good-1");
-    expect(payload.analysisRuntime.autoRecovered).toBe(true);
-    expect(enqueueTaskAnalysis).toHaveBeenCalledTimes(2);
-    expect(enqueueTaskAnalysis.mock.calls[0]?.[0]?.idempotencyKey).not.toBe(
-      enqueueTaskAnalysis.mock.calls[1]?.[0]?.idempotencyKey
-    );
-    expect(getTaskSummary("task-confirm-auto-recover")?.analysisRetryCount).toBe(2);
+    expect(payload.analysisRuntime.runId).toBe("run-confirm-pending-version-0");
+    expect(payload.analysisRuntime.autoRecovered).toBe(false);
+    expect(enqueueTaskAnalysis).toHaveBeenCalledTimes(1);
+    expect(getTaskSummary("task-confirm-starting")?.analysisRetryCount).toBe(1);
   });
 
   it("returns 502 when trigger does not return run id", async () => {
