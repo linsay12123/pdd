@@ -1,7 +1,7 @@
 import { task } from "@trigger.dev/sdk/v3";
 import { isMeaningfulOutline } from "@/src/lib/ai/outline-quality";
 import { analyzeUploadedTaskWithOpenAI } from "@/src/lib/ai/services/analyze-uploaded-task";
-import { shouldUseSupabasePersistence } from "@/src/lib/persistence/runtime-mode";
+import { requireFormalPersistence, shouldUseSupabasePersistence } from "@/src/lib/persistence/runtime-mode";
 import {
   getOwnedTaskSummary,
   listTaskFilesForModel,
@@ -33,7 +33,7 @@ export async function runAnalyzeUploadedTaskPipeline(
   input: AnalyzeUploadedTaskJobInput
 ) {
   if (!shouldUseSupabasePersistence()) {
-    throw new Error("REAL_PERSISTENCE_REQUIRED");
+    requireFormalPersistence();
   }
 
   const startedAt = Date.now();

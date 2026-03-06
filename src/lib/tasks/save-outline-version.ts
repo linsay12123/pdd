@@ -1,7 +1,11 @@
 import { randomUUID } from "node:crypto";
 import type { OutlineScaffold } from "@/src/lib/ai/prompts/generate-outline";
 import { reviseOutlineFromFilesWithOpenAI } from "@/src/lib/ai/services/revise-outline-from-files";
-import { shouldUseSupabasePersistence } from "@/src/lib/persistence/runtime-mode";
+import {
+  requireFormalPersistence,
+  shouldUseLocalTestPersistence,
+  shouldUseSupabasePersistence
+} from "@/src/lib/persistence/runtime-mode";
 import { createSupabaseAdminClient } from "@/src/lib/supabase/admin";
 import { assertStatusTransition } from "@/src/lib/tasks/status-machine";
 import {
@@ -46,25 +50,43 @@ type OutlineActionResult = {
 export async function saveOutlineVersion(
   input: SaveOutlineVersionInput
 ): Promise<TaskOutlineVersion> {
-  return shouldUseSupabasePersistence()
-    ? saveOutlineVersionWithSupabase(input)
-    : saveOutlineVersionLocally(input);
+  if (shouldUseSupabasePersistence()) {
+    return saveOutlineVersionWithSupabase(input);
+  }
+
+  if (shouldUseLocalTestPersistence()) {
+    return saveOutlineVersionLocally(input);
+  }
+
+  requireFormalPersistence();
 }
 
 export async function reviseOutlineVersion(
   input: ReviseOutlineInput
 ): Promise<OutlineActionResult> {
-  return shouldUseSupabasePersistence()
-    ? reviseOutlineVersionWithSupabase(input)
-    : reviseOutlineVersionLocally(input);
+  if (shouldUseSupabasePersistence()) {
+    return reviseOutlineVersionWithSupabase(input);
+  }
+
+  if (shouldUseLocalTestPersistence()) {
+    return reviseOutlineVersionLocally(input);
+  }
+
+  requireFormalPersistence();
 }
 
 export async function approveOutlineVersion(
   input: ApproveOutlineInput
 ): Promise<OutlineActionResult> {
-  return shouldUseSupabasePersistence()
-    ? approveOutlineVersionWithSupabase(input)
-    : approveOutlineVersionLocally(input);
+  if (shouldUseSupabasePersistence()) {
+    return approveOutlineVersionWithSupabase(input);
+  }
+
+  if (shouldUseLocalTestPersistence()) {
+    return approveOutlineVersionLocally(input);
+  }
+
+  requireFormalPersistence();
 }
 
 async function saveOutlineVersionLocally({

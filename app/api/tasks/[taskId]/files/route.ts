@@ -269,7 +269,8 @@ export async function handleTaskFileUploadRequest(
     await markTaskAnalysisPending({
       taskId: params.taskId,
       userId: user.id,
-      triggerRunId
+      triggerRunId,
+      analysisModel: "gpt-5.2"
     });
 
     const refreshedTask = await getOwnedTaskSummary(params.taskId, user.id);

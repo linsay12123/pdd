@@ -1,6 +1,10 @@
 import { randomUUID } from "node:crypto";
 import { countBodyWords } from "@/src/lib/drafts/word-count";
-import { shouldUseSupabasePersistence } from "@/src/lib/persistence/runtime-mode";
+import {
+  requireFormalPersistence,
+  shouldUseLocalTestPersistence,
+  shouldUseSupabasePersistence
+} from "@/src/lib/persistence/runtime-mode";
 import { createSupabaseAdminClient } from "@/src/lib/supabase/admin";
 import {
   getTaskSummary,
@@ -23,9 +27,15 @@ const referencesHeadingPattern = /^#{0,2}\s*References\s*$/im;
 export async function saveDraftVersion(
   input: SaveDraftVersionInput
 ): Promise<TaskDraftVersion> {
-  return shouldUseSupabasePersistence()
-    ? saveDraftVersionWithSupabase(input)
-    : saveDraftVersionLocally(input);
+  if (shouldUseSupabasePersistence()) {
+    return saveDraftVersionWithSupabase(input);
+  }
+
+  if (shouldUseLocalTestPersistence()) {
+    return saveDraftVersionLocally(input);
+  }
+
+  requireFormalPersistence();
 }
 
 function splitDraftMarkdown(markdown: string) {

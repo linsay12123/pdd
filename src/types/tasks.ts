@@ -50,6 +50,8 @@ export type TaskSummary = {
   analysisSnapshot?: TaskAnalysisSnapshot | null;
   analysisStatus?: "pending" | "succeeded" | "failed";
   analysisModel?: string | null;
+  analysisRetryCount?: number;
+  analysisErrorMessage?: string | null;
   analysisTriggerRunId?: string | null;
   analysisRequestedAt?: string | null;
   analysisStartedAt?: string | null;

@@ -1,6 +1,10 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { shouldUseSupabasePersistence } from "@/src/lib/persistence/runtime-mode";
+import {
+  requireFormalArtifactStorage,
+  shouldUseLocalTestPersistence,
+  shouldUseSupabasePersistence
+} from "@/src/lib/persistence/runtime-mode";
 import { createSupabaseAdminClient } from "@/src/lib/supabase/admin";
 import { resolveStoredFileDiskPath } from "@/src/lib/storage/task-output-files";
 
@@ -18,6 +22,10 @@ type ReadTaskArtifactInput = {
 
 export async function saveTaskArtifact(input: SaveTaskArtifactInput) {
   if (!shouldUseSupabasePersistence()) {
+    if (!shouldUseLocalTestPersistence()) {
+      requireFormalArtifactStorage();
+    }
+
     const outputPath = resolveStoredFileDiskPath(input.storagePath);
     await mkdir(path.dirname(outputPath), { recursive: true });
     await writeFile(outputPath, input.body);
@@ -47,6 +55,10 @@ export async function saveTaskArtifact(input: SaveTaskArtifactInput) {
 
 export async function readTaskArtifact(input: ReadTaskArtifactInput) {
   if (!shouldUseSupabasePersistence()) {
+    if (!shouldUseLocalTestPersistence()) {
+      requireFormalArtifactStorage();
+    }
+
     return readFile(resolveStoredFileDiskPath(input.storagePath));
   }
 

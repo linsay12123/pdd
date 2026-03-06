@@ -1,5 +1,9 @@
 import { randomUUID } from "node:crypto";
-import { shouldUseSupabasePersistence } from "@/src/lib/persistence/runtime-mode";
+import {
+  requireFormalPersistence,
+  shouldUseLocalTestPersistence,
+  shouldUseSupabasePersistence
+} from "@/src/lib/persistence/runtime-mode";
 import { createSupabaseAdminClient } from "@/src/lib/supabase/admin";
 import {
   getTaskDraftVersion,
@@ -26,9 +30,15 @@ type SaveReferenceChecksInput = {
 export async function saveReferenceChecks(
   input: SaveReferenceChecksInput
 ): Promise<TaskReferenceCheck[]> {
-  return shouldUseSupabasePersistence()
-    ? saveReferenceChecksWithSupabase(input)
-    : saveReferenceChecksLocally(input);
+  if (shouldUseSupabasePersistence()) {
+    return saveReferenceChecksWithSupabase(input);
+  }
+
+  if (shouldUseLocalTestPersistence()) {
+    return saveReferenceChecksLocally(input);
+  }
+
+  requireFormalPersistence();
 }
 
 async function saveReferenceChecksLocally({

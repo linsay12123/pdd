@@ -1,4 +1,8 @@
-import { shouldUseSupabasePersistence } from "@/src/lib/persistence/runtime-mode";
+import {
+  requireFormalPersistence,
+  shouldUseLocalTestPersistence,
+  shouldUseSupabasePersistence
+} from "@/src/lib/persistence/runtime-mode";
 import { createSupabaseAdminClient } from "@/src/lib/supabase/admin";
 import {
   findTaskOutputByStoragePath,
@@ -18,9 +22,15 @@ type SaveTaskOutputInput = {
 };
 
 export async function saveTaskOutput(input: SaveTaskOutputInput) {
-  return shouldUseSupabasePersistence()
-    ? saveTaskOutputWithSupabase(input)
-    : saveTaskOutputLocally(input);
+  if (shouldUseSupabasePersistence()) {
+    return saveTaskOutputWithSupabase(input);
+  }
+
+  if (shouldUseLocalTestPersistence()) {
+    return saveTaskOutputLocally(input);
+  }
+
+  requireFormalPersistence();
 }
 
 export async function getOwnedTaskOutput(input: {
@@ -28,24 +38,42 @@ export async function getOwnedTaskOutput(input: {
   outputId: string;
   userId: string;
 }) {
-  return shouldUseSupabasePersistence()
-    ? getOwnedTaskOutputWithSupabase(input)
-    : getOwnedTaskOutputLocally(input);
+  if (shouldUseSupabasePersistence()) {
+    return getOwnedTaskOutputWithSupabase(input);
+  }
+
+  if (shouldUseLocalTestPersistence()) {
+    return getOwnedTaskOutputLocally(input);
+  }
+
+  requireFormalPersistence();
 }
 
 export async function listOwnedTaskOutputs(input: { taskId: string; userId: string }) {
-  return shouldUseSupabasePersistence()
-    ? listOwnedTaskOutputsWithSupabase(input)
-    : listOwnedTaskOutputsLocally(input);
+  if (shouldUseSupabasePersistence()) {
+    return listOwnedTaskOutputsWithSupabase(input);
+  }
+
+  if (shouldUseLocalTestPersistence()) {
+    return listOwnedTaskOutputsLocally(input);
+  }
+
+  requireFormalPersistence();
 }
 
 export async function findOwnedTaskOutputByStoragePath(input: {
   storagePath: string;
   userId: string;
 }) {
-  return shouldUseSupabasePersistence()
-    ? findOwnedTaskOutputByStoragePathWithSupabase(input)
-    : findOwnedTaskOutputByStoragePathLocally(input);
+  if (shouldUseSupabasePersistence()) {
+    return findOwnedTaskOutputByStoragePathWithSupabase(input);
+  }
+
+  if (shouldUseLocalTestPersistence()) {
+    return findOwnedTaskOutputByStoragePathLocally(input);
+  }
+
+  requireFormalPersistence();
 }
 
 function saveTaskOutputLocally(input: SaveTaskOutputInput) {

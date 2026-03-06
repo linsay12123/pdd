@@ -1,4 +1,5 @@
 import { createSupabaseAdminClient } from "@/src/lib/supabase/admin";
+import { normalizeAnalysisModel } from "@/src/lib/tasks/analysis-runtime-cleanup";
 import { assertStatusTransition } from "@/src/lib/tasks/status-machine";
 import type {
   TaskHumanizeStatus,
@@ -23,6 +24,11 @@ type TaskRow = {
   analysis_snapshot: unknown;
   analysis_status: "pending" | "succeeded" | "failed" | null;
   analysis_model: string | null;
+  analysis_retry_count: number | null;
+  analysis_error_message: string | null;
+  analysis_trigger_run_id: string | null;
+  analysis_requested_at: string | null;
+  analysis_started_at: string | null;
   analysis_completed_at: string | null;
   latest_outline_version_id: string | null;
   latest_draft_version_id: string | null;
@@ -56,7 +62,7 @@ export async function getOwnedTaskFromSupabase(taskId: string, userId: string) {
   const { data, error } = await client
     .from("writing_tasks")
     .select(
-      "id,user_id,status,target_word_count,citation_style,special_requirements,topic,requested_chapter_count,outline_revision_count,primary_requirement_file_id,analysis_snapshot,analysis_status,analysis_model,analysis_completed_at,latest_outline_version_id,latest_draft_version_id,current_candidate_draft_id,quota_reservation"
+      "id,user_id,status,target_word_count,citation_style,special_requirements,topic,requested_chapter_count,outline_revision_count,primary_requirement_file_id,analysis_snapshot,analysis_status,analysis_model,analysis_retry_count,analysis_error_message,analysis_trigger_run_id,analysis_requested_at,analysis_started_at,analysis_completed_at,latest_outline_version_id,latest_draft_version_id,current_candidate_draft_id,quota_reservation"
       + ",humanize_status,humanize_provider,humanize_profile_snapshot,humanize_document_id,humanize_retry_document_id,humanize_error_message,humanize_requested_at,humanize_completed_at"
     )
     .eq("id", taskId)
@@ -135,7 +141,7 @@ export async function setOwnedTaskStatusInSupabase(
     .eq("user_id", userId)
     .eq("status", currentStatus)
     .select(
-      "id,user_id,status,target_word_count,citation_style,special_requirements,topic,requested_chapter_count,outline_revision_count,primary_requirement_file_id,analysis_snapshot,analysis_status,analysis_model,analysis_completed_at,latest_outline_version_id,latest_draft_version_id,current_candidate_draft_id,quota_reservation"
+      "id,user_id,status,target_word_count,citation_style,special_requirements,topic,requested_chapter_count,outline_revision_count,primary_requirement_file_id,analysis_snapshot,analysis_status,analysis_model,analysis_retry_count,analysis_error_message,analysis_trigger_run_id,analysis_requested_at,analysis_started_at,analysis_completed_at,latest_outline_version_id,latest_draft_version_id,current_candidate_draft_id,quota_reservation"
       + ",humanize_status,humanize_provider,humanize_profile_snapshot,humanize_document_id,humanize_retry_document_id,humanize_error_message,humanize_requested_at,humanize_completed_at"
     )
     .maybeSingle();
@@ -183,7 +189,7 @@ export async function updateOwnedTaskHumanizeStateInSupabase(
     .eq("id", taskId)
     .eq("user_id", userId)
     .select(
-      "id,user_id,status,target_word_count,citation_style,special_requirements,topic,requested_chapter_count,outline_revision_count,primary_requirement_file_id,analysis_snapshot,analysis_status,analysis_model,analysis_completed_at,latest_outline_version_id,latest_draft_version_id,current_candidate_draft_id,quota_reservation"
+      "id,user_id,status,target_word_count,citation_style,special_requirements,topic,requested_chapter_count,outline_revision_count,primary_requirement_file_id,analysis_snapshot,analysis_status,analysis_model,analysis_retry_count,analysis_error_message,analysis_trigger_run_id,analysis_requested_at,analysis_started_at,analysis_completed_at,latest_outline_version_id,latest_draft_version_id,current_candidate_draft_id,quota_reservation"
       + ",humanize_status,humanize_provider,humanize_profile_snapshot,humanize_document_id,humanize_retry_document_id,humanize_error_message,humanize_requested_at,humanize_completed_at"
     )
     .maybeSingle();
@@ -241,7 +247,20 @@ function mapTaskRow(row: TaskRow) {
         ? (row.analysis_snapshot as TaskAnalysisSnapshot)
         : null,
     analysisStatus: row.analysis_status ?? undefined,
-    analysisModel: row.analysis_model ? String(row.analysis_model) : null,
+    analysisModel: normalizeAnalysisModel(row.analysis_model ? String(row.analysis_model) : null),
+    analysisRetryCount: Number(row.analysis_retry_count ?? 0),
+    analysisErrorMessage: row.analysis_error_message
+      ? String(row.analysis_error_message)
+      : null,
+    analysisTriggerRunId: row.analysis_trigger_run_id
+      ? String(row.analysis_trigger_run_id)
+      : null,
+    analysisRequestedAt: row.analysis_requested_at
+      ? String(row.analysis_requested_at)
+      : null,
+    analysisStartedAt: row.analysis_started_at
+      ? String(row.analysis_started_at)
+      : null,
     analysisCompletedAt: row.analysis_completed_at
       ? String(row.analysis_completed_at)
       : null,

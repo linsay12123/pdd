@@ -191,6 +191,9 @@ describe("analysis retry route", () => {
       citationStyle: null,
       specialRequirements: "",
       analysisStatus: "pending",
+      analysisModel: "gpt-5.2",
+      analysisRetryCount: 1,
+      analysisErrorMessage: "STALE_TRIGGER_RUN",
       analysisRequestedAt: new Date(Date.now() - 60 * 1000).toISOString(),
       analysisTriggerRunId: "run-pending-version-1"
     });
@@ -231,6 +234,9 @@ describe("analysis retry route", () => {
     expect(payload.analysisRuntime.runId).toBe("run-retried-from-pending-version");
     expect(String(payload.message)).toContain("已重新提交后台分析");
     expect(getTriggerRunState).toHaveBeenCalledTimes(2);
+    expect(getTaskSummary("task-pending-version")?.analysisRetryCount).toBe(2);
+    expect(getTaskSummary("task-pending-version")?.analysisErrorMessage).toBeNull();
+    expect(getTaskSummary("task-pending-version")?.analysisModel).toBe("gpt-5.2");
   });
 
   it("returns 503 when a fresh retry run is still pending_version", async () => {
@@ -332,7 +338,10 @@ describe("analysis retry route", () => {
       targetWordCount: null,
       citationStyle: null,
       specialRequirements: "",
-      analysisStatus: "failed"
+      analysisStatus: "failed",
+      analysisModel: "gpt-5.2",
+      analysisRetryCount: 0,
+      analysisErrorMessage: "MODEL_ANALYSIS_TIMEOUT"
     });
 
     saveTaskFileRecords([
@@ -363,6 +372,9 @@ describe("analysis retry route", () => {
 
     expect(response.status).toBe(202);
     expect(payload.analysisStatus).toBe("pending");
+    expect(getTaskSummary("task-failed")?.analysisRetryCount).toBe(1);
+    expect(getTaskSummary("task-failed")?.analysisErrorMessage).toBeNull();
+    expect(getTaskSummary("task-failed")?.analysisModel).toBe("gpt-5.2");
   });
 
   it("returns 502 when trigger run id is missing", async () => {

@@ -98,6 +98,11 @@ async function createTaskWithSupabase(
     specialRequirements: input.specialRequirements,
     analysisStatus: "pending",
     analysisModel: null,
+    analysisRetryCount: 0,
+    analysisErrorMessage: null,
+    analysisTriggerRunId: null,
+    analysisRequestedAt: null,
+    analysisStartedAt: null,
     analysisCompletedAt: null,
     analysisSnapshot: null
   } satisfies TaskSummary;

@@ -1,9 +1,17 @@
 import { randomUUID } from "node:crypto";
 import type { OutlineScaffold } from "@/src/lib/ai/prompts/generate-outline";
-import { shouldUseSupabasePersistence } from "@/src/lib/persistence/runtime-mode";
+import {
+  requireFormalPersistence,
+  shouldUseLocalTestPersistence,
+  shouldUseSupabasePersistence
+} from "@/src/lib/persistence/runtime-mode";
 import { createTaskStoragePath } from "@/src/lib/storage/upload";
 import { readTaskArtifact, saveTaskArtifact } from "@/src/lib/storage/task-artifacts";
 import { createSupabaseAdminClient } from "@/src/lib/supabase/admin";
+import {
+  buildStaleTriggerRunRepairPatch,
+  normalizeAnalysisModel
+} from "@/src/lib/tasks/analysis-runtime-cleanup";
 import { assertStatusTransition } from "@/src/lib/tasks/status-machine";
 import { saveOutlineVersion } from "@/src/lib/tasks/save-outline-version";
 import {
@@ -55,6 +63,10 @@ type PersistedTaskFilesResult = {
 
 export async function getOwnedTaskSummary(taskId: string, userId: string) {
   if (!shouldUseSupabasePersistence()) {
+    if (!shouldUseLocalTestPersistence()) {
+      requireFormalPersistence();
+    }
+
     const task = getTaskSummary(taskId);
 
     if (!task || task.userId !== userId) {
@@ -68,7 +80,7 @@ export async function getOwnedTaskSummary(taskId: string, userId: string) {
   const { data, error } = await client
     .from("writing_tasks")
     .select(
-      "id,status,target_word_count,citation_style,special_requirements,primary_requirement_file_id,topic,requested_chapter_count,outline_revision_count,latest_outline_version_id,analysis_snapshot,analysis_status,analysis_model,analysis_trigger_run_id,analysis_requested_at,analysis_started_at,analysis_completed_at"
+      "id,status,target_word_count,citation_style,special_requirements,primary_requirement_file_id,topic,requested_chapter_count,outline_revision_count,latest_outline_version_id,analysis_snapshot,analysis_status,analysis_model,analysis_retry_count,analysis_error_message,analysis_trigger_run_id,analysis_requested_at,analysis_started_at,analysis_completed_at"
     )
     .eq("id", taskId)
     .eq("user_id", userId)
@@ -112,7 +124,11 @@ export async function getOwnedTaskSummary(taskId: string, userId: string) {
       data.analysis_status === "succeeded" || data.analysis_status === "failed"
         ? data.analysis_status
         : "pending",
-    analysisModel: data.analysis_model ? String(data.analysis_model) : null,
+    analysisModel: normalizeAnalysisModel(data.analysis_model ? String(data.analysis_model) : null),
+    analysisRetryCount: Number(data.analysis_retry_count ?? 0),
+    analysisErrorMessage: data.analysis_error_message
+      ? String(data.analysis_error_message)
+      : null,
     analysisTriggerRunId: data.analysis_trigger_run_id
       ? String(data.analysis_trigger_run_id)
       : null,
@@ -129,9 +145,15 @@ export async function getOwnedTaskSummary(taskId: string, userId: string) {
 }
 
 export async function saveTaskFiles(input: SaveTaskFilesInput) {
-  return shouldUseSupabasePersistence()
-    ? saveTaskFilesWithSupabase(input)
-    : saveTaskFilesLocally(input);
+  if (shouldUseSupabasePersistence()) {
+    return saveTaskFilesWithSupabase(input);
+  }
+
+  if (shouldUseLocalTestPersistence()) {
+    return saveTaskFilesLocally(input);
+  }
+
+  requireFormalPersistence();
 }
 
 export async function updateTaskFileOpenAIMetadata(input: {
@@ -145,9 +167,15 @@ export async function updateTaskFileOpenAIMetadata(input: {
     extractionWarnings?: string[];
   }>;
 }) {
-  return shouldUseSupabasePersistence()
-    ? updateTaskFileOpenAIMetadataWithSupabase(input)
-    : updateTaskFileOpenAIMetadataLocally(input);
+  if (shouldUseSupabasePersistence()) {
+    return updateTaskFileOpenAIMetadataWithSupabase(input);
+  }
+
+  if (shouldUseLocalTestPersistence()) {
+    return updateTaskFileOpenAIMetadataLocally(input);
+  }
+
+  requireFormalPersistence();
 }
 
 export async function listTaskFilesForModel(
@@ -156,7 +184,12 @@ export async function listTaskFilesForModel(
 ): Promise<Array<TaskFileRecord & { rawBody: Buffer | null }>> {
   const files = shouldUseSupabasePersistence()
     ? await listTaskFilesWithSupabase(taskId, userId)
-    : listTaskFiles(taskId);
+    : shouldUseLocalTestPersistence()
+      ? listTaskFiles(taskId)
+      : (() => {
+          requireFormalPersistence();
+          return [];
+        })();
 
   const withBodies = await Promise.all(
     files.map(async (file) => ({
@@ -174,9 +207,15 @@ export async function listTaskFilesForWorkflow(
   taskId: string,
   userId: string
 ): Promise<TaskFileRecord[]> {
-  return shouldUseSupabasePersistence()
-    ? listTaskFilesWithSupabase(taskId, userId)
-    : listTaskFiles(taskId).filter((file) => file.userId === userId);
+  if (shouldUseSupabasePersistence()) {
+    return listTaskFilesWithSupabase(taskId, userId);
+  }
+
+  if (shouldUseLocalTestPersistence()) {
+    return listTaskFiles(taskId).filter((file) => file.userId === userId);
+  }
+
+  requireFormalPersistence();
 }
 
 export async function persistTaskModelAnalysis(input: {
@@ -185,9 +224,15 @@ export async function persistTaskModelAnalysis(input: {
   analysis: TaskAnalysisSnapshot;
   outline: OutlineScaffold | null;
 }): Promise<PersistedTaskFilesResult> {
-  return shouldUseSupabasePersistence()
-    ? persistTaskModelAnalysisWithSupabase(input)
-    : persistTaskModelAnalysisLocally(input);
+  if (shouldUseSupabasePersistence()) {
+    return persistTaskModelAnalysisWithSupabase(input);
+  }
+
+  if (shouldUseLocalTestPersistence()) {
+    return persistTaskModelAnalysisLocally(input);
+  }
+
+  requireFormalPersistence();
 }
 
 export async function markTaskAnalysisFailed(input: {
@@ -195,9 +240,15 @@ export async function markTaskAnalysisFailed(input: {
   userId: string;
   reason: string;
 }) {
-  return shouldUseSupabasePersistence()
-    ? markTaskAnalysisFailedWithSupabase(input)
-    : markTaskAnalysisFailedLocally(input);
+  if (shouldUseSupabasePersistence()) {
+    return markTaskAnalysisFailedWithSupabase(input);
+  }
+
+  if (shouldUseLocalTestPersistence()) {
+    return markTaskAnalysisFailedLocally(input);
+  }
+
+  requireFormalPersistence();
 }
 
 export async function markTaskAnalysisPending(input: {
@@ -206,19 +257,32 @@ export async function markTaskAnalysisPending(input: {
   primaryRequirementFileId?: string | null;
   triggerRunId?: string | null;
   analysisModel?: string | null;
+  incrementRetryCount?: boolean;
 }) {
-  return shouldUseSupabasePersistence()
-    ? markTaskAnalysisPendingWithSupabase(input)
-    : markTaskAnalysisPendingLocally(input);
+  if (shouldUseSupabasePersistence()) {
+    return markTaskAnalysisPendingWithSupabase(input);
+  }
+
+  if (shouldUseLocalTestPersistence()) {
+    return markTaskAnalysisPendingLocally(input);
+  }
+
+  requireFormalPersistence();
 }
 
 export async function markTaskAnalysisStarted(input: {
   taskId: string;
   userId: string;
 }) {
-  return shouldUseSupabasePersistence()
-    ? markTaskAnalysisStartedWithSupabase(input)
-    : markTaskAnalysisStartedLocally(input);
+  if (shouldUseSupabasePersistence()) {
+    return markTaskAnalysisStartedWithSupabase(input);
+  }
+
+  if (shouldUseLocalTestPersistence()) {
+    return markTaskAnalysisStartedLocally(input);
+  }
+
+  requireFormalPersistence();
 }
 
 async function saveTaskFilesLocally({
@@ -435,6 +499,7 @@ async function persistTaskModelAnalysisLocally(input: {
     analysisSnapshot: input.analysis,
     analysisStatus: "succeeded",
     analysisModel: "gpt-5.2",
+    analysisErrorMessage: null,
     analysisStartedAt: task.analysisStartedAt ?? new Date().toISOString(),
     analysisCompletedAt: new Date().toISOString()
   });
@@ -523,7 +588,8 @@ async function persistTaskModelAnalysisWithSupabase(input: {
       latest_outline_version_id: latestOutlineVersionId,
       analysis_snapshot: input.analysis,
       analysis_status: "succeeded",
-      analysis_model: "gpt-5.2",
+      analysis_model: normalizeAnalysisModel("gpt-5.2"),
+      analysis_error_message: null,
       analysis_started_at: ownedTask.analysisStartedAt ?? new Date().toISOString(),
       analysis_completed_at: new Date().toISOString()
     })
@@ -550,7 +616,8 @@ async function persistTaskModelAnalysisWithSupabase(input: {
       latestOutlineVersionId,
       analysisSnapshot: input.analysis,
       analysisStatus: "succeeded",
-      analysisModel: "gpt-5.2",
+      analysisModel: normalizeAnalysisModel("gpt-5.2"),
+      analysisErrorMessage: null,
       analysisStartedAt: ownedTask.analysisStartedAt ?? new Date().toISOString(),
       analysisCompletedAt: new Date().toISOString()
     },
@@ -663,13 +730,27 @@ async function markTaskAnalysisFailedLocally(input: {
     return null;
   }
 
-  const now = new Date().toISOString();
+  const stalePatch = buildStaleTriggerRunRepairPatch({
+    analysisModel: task.analysisModel
+  });
   return patchTaskSummary(input.taskId, {
     analysisStatus: "failed",
-    analysisModel: "gpt-5.2",
-    analysisCompletedAt: now,
-    analysisStartedAt: task.analysisStartedAt ?? now,
-    analysisSnapshot: task.analysisSnapshot
+    analysisModel:
+      input.reason === "STALE_TRIGGER_RUN"
+        ? stalePatch.analysisModel
+        : normalizeAnalysisModel(task.analysisModel),
+    analysisErrorMessage: input.reason,
+    analysisCompletedAt: stalePatch.analysisCompletedAt,
+    analysisStartedAt:
+      input.reason === "STALE_TRIGGER_RUN"
+        ? stalePatch.analysisStartedAt
+        : task.analysisStartedAt ?? stalePatch.analysisCompletedAt,
+    analysisTriggerRunId:
+      input.reason === "STALE_TRIGGER_RUN" ? stalePatch.analysisTriggerRunId : task.analysisTriggerRunId,
+    analysisSnapshot:
+      input.reason === "STALE_TRIGGER_RUN"
+        ? null
+        : task.analysisSnapshot
       ? {
           ...task.analysisSnapshot,
           warnings: [
@@ -698,15 +779,28 @@ async function markTaskAnalysisFailedWithSupabase(input: {
         warnings: [...existingWarnings, `analysis_failed:${input.reason}`]
       }
     : null;
-  const now = new Date().toISOString();
+  const stalePatch = buildStaleTriggerRunRepairPatch({
+    analysisModel: ownedTask?.analysisModel
+  });
   const { error } = await client
     .from("writing_tasks")
     .update({
       analysis_status: "failed",
-      analysis_model: "gpt-5.2",
-      analysis_started_at: ownedTask?.analysisStartedAt ?? now,
-      analysis_completed_at: now,
-      analysis_snapshot: nextSnapshot
+      analysis_model:
+        input.reason === "STALE_TRIGGER_RUN"
+          ? stalePatch.analysisModel
+          : normalizeAnalysisModel(ownedTask?.analysisModel),
+      analysis_error_message: input.reason,
+      analysis_started_at:
+        input.reason === "STALE_TRIGGER_RUN"
+          ? stalePatch.analysisStartedAt
+          : ownedTask?.analysisStartedAt ?? stalePatch.analysisCompletedAt,
+      analysis_completed_at: stalePatch.analysisCompletedAt,
+      analysis_trigger_run_id:
+        input.reason === "STALE_TRIGGER_RUN"
+          ? stalePatch.analysisTriggerRunId
+          : ownedTask?.analysisTriggerRunId ?? null,
+      analysis_snapshot: input.reason === "STALE_TRIGGER_RUN" ? null : nextSnapshot
     })
     .eq("id", input.taskId)
     .eq("user_id", input.userId);
@@ -722,15 +816,22 @@ async function markTaskAnalysisPendingLocally(input: {
   primaryRequirementFileId?: string | null;
   triggerRunId?: string | null;
   analysisModel?: string | null;
+  incrementRetryCount?: boolean;
 }) {
   const task = getTaskSummary(input.taskId);
   if (!task || task.userId !== input.userId) {
     return null;
   }
 
+  const nextRetryCount = input.incrementRetryCount
+    ? (task.analysisRetryCount ?? 0) + 1
+    : (task.analysisRetryCount ?? 0);
+
   return patchTaskSummary(input.taskId, {
     analysisStatus: "pending",
-    analysisModel: input.analysisModel ?? null,
+    analysisModel: normalizeAnalysisModel(input.analysisModel ?? task.analysisModel ?? null),
+    analysisRetryCount: nextRetryCount,
+    analysisErrorMessage: null,
     analysisTriggerRunId: input.triggerRunId ?? null,
     analysisRequestedAt: new Date().toISOString(),
     analysisStartedAt: null,
@@ -750,11 +851,18 @@ async function markTaskAnalysisPendingWithSupabase(input: {
   primaryRequirementFileId?: string | null;
   triggerRunId?: string | null;
   analysisModel?: string | null;
+  incrementRetryCount?: boolean;
 }) {
   const client = createSupabaseAdminClient();
+  const ownedTask = await getOwnedTaskSummary(input.taskId, input.userId);
+  const nextRetryCount = input.incrementRetryCount
+    ? (ownedTask?.analysisRetryCount ?? 0) + 1
+    : (ownedTask?.analysisRetryCount ?? 0);
   const patch: Record<string, unknown> = {
     analysis_status: "pending",
-    analysis_model: input.analysisModel ?? null,
+    analysis_model: normalizeAnalysisModel(input.analysisModel ?? ownedTask?.analysisModel ?? null),
+    analysis_retry_count: nextRetryCount,
+    analysis_error_message: null,
     analysis_trigger_run_id: input.triggerRunId ?? null,
     analysis_requested_at: new Date().toISOString(),
     analysis_started_at: null,
@@ -788,7 +896,8 @@ async function markTaskAnalysisStartedLocally(input: {
 
   const now = new Date().toISOString();
   return patchTaskSummary(input.taskId, {
-    analysisStartedAt: now
+    analysisStartedAt: now,
+    analysisErrorMessage: null
   });
 }
 
@@ -800,7 +909,8 @@ async function markTaskAnalysisStartedWithSupabase(input: {
   const { error } = await client
     .from("writing_tasks")
     .update({
-      analysis_started_at: new Date().toISOString()
+      analysis_started_at: new Date().toISOString(),
+      analysis_error_message: null
     })
     .eq("id", input.taskId)
     .eq("user_id", input.userId);

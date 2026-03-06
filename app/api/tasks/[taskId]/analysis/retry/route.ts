@@ -213,7 +213,9 @@ export async function handleTaskAnalysisRetryRequest(
       taskId: params.taskId,
       userId: user.id,
       primaryRequirementFileId: task.primaryRequirementFileId ?? null,
-      triggerRunId
+      triggerRunId,
+      analysisModel: task.analysisModel ?? "gpt-5.2",
+      incrementRetryCount: true
     });
 
     if (freshRuntime.state === "pending_version") {

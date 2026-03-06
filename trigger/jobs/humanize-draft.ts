@@ -11,7 +11,7 @@ import {
   defaultHumanizeProfile,
 } from "@/src/lib/humanize/humanize-provider";
 import { resolveHumanizeProvider } from "@/src/lib/humanize/resolve-provider";
-import { shouldUseSupabasePersistence } from "@/src/lib/persistence/runtime-mode";
+import { requireFormalPersistence, shouldUseSupabasePersistence } from "@/src/lib/persistence/runtime-mode";
 import {
   applyWalletMutationWithLedgerInSupabase,
   getUserWalletFromSupabase,
@@ -56,7 +56,7 @@ export async function runHumanizeDraftPipeline(
   dependencies: HumanizeDraftDependencies = {}
 ) {
   if (!shouldUseSupabasePersistence()) {
-    throw new Error("REAL_PERSISTENCE_REQUIRED");
+    requireFormalPersistence();
   }
 
   const provider = dependencies.provider ?? resolveHumanizeProvider();

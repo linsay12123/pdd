@@ -1,6 +1,6 @@
 import { schedules } from "@trigger.dev/sdk/v3";
 import { cleanupStaleQuotaReservations } from "@/src/lib/billing/cleanup-stale-reservations";
-import { shouldUseSupabasePersistence } from "@/src/lib/persistence/runtime-mode";
+import { requireFormalPersistence, shouldUseSupabasePersistence } from "@/src/lib/persistence/runtime-mode";
 
 export const cleanupStaleQuotaReservationsJob = schedules.task({
   id: "cleanup-stale-quota-reservations",
@@ -14,10 +14,7 @@ export const cleanupStaleQuotaReservationsJob = schedules.task({
   maxDuration: 300,
   run: async () => {
     if (!shouldUseSupabasePersistence()) {
-      return {
-        jobSkipped: true,
-        reason: "REAL_PERSISTENCE_REQUIRED"
-      };
+      requireFormalPersistence();
     }
 
     const cleaned = await cleanupStaleQuotaReservations();

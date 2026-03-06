@@ -15,6 +15,10 @@ const undetectableHumanizeMigration = resolve(
   migrationsDir,
   "202603050001_undetectable_humanize_flow.sql"
 );
+const analysisRuntimeCleanupMigration = resolve(
+  migrationsDir,
+  "202603060001_analysis_runtime_cleanup.sql"
+);
 
 describe("database cleanup migrations", () => {
   it("keeps task creation nullable until model analysis fills the requirements", () => {
@@ -61,5 +65,16 @@ describe("database cleanup migrations", () => {
     expect(sql).toContain("humanizing");
     expect(sql).toContain("humanized_ready");
     expect(sql).toContain("deliverable_ready");
+  });
+
+  it("ships a runtime cleanup migration that adds dedicated analysis retry/error fields", () => {
+    expect(existsSync(analysisRuntimeCleanupMigration)).toBe(true);
+
+    const sql = readFileSync(analysisRuntimeCleanupMigration, "utf8");
+
+    expect(sql).toContain("add column if not exists analysis_retry_count");
+    expect(sql).toContain("add column if not exists analysis_error_message");
+    expect(sql).toContain("analysis_model");
+    expect(sql).not.toContain("analysis_auto_recovered_once");
   });
 });

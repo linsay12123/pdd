@@ -122,7 +122,8 @@ export async function handleConfirmPrimaryFileRequest(
       taskId: params.taskId,
       userId: user.id,
       primaryRequirementFileId: fileId,
-      triggerRunId
+      triggerRunId,
+      analysisModel: task.analysisModel ?? "gpt-5.2"
     });
 
     const refreshedTask = await getOwnedTaskSummary(params.taskId, user.id);

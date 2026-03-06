@@ -1,14 +1,16 @@
 import { NextResponse } from "next/server";
-import { tasks } from "@trigger.dev/sdk/v3";
 import { requireCurrentSessionUser } from "@/src/lib/auth/current-user";
 import type { TaskWorkflowClassificationPayload } from "@/src/lib/tasks/request-task-file-upload";
 import { buildAnalysisProgressPayload } from "@/src/lib/tasks/analysis-progress";
 import {
   getOwnedTaskSummary,
-  listTaskFilesForWorkflow,
-  markTaskAnalysisPending
+  listTaskFilesForWorkflow
 } from "@/src/lib/tasks/save-task-files";
-import { shouldUseSupabasePersistence } from "@/src/lib/persistence/runtime-mode";
+import {
+  requireFormalPersistence,
+  shouldUseLocalTestPersistence,
+  shouldUseSupabasePersistence
+} from "@/src/lib/persistence/runtime-mode";
 import { createSupabaseAdminClient } from "@/src/lib/supabase/admin";
 import {
   toSessionTaskHumanizePayload,
@@ -17,7 +19,7 @@ import {
 import type { OutlineScaffold } from "@/src/lib/ai/prompts/generate-outline";
 import type { TaskAnalysisSnapshot } from "@/src/types/tasks";
 import type { SessionUser } from "@/src/types/auth";
-import { getInvalidTriggerKeyReason } from "@/src/lib/trigger/key-guard";
+import { STALE_TRIGGER_RUN_REASON } from "@/src/lib/tasks/analysis-runtime-cleanup";
 import {
   resolveTriggerRunState,
   type TriggerRunRuntimeState
@@ -43,30 +45,7 @@ type AnalysisRouteDependencies = {
   getTriggerRunState?: (
     runId: string
   ) => Promise<{ state: TriggerRunRuntimeState; status: string | null }>;
-  enqueueTaskAnalysis?: (input: {
-    taskId: string;
-    userId: string;
-    forcedPrimaryFileId?: string | null;
-    idempotencyKey: string;
-  }) => Promise<string | null>;
-  markAnalysisPending?: typeof markTaskAnalysisPending;
 };
-
-type TriggerRuntimeSnapshot = {
-  state: TriggerRunRuntimeState;
-  status: string | null;
-};
-
-type AutoRecoverPendingAnalysisResult = {
-  attempted: boolean;
-  triggered: boolean;
-  triggerRunId: string | null;
-  runtime: TriggerRuntimeSnapshot;
-  detail: string;
-};
-
-const ANALYSIS_AUTO_RECOVER_AFTER_SECONDS = 2 * 60;
-const ANALYSIS_AUTO_RECOVER_MAX_SECONDS = 10 * 60;
 
 export async function handleTaskAnalysisStatusRequest(
   _request: Request,
@@ -112,47 +91,6 @@ export async function handleTaskAnalysisStatusRequest(
 
     if (analysisStatus === "pending") {
       analysisRuntime = await resolveAnalysisRuntime(task, dependencies);
-
-      const shouldAutoRecover = canAutoRecoverPendingAnalysis({
-        task,
-        progressElapsedSeconds: analysisProgress.elapsedSeconds,
-        runtimeState: analysisRuntime.state
-      });
-
-      if (shouldAutoRecover) {
-        const autoRecoverResult = await tryAutoRecoverPendingAnalysis({
-          task,
-          userId: user.id,
-          dependencies
-        });
-
-        if (autoRecoverResult.attempted) {
-          analysisRuntime = {
-            state: autoRecoverResult.runtime.state,
-            status: autoRecoverResult.runtime.status,
-            detail: autoRecoverResult.detail,
-            autoRecovered: autoRecoverResult.triggered,
-            runId:
-              autoRecoverResult.triggerRunId ??
-              task.analysisTriggerRunId?.trim() ??
-              null
-          };
-
-          const refreshedTask = await getOwnedTaskSummary(params.taskId, user.id);
-          if (refreshedTask) {
-            task = refreshedTask;
-            analysis = refreshedTask.analysisSnapshot ?? null;
-            analysisStatus = refreshedTask.analysisStatus ?? "pending";
-            analysisProgress = buildAnalysisProgressPayload({
-              status: analysisStatus,
-              requestedAt: refreshedTask.analysisRequestedAt ?? null,
-              startedAt: refreshedTask.analysisStartedAt ?? null,
-              completedAt: refreshedTask.analysisCompletedAt ?? null
-            });
-          }
-        }
-      }
-
       if (canRetryPendingVersionImmediately(task, analysisRuntime.state)) {
         analysisProgress = {
           ...analysisProgress,
@@ -176,7 +114,8 @@ export async function handleTaskAnalysisStatusRequest(
       analysisStatus,
       analysisProgress,
       analysisRuntime,
-      analysis
+      analysis,
+      analysisErrorMessage: task.analysisErrorMessage ?? null
     });
 
     return NextResponse.json(
@@ -256,6 +195,10 @@ async function getOutlineByVersionId(
   outlineVersionId: string
 ) {
   if (!shouldUseSupabasePersistence()) {
+    if (!shouldUseLocalTestPersistence()) {
+      requireFormalPersistence();
+    }
+
     const { getTaskOutlineVersion } = await import("@/src/lib/tasks/repository");
     return getTaskOutlineVersion(taskId, outlineVersionId)?.outline ?? null;
   }
@@ -284,12 +227,24 @@ async function getOutlineByVersionId(
   return data.english_outline as OutlineScaffold;
 }
 
-function mapAnalysisFailureMessage(analysis: TaskAnalysisSnapshot | null) {
-  const warning = analysis?.warnings?.find((item) => item.startsWith("analysis_failed:"));
-  const code = warning?.replace("analysis_failed:", "")?.trim() ?? "";
+function mapAnalysisFailureMessage(input: {
+  analysis: TaskAnalysisSnapshot | null;
+  analysisErrorMessage?: string | null;
+}) {
+  const warning = input.analysis?.warnings?.find((item) =>
+    item.startsWith("analysis_failed:")
+  );
+  const code =
+    input.analysisErrorMessage?.trim() ||
+    warning?.replace("analysis_failed:", "")?.trim() ||
+    "";
 
   if (!code) {
     return "这次分析失败了，请直接点“一键重试分析”，不用重新上传文件。";
+  }
+
+  if (code === STALE_TRIGGER_RUN_REASON) {
+    return "这条旧的后台任务编号已经坏了。请直接点“一键重试分析”，系统会换一条新的后台任务编号，不用重新上传文件。";
   }
 
   if (code === "MODEL_ANALYSIS_TIMEOUT") {
@@ -319,9 +274,13 @@ function mapAnalysisMessage(input: {
   };
   analysisRuntime: AnalysisRuntimePayload;
   analysis: TaskAnalysisSnapshot | null;
+  analysisErrorMessage?: string | null;
 }) {
   if (input.analysisStatus === "failed") {
-    return mapAnalysisFailureMessage(input.analysis);
+    return mapAnalysisFailureMessage({
+      analysis: input.analysis,
+      analysisErrorMessage: input.analysisErrorMessage
+    });
   }
 
   if (input.analysisStatus === "succeeded") {
@@ -330,12 +289,8 @@ function mapAnalysisMessage(input: {
       : "文件分析已完成，第一版大纲已就绪。";
   }
 
-  if (input.analysisRuntime.autoRecovered) {
-    return "检测到上一轮后台分析没有真正启动，系统已自动补提一次分析任务。请再等一会儿。";
-  }
-
   if (input.analysisRuntime.state === "pending_version") {
-    return "这条后台任务编号现在还是坏的。等你把后台任务重新部署好后，直接点“一键重试分析”就行，不用重新上传文件。";
+    return "这条旧的后台任务编号已经坏了。请直接点“一键重试分析”，系统会换一条新的后台任务编号，不用重新上传文件。";
   }
 
   if (input.analysisProgress.canRetry) {
@@ -402,7 +357,7 @@ function mapRunStateDetail(state: TriggerRunRuntimeState) {
     case "active":
       return "后台任务正在执行中。";
     case "pending_version":
-      return "后台任务版本还没部署到生产环境。";
+      return "这条旧的后台任务编号已经失效，你可以直接点“一键重试分析”换一条新的编号。";
     case "terminal":
       return "上一轮后台任务已经结束，但任务状态还停在分析中。";
     case "missing":
@@ -412,175 +367,11 @@ function mapRunStateDetail(state: TriggerRunRuntimeState) {
   }
 }
 
-function canAutoRecoverPendingAnalysis(input: {
-  task: {
-    analysisStartedAt?: string | null;
-    analysisModel?: string | null;
-  };
-  progressElapsedSeconds: number;
-  runtimeState: AnalysisRuntimePayload["state"];
-}) {
-  const hasStarted = Boolean(input.task.analysisStartedAt);
-  const alreadyAutoRecovered = input.task.analysisModel === "analysis_auto_recovered_once";
-  const withinAutoRecoverWindow =
-    input.progressElapsedSeconds >= ANALYSIS_AUTO_RECOVER_AFTER_SECONDS &&
-    input.progressElapsedSeconds <= ANALYSIS_AUTO_RECOVER_MAX_SECONDS;
-  const canRecoverByState =
-    input.runtimeState === "terminal" || input.runtimeState === "missing";
-  const shouldRecoverBadPendingVersion = input.runtimeState === "pending_version";
-
-  return (
-    !hasStarted &&
-    !alreadyAutoRecovered &&
-    (shouldRecoverBadPendingVersion || (withinAutoRecoverWindow && canRecoverByState))
-  );
-}
-
-async function tryAutoRecoverPendingAnalysis(input: {
-  task: {
-    id: string;
-    analysisRequestedAt?: string | null;
-    analysisTriggerRunId?: string | null;
-    primaryRequirementFileId?: string | null;
-  };
-  userId: string;
-  dependencies: AnalysisRouteDependencies;
-}): Promise<AutoRecoverPendingAnalysisResult> {
-  if (!process.env.TRIGGER_SECRET_KEY?.trim()) {
-    return {
-      attempted: false,
-      triggered: false,
-      triggerRunId: null,
-      runtime: { state: "unknown", status: null },
-      detail: "后台任务密钥还没配置好，系统暂时没法自动补提分析。"
-    };
-  }
-
-  const invalidTriggerKeyReason = getInvalidTriggerKeyReason({
-    triggerSecretKey: process.env.TRIGGER_SECRET_KEY,
-    nodeEnv: process.env.NODE_ENV,
-    vercelEnv: process.env.VERCEL_ENV
-  });
-  if (invalidTriggerKeyReason === "dev_key_in_production") {
-    return {
-      attempted: false,
-      triggered: false,
-      triggerRunId: null,
-      runtime: { state: "pending_version", status: "INVALID_KEY" },
-      detail: "当前使用的还是开发版后台密钥，所以自动补提不会生效。"
-    };
-  }
-
-  const triggerRunId = await (input.dependencies.enqueueTaskAnalysis ??
-    enqueueAnalyzeTaskWithTrigger)({
-    taskId: input.task.id,
-    userId: input.userId,
-    forcedPrimaryFileId: input.task.primaryRequirementFileId ?? null,
-    idempotencyKey: buildAutoRecoverIdempotencyKey(input.task.id, input.userId, {
-      requestedAt: input.task.analysisRequestedAt ?? null,
-      triggerRunId: input.task.analysisTriggerRunId ?? null
-    })
-  }).catch(() => null);
-
-  if (!triggerRunId) {
-    return {
-      attempted: false,
-      triggered: false,
-      triggerRunId: null,
-      runtime: { state: "unknown", status: null },
-      detail: "系统刚尝试自动补提分析，但没拿到新的后台任务编号。"
-    };
-  }
-
-  const freshRuntime = await (input.dependencies.getTriggerRunState ?? getTriggerRunState)(
-    triggerRunId
-  ).catch(
-    (): TriggerRuntimeSnapshot => ({
-      state: "unknown",
-      status: null
-    })
-  );
-
-  await (input.dependencies.markAnalysisPending ?? markTaskAnalysisPending)({
-    taskId: input.task.id,
-    userId: input.userId,
-    primaryRequirementFileId: input.task.primaryRequirementFileId ?? null,
-    triggerRunId,
-    analysisModel: "analysis_auto_recovered_once"
-  }).catch(() => null);
-
-  if (freshRuntime.state === "pending_version") {
-    return {
-      attempted: true,
-      triggered: false,
-      triggerRunId,
-      runtime: freshRuntime,
-      detail:
-        "系统刚刚已经自动换过一次后台任务，但新任务还是显示“版本没部署”。说明现在生产环境还没准备好。"
-    };
-  }
-
-  return {
-    attempted: true,
-    triggered: true,
-    triggerRunId,
-    runtime: normalizeFreshEnqueuedRuntime(freshRuntime),
-    detail: "检测到上一轮后台分析没有真正启动，系统已自动换成新的后台任务。"
-  };
-}
-
 function canRetryPendingVersionImmediately(
   task: { analysisStartedAt?: string | null },
   runtimeState: AnalysisRuntimePayload["state"]
 ) {
   return !task.analysisStartedAt && runtimeState === "pending_version";
-}
-
-function normalizeFreshEnqueuedRuntime(
-  runtime: TriggerRuntimeSnapshot
-): TriggerRuntimeSnapshot {
-  if (runtime.state === "pending_version") {
-    return runtime;
-  }
-
-  return {
-    state: "active",
-    status: runtime.status ?? "QUEUED"
-  };
-}
-
-function buildAutoRecoverIdempotencyKey(
-  taskId: string,
-  userId: string,
-  seed: { requestedAt: string | null; triggerRunId: string | null }
-) {
-  const stableSeed = (seed.triggerRunId ?? seed.requestedAt ?? "no-analysis-run")
-    .replace(/[^a-zA-Z0-9_-]/g, "-")
-    .slice(0, 64);
-  return `task-analysis-auto-recover-${taskId}-${userId}-${stableSeed}`;
-}
-
-async function enqueueAnalyzeTaskWithTrigger(input: {
-  taskId: string;
-  userId: string;
-  forcedPrimaryFileId?: string | null;
-  idempotencyKey: string;
-}) {
-  const run = await tasks.trigger(
-    "analyze-uploaded-task",
-    {
-      taskId: input.taskId,
-      userId: input.userId,
-      forcedPrimaryFileId: input.forcedPrimaryFileId ?? null
-    },
-    {
-      queue: "task-analysis",
-      concurrencyKey: `task-analysis-${input.taskId}`,
-      idempotencyKey: input.idempotencyKey
-    }
-  );
-
-  return typeof run?.id === "string" ? run.id : null;
 }
 
 async function getTriggerRunState(

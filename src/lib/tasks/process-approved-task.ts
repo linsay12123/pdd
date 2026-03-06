@@ -1,6 +1,10 @@
 import { buildAdjustWordCountPrompt } from "@/src/lib/ai/prompts/adjust-word-count";
 import { defaultOpenAIModel, requestOpenAITextResponse } from "@/src/lib/ai/openai-client";
-import { shouldUseSupabasePersistence } from "@/src/lib/persistence/runtime-mode";
+import {
+  requireFormalPersistence,
+  shouldUseLocalTestPersistence,
+  shouldUseSupabasePersistence
+} from "@/src/lib/persistence/runtime-mode";
 import { mapReferenceVerdictLabel } from "@/src/lib/references/verification-rules";
 import { createSupabaseAdminClient } from "@/src/lib/supabase/admin";
 import { exportDocx, type DocxExportInput } from "@/src/lib/deliverables/export-docx";
@@ -294,9 +298,15 @@ async function requestAdjustedDraft({
 }
 
 async function loadApprovedTaskContext(taskId: string, userId: string) {
-  return shouldUseSupabasePersistence()
-    ? loadApprovedTaskContextWithSupabase(taskId, userId)
-    : loadApprovedTaskContextLocally(taskId, userId);
+  if (shouldUseSupabasePersistence()) {
+    return loadApprovedTaskContextWithSupabase(taskId, userId);
+  }
+
+  if (shouldUseLocalTestPersistence()) {
+    return loadApprovedTaskContextLocally(taskId, userId);
+  }
+
+  requireFormalPersistence();
 }
 
 function loadApprovedTaskContextLocally(taskId: string, userId: string) {
@@ -432,9 +442,15 @@ function requireTaskCitationStyle(task: TaskSummary) {
 }
 
 async function setTaskStatus(taskId: string, userId: string, status: TaskSummary["status"]) {
-  return shouldUseSupabasePersistence()
-    ? setTaskStatusWithSupabase(taskId, userId, status)
-    : setTaskStatusLocally(taskId, status);
+  if (shouldUseSupabasePersistence()) {
+    return setTaskStatusWithSupabase(taskId, userId, status);
+  }
+
+  if (shouldUseLocalTestPersistence()) {
+    return setTaskStatusLocally(taskId, status);
+  }
+
+  requireFormalPersistence();
 }
 
 function setTaskStatusLocally(taskId: string, status: TaskSummary["status"]) {

@@ -24,6 +24,22 @@
   `outline_versions`
 - 当前规则：
   文件会尽量提字，但最终任务要求和大纲都由大模型统一分析后回填。
+- 正式运行硬规则：
+  这里只允许走 Supabase 正式数据库、`task-artifacts` 正式 bucket、Trigger 正式后台任务。
+  本地内存仓库和本地 `storage/` 文件夹现在只留给测试，不再允许正式入口偷偷回退。
+- 分析运行字段：
+  `analysis_status`
+  `analysis_trigger_run_id`
+  `analysis_requested_at`
+  `analysis_started_at`
+  `analysis_completed_at`
+  `analysis_model`
+  `analysis_snapshot`
+  `analysis_retry_count`
+  `analysis_error_message`
+- 旧坏任务说明：
+  如果一条旧任务的后台编号已经坏掉，不会自动偷偷重跑。
+  会把它修成“可一键重试”的状态，保留原任务和原文件，让用户自己决定要不要继续。
 
 ## 3. 用户确认主任务文件
 
@@ -89,11 +105,12 @@
   `quota_ledger_entries`
   `task_outputs`
 - 当前规则：
-  现在不再返回“已排队”的假成功。
+  自动降AI是交付后的附加流程，不再假装是主任务状态的一部分。
   如果真实服务密钥没配好，会直接明确提示“功能未启用”。
-  如果密钥已配置，就会直接完成一次真实降AI处理，并生成新的 Word 文件。
+  如果密钥已配置，就会走正式后台任务，并生成新的 Word 文件。
 - 必备依赖：
-  `STEALTHGPT_API_KEY`
+  `UNDETECTABLE_API_KEY`
+  `TRIGGER_SECRET_KEY`
 
 ## 8. 下载交付文件
 
@@ -103,6 +120,7 @@
   `task_outputs`
 - 当前规则：
   只允许下载属于当前用户自己的有效文件。
+  交付文件现在只认 `task-artifacts` bucket 里的正式文件，不再回退到本地磁盘。
 
 ## 9. 健康检查
 
@@ -119,5 +137,18 @@
 ## 10. 现在这条线上主流程的硬规则
 
 - 正式接口不再允许靠本地临时仓库冒充线上数据。
+- 正式存储不再允许靠本地磁盘冒充线上文件。
 - 如果功能还没真启用，就直接报未启用，不再返回假成功。
 - 健康检查必须说真话，不能因为页面能打开就假装一切正常。
+- 如果旧后台编号已经坏掉，只允许“手动一键重试”，不允许系统自己偷偷重跑并花模型钱。
+
+## 11. 旧坏分析任务怎么修
+
+- 脚本：
+  `node scripts/repair-stale-analysis-runs.mjs --all-pending --dry-run`
+- 作用：
+  只修“后台编号已经坏掉”的旧任务。
+  保留原任务、保留原文件，不自动重跑。
+  只是把坏编号清掉，把任务改成“可以手动一键重试”的失败态。
+- 真正执行：
+  `node scripts/repair-stale-analysis-runs.mjs --all-pending`
