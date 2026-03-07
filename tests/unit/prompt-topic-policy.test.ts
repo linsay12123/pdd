@@ -14,6 +14,22 @@ describe("topic selection policy prompts", () => {
     expect(prompt).toContain("propose one specific, arguable topic");
   });
 
+  it("includes the new chapter sizing rule and bullet-point limits in upload analysis prompt", () => {
+    const prompt = buildAnalyzeUploadedTaskInstruction({
+      specialRequirements: "Keep it concise"
+    });
+
+    expect(prompt).toContain("1000 words or fewer = exactly 3 chapters");
+    expect(prompt).toContain("800 -> 3");
+    expect(prompt).toContain("1000 -> 3");
+    expect(prompt).toContain("1001 -> 4");
+    expect(prompt).toContain("1800 -> 4");
+    expect(prompt).toContain("2000 -> 4");
+    expect(prompt).toContain("2001 -> 5");
+    expect(prompt).toContain("Each section must contain 3 to 5 specific bullet points");
+    expect(prompt).toContain("Never output fewer than 3 or more than 5 bullet points");
+  });
+
   it("includes fixed-topic guardrail in outline revision prompt", () => {
     const prompt = buildReviseOutlineInstruction({
       analysis: {
