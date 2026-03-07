@@ -1,4 +1,7 @@
-import { analyzeUploadedTaskWithOpenAI } from "@/src/lib/ai/services/analyze-uploaded-task";
+import {
+  analyzeUploadedTaskWithOpenAI,
+  MODEL_RAW_RESPONSE_ONLY
+} from "@/src/lib/ai/services/analyze-uploaded-task";
 import { requireFormalPersistence, shouldUseSupabasePersistence } from "@/src/lib/persistence/runtime-mode";
 import {
   getOwnedTaskSummary,
@@ -66,6 +69,26 @@ export async function runAnalyzeUploadedTaskPipeline(
       ANALYZE_JOB_MAX_RUNTIME_MS,
       "MODEL_ANALYSIS_TIMEOUT"
     );
+
+    if (analyzed.analysis.analysisRenderMode === "raw") {
+      await persistTaskPartialModelAnalysis({
+        taskId: input.taskId,
+        userId: input.userId,
+        analysis: analyzed.analysis
+      });
+
+      await markTaskAnalysisFailed({
+        taskId: input.taskId,
+        userId: input.userId,
+        reason: MODEL_RAW_RESPONSE_ONLY
+      });
+
+      return {
+        taskId: input.taskId,
+        userId: input.userId,
+        analysisStatus: "failed" as const
+      };
+    }
 
     const persisted = await persistTaskModelAnalysis({
       taskId: input.taskId,

@@ -1,4 +1,8 @@
 import type { OutlineScaffold } from "@/src/lib/ai/prompts/generate-outline";
+import {
+  analyzeUploadedTaskWithOpenAI,
+  MODEL_RAW_RESPONSE_ONLY
+} from "@/src/lib/ai/services/analyze-uploaded-task";
 import { buildAnalysisProgressPayload } from "@/src/lib/tasks/analysis-progress";
 import type {
   TaskWorkflowAnalysisRuntimePayload,
@@ -7,11 +11,12 @@ import type {
 } from "@/src/lib/tasks/request-task-file-upload";
 import {
   getOwnedTaskSummary,
+  listTaskFilesForModel,
   listTaskFilesForWorkflow,
   markTaskAnalysisFailed,
-  markTaskAnalysisPending
+  persistTaskModelAnalysis,
+  persistTaskPartialModelAnalysis
 } from "@/src/lib/tasks/save-task-files";
-import { runAnalyzeUploadedTaskPipeline } from "@/src/lib/tasks/analyze-uploaded-task-pipeline";
 import {
   toSessionTaskHumanizePayload,
   toSessionTaskPayload
@@ -22,7 +27,12 @@ import {
   shouldUseSupabasePersistence
 } from "@/src/lib/persistence/runtime-mode";
 import { createSupabaseAdminClient } from "@/src/lib/supabase/admin";
-import type { TaskAnalysisSnapshot, TaskFileRecord, TaskSummary } from "@/src/types/tasks";
+import type {
+  TaskAnalysisRenderMode,
+  TaskAnalysisSnapshot,
+  TaskFileRecord,
+  TaskSummary
+} from "@/src/types/tasks";
 
 export type InlineFirstOutlineSource = "upload" | "confirm_primary" | "manual_retry";
 
@@ -35,6 +45,8 @@ export type InlineFirstOutlineResult = {
   analysisProgress: ReturnType<typeof buildAnalysisProgressPayload>;
   analysisRuntime: TaskWorkflowAnalysisRuntimePayload;
   analysis: TaskAnalysisSnapshot | null;
+  analysisRenderMode: TaskAnalysisRenderMode | null;
+  rawModelResponse: string | null;
   ruleCard: TaskWorkflowRuleCardPayload | null;
   outline: OutlineScaffold | null;
   humanize: ReturnType<typeof toSessionTaskHumanizePayload>;
@@ -48,12 +60,7 @@ type RunInlineFirstOutlineInput = {
 };
 
 const INLINE_ANALYSIS_DID_NOT_FINISH = "INLINE_ANALYSIS_DID_NOT_FINISH";
-const OUTLINE_STAGE_FAILURE_CODES = new Set([
-  "MODEL_OUTLINE_INCOMPLETE",
-  "MODEL_OUTLINE_INCOMPLETE_AFTER_RETRY",
-  "MODEL_RETURNED_EMPTY_OUTLINE",
-  "MODEL_RETURNED_EMPTY_OUTLINE_AFTER_RETRY"
-]);
+const ANALYSIS_MODEL = "gpt-5.2";
 
 export async function runInlineFirstOutline(
   input: RunInlineFirstOutlineInput
@@ -64,27 +71,89 @@ export async function runInlineFirstOutline(
   }
 
   const nextRetryCount = computeNextAnalysisRetryCount(taskBeforeRun, input.source);
-  const seedAnalysis = resolveSeedAnalysis(taskBeforeRun, input);
-
-  await markTaskAnalysisPending({
-    taskId: input.taskId,
-    userId: input.userId,
-    primaryRequirementFileId:
-      input.forcedPrimaryFileId !== undefined ? input.forcedPrimaryFileId : undefined,
-    triggerRunId: null,
-    analysisModel: "gpt-5.2",
-    analysisRetryCount: nextRetryCount
-  });
+  const startedAt = new Date().toISOString();
+  const filesForModel = await listTaskFilesForModel(input.taskId, input.userId);
+  if (filesForModel.length === 0) {
+    throw new Error("TASK_FILES_NOT_FOUND");
+  }
 
   try {
-    await runAnalyzeUploadedTaskPipeline({
+    const analyzed = await analyzeUploadedTaskWithOpenAI({
+      files: filesForModel,
+      specialRequirements: taskBeforeRun.specialRequirements ?? "",
+      forcedPrimaryFileId: input.forcedPrimaryFileId ?? null
+    });
+
+    if (resolveAnalysisRenderMode(analyzed.analysis) === "raw") {
+      await persistTaskPartialModelAnalysis({
+        taskId: input.taskId,
+        userId: input.userId,
+        analysis: analyzed.analysis,
+        analysisAttempt: {
+          requestedAt: startedAt,
+          startedAt,
+          model: ANALYSIS_MODEL,
+          retryCount: nextRetryCount
+        }
+      });
+
+      await markTaskAnalysisFailed({
+        taskId: input.taskId,
+        userId: input.userId,
+        reason: MODEL_RAW_RESPONSE_ONLY,
+        analysisRetryCount: nextRetryCount,
+        analysisRequestedAt: startedAt,
+        analysisStartedAt: startedAt,
+        analysisModel: ANALYSIS_MODEL
+      });
+    } else {
+      await persistTaskModelAnalysis({
+        taskId: input.taskId,
+        userId: input.userId,
+        analysis: analyzed.analysis,
+        outline: analyzed.outline,
+        analysisAttempt: {
+          requestedAt: startedAt,
+          startedAt,
+          model: ANALYSIS_MODEL,
+          retryCount: nextRetryCount
+        }
+      });
+    }
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    const partialAnalysis =
+      error &&
+      typeof error === "object" &&
+      "partialAnalysis" in error &&
+      error.partialAnalysis &&
+      typeof error.partialAnalysis === "object"
+        ? (error.partialAnalysis as TaskAnalysisSnapshot)
+        : null;
+
+    if (partialAnalysis) {
+      await persistTaskPartialModelAnalysis({
+        taskId: input.taskId,
+        userId: input.userId,
+        analysis: partialAnalysis,
+        analysisAttempt: {
+          requestedAt: startedAt,
+          startedAt,
+          model: ANALYSIS_MODEL,
+          retryCount: nextRetryCount
+        }
+      }).catch(() => {});
+    }
+
+    await markTaskAnalysisFailed({
       taskId: input.taskId,
       userId: input.userId,
-      forcedPrimaryFileId: input.forcedPrimaryFileId ?? null,
-      seedAnalysis
-    });
-  } catch {
-    // The pipeline already writes the failed state. The route only needs the final snapshot.
+      reason,
+      analysisRetryCount: nextRetryCount,
+      analysisRequestedAt: startedAt,
+      analysisStartedAt: startedAt,
+      analysisModel: ANALYSIS_MODEL
+    }).catch(() => {});
   }
 
   let taskAfterRun = await getOwnedTaskSummary(input.taskId, input.userId);
@@ -97,13 +166,18 @@ export async function runInlineFirstOutline(
       taskId: input.taskId,
       userId: input.userId,
       reason: INLINE_ANALYSIS_DID_NOT_FINISH,
-      analysisRetryCount: taskAfterRun.analysisRetryCount ?? nextRetryCount
+      analysisRetryCount: nextRetryCount,
+      analysisRequestedAt: startedAt,
+      analysisStartedAt: startedAt,
+      analysisModel: ANALYSIS_MODEL
     });
     taskAfterRun = (await getOwnedTaskSummary(input.taskId, input.userId)) ?? taskAfterRun;
   }
 
   const files = await listTaskFilesForWorkflow(input.taskId, input.userId);
   const analysis = taskAfterRun.analysisSnapshot ?? null;
+  const analysisRenderMode = resolveAnalysisRenderMode(analysis);
+  const rawModelResponse = analysis?.rawModelResponse?.trim() || null;
   const analysisStatus = taskAfterRun.analysisStatus === "succeeded" ? "succeeded" : "failed";
   const analysisProgress = buildAnalysisProgressPayload({
     status: analysisStatus,
@@ -120,10 +194,7 @@ export async function runInlineFirstOutline(
     task: toSessionTaskPayload(taskAfterRun),
     taskSummary: taskAfterRun,
     files,
-    classification: buildClassificationFromTask(
-      taskAfterRun.primaryRequirementFileId ?? null,
-      analysis
-    ),
+    classification: buildClassificationFromTask(taskAfterRun.primaryRequirementFileId ?? null, analysis),
     analysisStatus,
     analysisProgress,
     analysisRuntime: {
@@ -134,8 +205,13 @@ export async function runInlineFirstOutline(
       runId: null
     },
     analysis,
+    analysisRenderMode,
+    rawModelResponse,
     ruleCard:
-      analysisStatus === "succeeded" && analysis && !analysis.needsUserConfirmation
+      analysisStatus === "succeeded" &&
+      analysis &&
+      !analysis.needsUserConfirmation &&
+      analysisRenderMode === "structured"
         ? buildRuleCardFromAnalysis(analysis, outline)
         : null,
     outline: analysisStatus === "succeeded" ? outline : null,
@@ -159,33 +235,18 @@ function computeNextAnalysisRetryCount(
   return current + 1;
 }
 
-function resolveSeedAnalysis(
-  task: Pick<TaskSummary, "analysisSnapshot" | "analysisErrorMessage">,
-  input: RunInlineFirstOutlineInput
-) {
-  if (input.source !== "manual_retry") {
-    return null;
-  }
-
-  const analysis = task.analysisSnapshot ?? null;
+function resolveAnalysisRenderMode(
+  analysis: TaskAnalysisSnapshot | null | undefined
+): TaskAnalysisRenderMode | null {
   if (!analysis) {
     return null;
   }
 
-  const errorCode = task.analysisErrorMessage?.trim() ?? "";
-  if (!OUTLINE_STAGE_FAILURE_CODES.has(errorCode)) {
-    return null;
+  if (analysis.analysisRenderMode === "raw" || analysis.analysisRenderMode === "structured") {
+    return analysis.analysisRenderMode;
   }
 
-  if (
-    input.forcedPrimaryFileId &&
-    analysis.chosenTaskFileId &&
-    input.forcedPrimaryFileId !== analysis.chosenTaskFileId
-  ) {
-    return null;
-  }
-
-  return analysis;
+  return analysis.rawModelResponse?.trim() ? "raw" : "structured";
 }
 
 function buildClassificationFromTask(

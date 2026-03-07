@@ -90,6 +90,8 @@ export async function handleConfirmPrimaryFileRequest(
       analysisProgress: result.analysisProgress,
       analysisRuntime: result.analysisRuntime,
       analysis: result.analysis,
+      analysisRenderMode: result.analysisRenderMode,
+      rawModelResponse: result.rawModelResponse,
       ruleCard: result.ruleCard,
       outline: result.outline,
       humanize: result.humanize,

@@ -60,7 +60,9 @@ function makeSucceededInlineResult(
         appliedSpecialRequirements: "Focus on finance.",
         usedDefaultWordCount: false,
         usedDefaultCitationStyle: false,
-        warnings: []
+        warnings: [],
+        analysisRenderMode: "structured",
+        rawModelResponse: null
       },
       latestOutlineVersionId: "outline-1",
       primaryRequirementFileId: "file-1"
@@ -117,8 +119,12 @@ function makeSucceededInlineResult(
       appliedSpecialRequirements: "Focus on finance.",
       usedDefaultWordCount: false,
       usedDefaultCitationStyle: false,
-      warnings: []
+      warnings: [],
+      analysisRenderMode: "structured",
+      rawModelResponse: null
     },
+    analysisRenderMode: "structured",
+    rawModelResponse: null,
     ruleCard: {
       topic: "Finance Risk Management",
       targetWordCount: 1800,
@@ -152,34 +158,78 @@ function makeSucceededInlineResult(
   };
 }
 
-function makeFailedInlineResult(
+function makeRawInlineResult(
   overrides: Partial<InlineFirstOutlineResult> = {}
 ): InlineFirstOutlineResult {
-  const succeeded = makeSucceededInlineResult();
+  const rawModelResponse = [
+    "I can draft this paper around finance risk governance.",
+    "Suggested structure:",
+    "1. Introduction",
+    "2. Governance framework",
+    "3. Regional banking cases"
+  ].join("\n");
+
   return {
-    ...succeeded,
+    ...makeSucceededInlineResult(),
     task: {
-      ...succeeded.task,
-      status: "created"
+      id: "task-raw",
+      status: "created",
+      targetWordCount: null,
+      citationStyle: null,
+      specialRequirements: ""
     },
     taskSummary: {
-      ...succeeded.taskSummary,
+      ...makeSucceededInlineResult().taskSummary,
+      id: "task-raw",
       status: "created",
+      targetWordCount: null,
+      citationStyle: null,
+      specialRequirements: "",
       analysisStatus: "failed",
-      analysisErrorMessage: "MODEL_REQUIREMENTS_INCOMPLETE_AFTER_RETRY",
+      analysisErrorMessage: "MODEL_RAW_RESPONSE_ONLY",
       latestOutlineVersionId: null,
-      analysisSnapshot: null
+      analysisSnapshot: {
+        chosenTaskFileId: "file-1",
+        supportingFileIds: [],
+        ignoredFileIds: [],
+        needsUserConfirmation: false,
+        reasoning: "The model returned readable content, but not a formal outline payload.",
+        targetWordCount: 2000,
+        citationStyle: "APA 7",
+        topic: null,
+        chapterCount: null,
+        mustCover: [],
+        gradingFocus: [],
+        appliedSpecialRequirements: "",
+        usedDefaultWordCount: true,
+        usedDefaultCitationStyle: true,
+        warnings: [],
+        analysisRenderMode: "raw",
+        rawModelResponse
+      }
     },
     analysisStatus: "failed",
-    analysisProgress: {
-      requestedAt: new Date().toISOString(),
-      startedAt: new Date().toISOString(),
-      completedAt: new Date().toISOString(),
-      elapsedSeconds: 5,
-      maxWaitSeconds: 600,
-      canRetry: true
+    analysis: {
+      chosenTaskFileId: "file-1",
+      supportingFileIds: [],
+      ignoredFileIds: [],
+      needsUserConfirmation: false,
+      reasoning: "The model returned readable content, but not a formal outline payload.",
+      targetWordCount: 2000,
+      citationStyle: "APA 7",
+      topic: null,
+      chapterCount: null,
+      mustCover: [],
+      gradingFocus: [],
+      appliedSpecialRequirements: "",
+      usedDefaultWordCount: true,
+      usedDefaultCitationStyle: true,
+      warnings: [],
+      analysisRenderMode: "raw",
+      rawModelResponse
     },
-    analysis: null,
+    analysisRenderMode: "raw",
+    rawModelResponse,
     ruleCard: null,
     outline: null,
     ...overrides
@@ -254,7 +304,7 @@ describe("analysis retry route", () => {
       citationStyle: null,
       specialRequirements: "",
       analysisStatus: "failed",
-      analysisErrorMessage: "MODEL_REQUIREMENTS_INCOMPLETE_AFTER_RETRY"
+      analysisErrorMessage: "MODEL_RAW_RESPONSE_ONLY"
     });
 
     saveTaskFileRecords([
@@ -305,6 +355,7 @@ describe("analysis retry route", () => {
 
     expect(response.status).toBe(200);
     expect(payload.analysisStatus).toBe("succeeded");
+    expect(payload.analysisRenderMode).toBe("structured");
     expect(payload.outline?.articleTitle).toContain("Finance");
     expect(runInlineFirstOutline).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -315,22 +366,22 @@ describe("analysis retry route", () => {
     );
   });
 
-  it("returns 422 when retry still cannot get a complete outline", async () => {
+  it("returns raw fallback when retry still only gets readable model text", async () => {
     saveTaskSummary({
-      id: "task-retry-failed",
+      id: "task-retry-raw",
       userId: "user-1",
       status: "created",
       targetWordCount: null,
       citationStyle: null,
       specialRequirements: "",
       analysisStatus: "failed",
-      analysisErrorMessage: "MODEL_OUTLINE_INCOMPLETE_AFTER_RETRY"
+      analysisErrorMessage: "MODEL_RAW_RESPONSE_ONLY"
     });
 
     saveTaskFileRecords([
       {
         id: "file-1",
-        taskId: "task-retry-failed",
+        taskId: "task-retry-raw",
         userId: "user-1",
         originalFilename: "brief.txt",
         storagePath: "tmp/brief.txt",
@@ -343,27 +394,26 @@ describe("analysis retry route", () => {
     ]);
 
     const response = await handleTaskAnalysisRetryRequest(
-      new Request("http://localhost/api/tasks/task-retry-failed/analysis/retry", {
+      new Request("http://localhost/api/tasks/task-retry-raw/analysis/retry", {
         method: "POST"
       }),
-      { taskId: "task-retry-failed" },
+      { taskId: "task-retry-raw" },
       {
         isPersistenceReady: () => true,
         requireUser: async () => makeUser(),
         runInlineFirstOutline: vi.fn().mockResolvedValue(
-          makeFailedInlineResult({
+          makeRawInlineResult({
             task: {
-              id: "task-retry-failed",
+              id: "task-retry-raw",
               status: "created",
               targetWordCount: null,
               citationStyle: null,
               specialRequirements: ""
             },
             taskSummary: {
-              ...makeFailedInlineResult().taskSummary,
-              id: "task-retry-failed",
-              specialRequirements: "",
-              analysisErrorMessage: "MODEL_OUTLINE_INCOMPLETE_AFTER_RETRY"
+              ...makeRawInlineResult().taskSummary,
+              id: "task-retry-raw",
+              specialRequirements: ""
             }
           })
         )
@@ -373,68 +423,10 @@ describe("analysis retry route", () => {
 
     expect(response.status).toBe(422);
     expect(payload.analysisStatus).toBe("failed");
-    expect(String(payload.message)).toContain("大纲结构不完整");
+    expect(payload.analysisRenderMode).toBe("raw");
+    expect(String(payload.rawModelResponse)).toContain("Suggested structure");
+    expect(String(payload.message)).toContain("原始回复");
     expect(payload.outline).toBeNull();
-  });
-
-  it("returns 400 when retry starts before the files are model-ready", async () => {
-    saveTaskSummary({
-      id: "task-retry-input-not-ready",
-      userId: "user-1",
-      status: "created",
-      targetWordCount: null,
-      citationStyle: null,
-      specialRequirements: "",
-      analysisStatus: "failed",
-      analysisErrorMessage: "MODEL_INPUT_NOT_READY"
-    });
-
-    saveTaskFileRecords([
-      {
-        id: "file-1",
-        taskId: "task-retry-input-not-ready",
-        userId: "user-1",
-        originalFilename: "brief.pdf",
-        storagePath: "tmp/brief.pdf",
-        extractedText: "[pdf transport-only: brief.pdf]",
-        role: "unknown",
-        isPrimary: false,
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString()
-      }
-    ]);
-
-    const response = await handleTaskAnalysisRetryRequest(
-      new Request("http://localhost/api/tasks/task-retry-input-not-ready/analysis/retry", {
-        method: "POST"
-      }),
-      { taskId: "task-retry-input-not-ready" },
-      {
-        isPersistenceReady: () => true,
-        requireUser: async () => makeUser(),
-        runInlineFirstOutline: vi.fn().mockResolvedValue(
-          makeFailedInlineResult({
-            task: {
-              id: "task-retry-input-not-ready",
-              status: "created",
-              targetWordCount: null,
-              citationStyle: null,
-              specialRequirements: ""
-            },
-            taskSummary: {
-              ...makeFailedInlineResult().taskSummary,
-              id: "task-retry-input-not-ready",
-              specialRequirements: "",
-              analysisErrorMessage: "MODEL_INPUT_NOT_READY"
-            }
-          })
-        )
-      } as never
-    );
-    const payload = await response.json();
-
-    expect(response.status).toBe(400);
-    expect(String(payload.message)).toContain("文件完整交给分析模型");
   });
 
   it("rejects retry when there are no uploaded files", async () => {

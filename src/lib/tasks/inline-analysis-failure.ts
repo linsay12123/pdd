@@ -68,6 +68,14 @@ export function resolveInlineAnalysisFailure(
     };
   }
 
+  if (code === "MODEL_RAW_RESPONSE_ONLY") {
+    return {
+      code,
+      status: 422,
+      message: "模型这次已经回了原始回复，但还没有形成正式大纲。你可以先看原始回复，再决定是否重试。"
+    };
+  }
+
   if (code === "MODEL_ANALYSIS_TIMEOUT") {
     return {
       code,

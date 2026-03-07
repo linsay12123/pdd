@@ -224,6 +224,12 @@ export async function persistTaskModelAnalysis(input: {
   userId: string;
   analysis: TaskAnalysisSnapshot;
   outline: OutlineScaffold | null;
+  analysisAttempt?: {
+    requestedAt?: string | null;
+    startedAt?: string | null;
+    model?: string | null;
+    retryCount?: number;
+  };
 }): Promise<PersistedTaskFilesResult> {
   if (shouldUseSupabasePersistence()) {
     return persistTaskModelAnalysisWithSupabase(input);
@@ -240,6 +246,12 @@ export async function persistTaskPartialModelAnalysis(input: {
   taskId: string;
   userId: string;
   analysis: TaskAnalysisSnapshot;
+  analysisAttempt?: {
+    requestedAt?: string | null;
+    startedAt?: string | null;
+    model?: string | null;
+    retryCount?: number;
+  };
 }) {
   if (shouldUseSupabasePersistence()) {
     return persistTaskPartialModelAnalysisWithSupabase(input);
@@ -257,6 +269,9 @@ export async function markTaskAnalysisFailed(input: {
   userId: string;
   reason: string;
   analysisRetryCount?: number;
+  analysisRequestedAt?: string | null;
+  analysisStartedAt?: string | null;
+  analysisModel?: string | null;
 }) {
   if (shouldUseSupabasePersistence()) {
     return markTaskAnalysisFailedWithSupabase(input);
@@ -462,6 +477,12 @@ async function persistTaskModelAnalysisLocally(input: {
   userId: string;
   analysis: TaskAnalysisSnapshot;
   outline: OutlineScaffold | null;
+  analysisAttempt?: {
+    requestedAt?: string | null;
+    startedAt?: string | null;
+    model?: string | null;
+    retryCount?: number;
+  };
 }): Promise<PersistedTaskFilesResult> {
   const task = getTaskSummary(input.taskId);
 
@@ -474,6 +495,8 @@ async function persistTaskModelAnalysisLocally(input: {
   const nextStatus: TaskStatus = input.analysis.needsUserConfirmation
     ? "awaiting_primary_file_confirmation"
     : "awaiting_outline_approval";
+  const requestedAt = input.analysisAttempt?.requestedAt ?? task.analysisRequestedAt ?? new Date().toISOString();
+  const startedAt = input.analysisAttempt?.startedAt ?? task.analysisStartedAt ?? requestedAt;
   assertStatusTransition(task.status, nextStatus);
   const nextFiles = currentFiles.map((file) => {
     const role = resolveRoleFromAnalysis(file.id, input.analysis);
@@ -517,10 +540,12 @@ async function persistTaskModelAnalysisLocally(input: {
     latestOutlineVersionId,
     analysisSnapshot: input.analysis,
     analysisStatus: "succeeded",
-    analysisModel: "gpt-5.2",
+    analysisModel: normalizeAnalysisModel(input.analysisAttempt?.model ?? "gpt-5.2"),
+    analysisRetryCount: input.analysisAttempt?.retryCount ?? task.analysisRetryCount,
     analysisErrorMessage: null,
     analysisTriggerRunId: null,
-    analysisStartedAt: task.analysisStartedAt ?? new Date().toISOString(),
+    analysisRequestedAt: requestedAt,
+    analysisStartedAt: startedAt,
     analysisCompletedAt: new Date().toISOString()
   });
 
@@ -544,6 +569,12 @@ async function persistTaskModelAnalysisWithSupabase(input: {
   userId: string;
   analysis: TaskAnalysisSnapshot;
   outline: OutlineScaffold | null;
+  analysisAttempt?: {
+    requestedAt?: string | null;
+    startedAt?: string | null;
+    model?: string | null;
+    retryCount?: number;
+  };
 }): Promise<PersistedTaskFilesResult> {
   const client = createSupabaseAdminClient();
   const ownedTask = await getOwnedTaskSummary(input.taskId, input.userId);
@@ -554,6 +585,9 @@ async function persistTaskModelAnalysisWithSupabase(input: {
 
   const files = await listTaskFilesWithSupabase(input.taskId, input.userId);
   const resolvedTopic = input.analysis.topic ?? input.outline?.articleTitle ?? null;
+  const requestedAt =
+    input.analysisAttempt?.requestedAt ?? ownedTask.analysisRequestedAt ?? new Date().toISOString();
+  const startedAt = input.analysisAttempt?.startedAt ?? ownedTask.analysisStartedAt ?? requestedAt;
 
   for (const file of files) {
     const { error } = await client
@@ -608,10 +642,12 @@ async function persistTaskModelAnalysisWithSupabase(input: {
       latest_outline_version_id: latestOutlineVersionId,
       analysis_snapshot: input.analysis,
       analysis_status: "succeeded",
-      analysis_model: normalizeAnalysisModel("gpt-5.2"),
+      analysis_model: normalizeAnalysisModel(input.analysisAttempt?.model ?? "gpt-5.2"),
+      analysis_retry_count: input.analysisAttempt?.retryCount ?? ownedTask.analysisRetryCount,
       analysis_error_message: null,
       analysis_trigger_run_id: null,
-      analysis_started_at: ownedTask.analysisStartedAt ?? new Date().toISOString(),
+      analysis_requested_at: requestedAt,
+      analysis_started_at: startedAt,
       analysis_completed_at: new Date().toISOString()
     })
     .eq("id", input.taskId)
@@ -637,10 +673,12 @@ async function persistTaskModelAnalysisWithSupabase(input: {
       latestOutlineVersionId,
       analysisSnapshot: input.analysis,
       analysisStatus: "succeeded",
-      analysisModel: normalizeAnalysisModel("gpt-5.2"),
+      analysisModel: normalizeAnalysisModel(input.analysisAttempt?.model ?? "gpt-5.2"),
+      analysisRetryCount: input.analysisAttempt?.retryCount ?? ownedTask.analysisRetryCount,
       analysisErrorMessage: null,
       analysisTriggerRunId: null,
-      analysisStartedAt: ownedTask.analysisStartedAt ?? new Date().toISOString(),
+      analysisRequestedAt: requestedAt,
+      analysisStartedAt: startedAt,
       analysisCompletedAt: new Date().toISOString()
     },
     files: await listTaskFilesWithSupabase(input.taskId, input.userId),
@@ -656,6 +694,12 @@ async function persistTaskPartialModelAnalysisLocally(input: {
   taskId: string;
   userId: string;
   analysis: TaskAnalysisSnapshot;
+  analysisAttempt?: {
+    requestedAt?: string | null;
+    startedAt?: string | null;
+    model?: string | null;
+    retryCount?: number;
+  };
 }) {
   const task = getTaskSummary(input.taskId);
 
@@ -665,6 +709,8 @@ async function persistTaskPartialModelAnalysisLocally(input: {
 
   const currentFiles = listTaskFiles(input.taskId);
   const resolvedTopic = input.analysis.topic ?? task.topic ?? null;
+  const requestedAt = input.analysisAttempt?.requestedAt ?? task.analysisRequestedAt ?? new Date().toISOString();
+  const startedAt = input.analysisAttempt?.startedAt ?? task.analysisStartedAt ?? requestedAt;
   const nextFiles = currentFiles.map((file) => ({
     ...file,
     role: resolveRoleFromAnalysis(file.id, input.analysis),
@@ -681,9 +727,11 @@ async function persistTaskPartialModelAnalysisLocally(input: {
     topic: resolvedTopic,
     requestedChapterCount: input.analysis.chapterCount,
     analysisSnapshot: input.analysis,
-    analysisModel: normalizeAnalysisModel("gpt-5.2"),
+    analysisModel: normalizeAnalysisModel(input.analysisAttempt?.model ?? "gpt-5.2"),
+    analysisRetryCount: input.analysisAttempt?.retryCount ?? task.analysisRetryCount,
     analysisErrorMessage: null,
-    analysisStartedAt: task.analysisStartedAt ?? new Date().toISOString()
+    analysisRequestedAt: requestedAt,
+    analysisStartedAt: startedAt
   });
 }
 
@@ -691,6 +739,12 @@ async function persistTaskPartialModelAnalysisWithSupabase(input: {
   taskId: string;
   userId: string;
   analysis: TaskAnalysisSnapshot;
+  analysisAttempt?: {
+    requestedAt?: string | null;
+    startedAt?: string | null;
+    model?: string | null;
+    retryCount?: number;
+  };
 }) {
   const client = createSupabaseAdminClient();
   const ownedTask = await getOwnedTaskSummary(input.taskId, input.userId);
@@ -701,6 +755,9 @@ async function persistTaskPartialModelAnalysisWithSupabase(input: {
 
   const files = await listTaskFilesWithSupabase(input.taskId, input.userId);
   const resolvedTopic = input.analysis.topic ?? ownedTask.topic ?? null;
+  const requestedAt =
+    input.analysisAttempt?.requestedAt ?? ownedTask.analysisRequestedAt ?? new Date().toISOString();
+  const startedAt = input.analysisAttempt?.startedAt ?? ownedTask.analysisStartedAt ?? requestedAt;
 
   for (const file of files) {
     const { error } = await client
@@ -727,9 +784,11 @@ async function persistTaskPartialModelAnalysisWithSupabase(input: {
       topic: resolvedTopic,
       requested_chapter_count: input.analysis.chapterCount,
       analysis_snapshot: input.analysis,
-      analysis_model: normalizeAnalysisModel("gpt-5.2"),
+      analysis_model: normalizeAnalysisModel(input.analysisAttempt?.model ?? "gpt-5.2"),
+      analysis_retry_count: input.analysisAttempt?.retryCount ?? ownedTask.analysisRetryCount,
       analysis_error_message: null,
-      analysis_started_at: ownedTask.analysisStartedAt ?? new Date().toISOString()
+      analysis_requested_at: requestedAt,
+      analysis_started_at: startedAt
     })
     .eq("id", input.taskId)
     .eq("user_id", input.userId);
@@ -834,6 +893,9 @@ async function markTaskAnalysisFailedLocally(input: {
   userId: string;
   reason: string;
   analysisRetryCount?: number;
+  analysisRequestedAt?: string | null;
+  analysisStartedAt?: string | null;
+  analysisModel?: string | null;
 }) {
   const task = getTaskSummary(input.taskId);
   if (!task || task.userId !== input.userId) {
@@ -851,13 +913,14 @@ async function markTaskAnalysisFailedLocally(input: {
     analysisModel:
       clearBrokenRun
         ? stalePatch.analysisModel
-        : normalizeAnalysisModel(task.analysisModel),
+        : normalizeAnalysisModel(input.analysisModel ?? task.analysisModel),
     analysisErrorMessage: input.reason,
+    analysisRequestedAt: input.analysisRequestedAt ?? task.analysisRequestedAt,
     analysisCompletedAt: stalePatch.analysisCompletedAt,
     analysisStartedAt:
       clearBrokenRun
         ? stalePatch.analysisStartedAt
-        : task.analysisStartedAt ?? stalePatch.analysisCompletedAt,
+        : input.analysisStartedAt ?? task.analysisStartedAt ?? stalePatch.analysisCompletedAt,
     analysisTriggerRunId:
       clearBrokenRun ? stalePatch.analysisTriggerRunId : task.analysisTriggerRunId,
     analysisSnapshot:
@@ -880,6 +943,9 @@ async function markTaskAnalysisFailedWithSupabase(input: {
   userId: string;
   reason: string;
   analysisRetryCount?: number;
+  analysisRequestedAt?: string | null;
+  analysisStartedAt?: string | null;
+  analysisModel?: string | null;
 }) {
   const client = createSupabaseAdminClient();
   const ownedTask = await getOwnedTaskSummary(input.taskId, input.userId);
@@ -906,12 +972,15 @@ async function markTaskAnalysisFailedWithSupabase(input: {
       analysis_model:
         clearBrokenRun
           ? stalePatch.analysisModel
-          : normalizeAnalysisModel(ownedTask?.analysisModel),
+          : normalizeAnalysisModel(input.analysisModel ?? ownedTask?.analysisModel),
       analysis_error_message: input.reason,
+      analysis_requested_at: input.analysisRequestedAt ?? ownedTask?.analysisRequestedAt ?? null,
       analysis_started_at:
         clearBrokenRun
           ? stalePatch.analysisStartedAt
-          : ownedTask?.analysisStartedAt ?? stalePatch.analysisCompletedAt,
+          : input.analysisStartedAt ??
+            ownedTask?.analysisStartedAt ??
+            stalePatch.analysisCompletedAt,
       analysis_completed_at: stalePatch.analysisCompletedAt,
       analysis_trigger_run_id:
         clearBrokenRun

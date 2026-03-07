@@ -124,6 +124,8 @@ export async function handleTaskAnalysisRetryRequest(
             runId: currentRunId
           },
           analysis: task.analysisSnapshot ?? null,
+          analysisRenderMode: task.analysisSnapshot?.analysisRenderMode ?? null,
+          rawModelResponse: task.analysisSnapshot?.rawModelResponse?.trim() || null,
           ruleCard: null,
           outline: null,
           humanize: toSessionTaskHumanizePayload(task),
@@ -159,6 +161,8 @@ export async function handleTaskAnalysisRetryRequest(
       analysisProgress: result.analysisProgress,
       analysisRuntime: result.analysisRuntime,
       analysis: result.analysis,
+      analysisRenderMode: result.analysisRenderMode,
+      rawModelResponse: result.rawModelResponse,
       ruleCard: result.ruleCard,
       outline: result.outline,
       humanize: result.humanize,

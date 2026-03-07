@@ -18,6 +18,8 @@ export type TaskHumanizeStatus =
   | "completed"
   | "failed";
 
+export type TaskAnalysisRenderMode = "structured" | "raw";
+
 export type TaskAnalysisSnapshot = {
   chosenTaskFileId: string | null;
   supportingFileIds: string[];
@@ -34,6 +36,8 @@ export type TaskAnalysisSnapshot = {
   usedDefaultWordCount: boolean;
   usedDefaultCitationStyle: boolean;
   warnings: string[];
+  analysisRenderMode?: TaskAnalysisRenderMode | null;
+  rawModelResponse?: string | null;
 };
 
 export type TaskSummary = {

@@ -623,7 +623,19 @@ export function WorkspacePageClient({
   const outlineSections = activeTask?.outline?.sections ?? [];
   const taskFiles = activeTask?.files ?? [];
   const analysis = activeTask?.analysis ?? null;
+  const analysisRenderMode =
+    activeTask?.analysisRenderMode ??
+    (analysis?.analysisRenderMode === "raw" || analysis?.analysisRenderMode === "structured"
+      ? analysis.analysisRenderMode
+      : analysis?.rawModelResponse?.trim()
+        ? "raw"
+        : analysis
+          ? "structured"
+          : null);
+  const rawModelResponse =
+    activeTask?.rawModelResponse?.trim() || analysis?.rawModelResponse?.trim() || null;
   const analysisStatus = activeTask?.analysisStatus ?? "pending";
+  const failedAnalysisCard = getFailedAnalysisCard(activeTask?.message ?? null);
   const analysisProgress = activeTask?.analysisProgress ?? {
     requestedAt: null,
     startedAt: null,
@@ -872,12 +884,50 @@ export function WorkspacePageClient({
                       </div>
                     )}
                   </div>
+                ) : analysisRenderMode === "raw" && rawModelResponse ? (
+                  <div className="glass-panel p-6 rounded-2xl border border-gold-500/30 shadow-[0_0_15px_rgba(245,158,11,0.08)]">
+                    <div className="flex items-center justify-between mb-4 pb-4 border-b border-white/10">
+                      <h2 className="text-xl font-bold text-cream-50 flex items-center gap-2">
+                        <MessageSquare className="w-5 h-5 text-gold-400" />
+                        模型原始回复
+                      </h2>
+                      <span className="px-3 py-1 bg-gold-500/10 text-gold-200 text-xs rounded-full border border-gold-500/20">
+                        还不能继续正文
+                      </span>
+                    </div>
+
+                    <div className="space-y-4">
+                      <p className="text-sm text-brand-700">
+                        这次还没有形成正式大纲，所以系统先把模型原始回复直接展示给你看。只要没有正式大纲，就不能继续正文写作。
+                      </p>
+
+                      <div className="rounded-xl border border-white/5 bg-brand-950/80 p-4">
+                        <pre className="whitespace-pre-wrap break-words text-sm leading-7 text-cream-100">
+                          {rawModelResponse}
+                        </pre>
+                      </div>
+
+                      <div className="flex items-center gap-3">
+                        <Button
+                          variant="outline"
+                          onClick={() => void handleRetryAnalysis()}
+                          disabled={isRetryingAnalysis}
+                          className="border-gold-500/30 text-gold-200"
+                        >
+                          {isRetryingAnalysis ? "正在重试..." : "一键重试分析"}
+                        </Button>
+                        <span className="text-xs text-brand-700">
+                          不需要重新上传文件，系统会直接再跑一轮首版大纲。
+                        </span>
+                      </div>
+                    </div>
+                  </div>
                 ) : analysisStatus === "failed" ? (
                   <div className="glass-panel p-6 rounded-2xl border border-red-500/20">
                     <div className="flex items-center justify-between mb-4 pb-4 border-b border-white/10">
                       <h2 className="text-xl font-bold text-cream-50 flex items-center gap-2">
                         <AlertCircle className="w-5 h-5 text-red-300" />
-                        本次分析失败
+                        {failedAnalysisCard.title}
                       </h2>
                       <span className="px-3 py-1 bg-red-500/10 text-red-200 text-xs rounded-full border border-red-500/20">
                         可重试
@@ -885,7 +935,7 @@ export function WorkspacePageClient({
                     </div>
 
                     <p className="text-sm text-brand-700">
-                      系统没能完成这次分析。你可以直接点下面的一键重试，不需要重新上传文件。
+                      {failedAnalysisCard.body}
                     </p>
                     <div className="mt-4">
                       <Button
@@ -1374,4 +1424,48 @@ function deriveInitialStep(task: WorkspaceTaskState | null) {
   }
 
   return 2;
+}
+
+function getFailedAnalysisCard(message: string | null) {
+  const normalized = message?.trim() || "";
+
+  if (normalized.includes("模型服务这次不稳定")) {
+    return {
+      title: "模型服务这次不稳定",
+      body: `${normalized} 你可以直接点下面的一键重试，不需要重新上传文件。`
+    };
+  }
+
+  if (normalized.includes("处理时间太长")) {
+    return {
+      title: "模型这次处理超时了",
+      body: `${normalized} 你可以直接点下面的一键重试，不需要重新上传文件。`
+    };
+  }
+
+  if (normalized.includes("没把文件完整交给分析模型")) {
+    return {
+      title: "文件还没真正交给模型",
+      body: `${normalized} 你可以直接点下面的一键重试，不需要重新上传文件。`
+    };
+  }
+
+  if (normalized.includes("没能稳定提取出完整写作要求")) {
+    return {
+      title: "模型有回复，但程序没接成正式要求",
+      body: `${normalized} 你可以直接点下面的一键重试，不需要重新上传文件。`
+    };
+  }
+
+  if (normalized.includes("大纲结构不完整")) {
+    return {
+      title: "模型有回复，但还没形成正式大纲",
+      body: `${normalized} 你可以直接点下面的一键重试，不需要重新上传文件。`
+    };
+  }
+
+  return {
+    title: "本次分析失败",
+    body: "系统没能完成这次分析。你可以直接点下面的一键重试，不需要重新上传文件。"
+  };
 }

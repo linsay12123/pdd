@@ -133,6 +133,15 @@ export async function handleTaskAnalysisStatusRequest(
       analysisStatus === "succeeded" && analysis && !analysis.needsUserConfirmation
         ? buildRuleCardFromAnalysis(analysis, outline)
         : null;
+    const analysisRenderMode =
+      analysis?.analysisRenderMode === "raw" || analysis?.analysisRenderMode === "structured"
+        ? analysis.analysisRenderMode
+        : analysis?.rawModelResponse?.trim()
+          ? "raw"
+          : analysis
+            ? "structured"
+            : null;
+    const rawModelResponse = analysis?.rawModelResponse?.trim() || null;
 
     const classification = buildClassificationFromTask(task.primaryRequirementFileId ?? null, analysis);
 
@@ -154,6 +163,8 @@ export async function handleTaskAnalysisStatusRequest(
         analysisProgress,
         analysisRuntime,
         analysis,
+        analysisRenderMode,
+        rawModelResponse,
         ruleCard,
         outline: analysisStatus === "succeeded" ? outline : null,
         humanize: toSessionTaskHumanizePayload(task),

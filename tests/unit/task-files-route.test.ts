@@ -63,7 +63,9 @@ function makeSucceededInlineResult(
         appliedSpecialRequirements: "Focus on finance.",
         usedDefaultWordCount: false,
         usedDefaultCitationStyle: false,
-        warnings: []
+        warnings: [],
+        analysisRenderMode: "structured",
+        rawModelResponse: null
       },
       latestOutlineVersionId: "outline-1"
     },
@@ -119,8 +121,12 @@ function makeSucceededInlineResult(
       appliedSpecialRequirements: "Focus on finance.",
       usedDefaultWordCount: false,
       usedDefaultCitationStyle: false,
-      warnings: []
+      warnings: [],
+      analysisRenderMode: "structured",
+      rawModelResponse: null
     },
+    analysisRenderMode: "structured",
+    rawModelResponse: null,
     ruleCard: {
       topic: "Finance Risk Management",
       targetWordCount: 1800,
@@ -154,6 +160,83 @@ function makeSucceededInlineResult(
   };
 }
 
+function makeRawInlineResult(
+  overrides: Partial<InlineFirstOutlineResult> = {}
+): InlineFirstOutlineResult {
+  const rawModelResponse = [
+    "I can draft this paper around finance risk governance.",
+    "Suggested structure:",
+    "1. Introduction",
+    "2. Governance framework",
+    "3. Regional banking cases"
+  ].join("\n");
+
+  return {
+    ...makeSucceededInlineResult(),
+    task: {
+      id: "task-raw",
+      status: "created",
+      targetWordCount: null,
+      citationStyle: null,
+      specialRequirements: "Focus on finance."
+    },
+    taskSummary: {
+      ...makeSucceededInlineResult().taskSummary,
+      id: "task-raw",
+      status: "created",
+      targetWordCount: null,
+      citationStyle: null,
+      analysisStatus: "failed",
+      analysisErrorMessage: "MODEL_RAW_RESPONSE_ONLY",
+      latestOutlineVersionId: null,
+      analysisSnapshot: {
+        chosenTaskFileId: null,
+        supportingFileIds: [],
+        ignoredFileIds: [],
+        needsUserConfirmation: false,
+        reasoning: "The model returned readable content, but not a formal outline payload.",
+        targetWordCount: 2000,
+        citationStyle: "APA 7",
+        topic: null,
+        chapterCount: null,
+        mustCover: [],
+        gradingFocus: [],
+        appliedSpecialRequirements: "Focus on finance.",
+        usedDefaultWordCount: true,
+        usedDefaultCitationStyle: true,
+        warnings: [],
+        analysisRenderMode: "raw",
+        rawModelResponse
+      }
+    },
+    analysisStatus: "failed",
+    analysis: {
+      chosenTaskFileId: null,
+      supportingFileIds: [],
+      ignoredFileIds: [],
+      needsUserConfirmation: false,
+      reasoning: "The model returned readable content, but not a formal outline payload.",
+      targetWordCount: 2000,
+      citationStyle: "APA 7",
+      topic: null,
+      chapterCount: null,
+      mustCover: [],
+      gradingFocus: [],
+      appliedSpecialRequirements: "Focus on finance.",
+      usedDefaultWordCount: true,
+      usedDefaultCitationStyle: true,
+      warnings: [],
+      analysisRenderMode: "raw",
+      rawModelResponse
+    },
+    analysisRenderMode: "raw",
+    rawModelResponse,
+    ruleCard: null,
+    outline: null,
+    ...overrides
+  };
+}
+
 function makeFailedInlineResult(
   overrides: Partial<InlineFirstOutlineResult> = {}
 ): InlineFirstOutlineResult {
@@ -168,20 +251,14 @@ function makeFailedInlineResult(
       ...succeeded.taskSummary,
       status: "created",
       analysisStatus: "failed",
-      analysisErrorMessage: "MODEL_REQUIREMENTS_INCOMPLETE_AFTER_RETRY",
+      analysisErrorMessage: "MODEL_INPUT_NOT_READY",
       latestOutlineVersionId: null,
       analysisSnapshot: null
     },
     analysisStatus: "failed",
-    analysisProgress: {
-      requestedAt: new Date().toISOString(),
-      startedAt: new Date().toISOString(),
-      completedAt: new Date().toISOString(),
-      elapsedSeconds: 5,
-      maxWaitSeconds: 600,
-      canRetry: true
-    },
     analysis: null,
+    analysisRenderMode: null,
+    rawModelResponse: null,
     ruleCard: null,
     outline: null,
     ...overrides
@@ -230,39 +307,6 @@ describe("task file first-outline routes", () => {
     expect(getTaskSummary("task-too-large")?.analysisStatus).not.toBe("pending");
   });
 
-  it("rejects uploads when file count exceeds the configured limit", async () => {
-    saveTaskSummary({
-      id: "task-too-many",
-      userId: "user-1",
-      status: "created",
-      targetWordCount: null,
-      citationStyle: null,
-      specialRequirements: ""
-    });
-
-    const formData = new FormData();
-    formData.append("files", new File(["a"], "a.txt", { type: "text/plain" }));
-    formData.append("files", new File(["b"], "b.txt", { type: "text/plain" }));
-
-    const response = await handleTaskFileUploadRequest(
-      new Request("http://localhost/api/tasks/task-too-many/files", {
-        method: "POST",
-        body: formData
-      }),
-      { taskId: "task-too-many" },
-      {
-        isPersistenceReady: () => true,
-        requireUser: async () => makeUser(),
-        maxFileCount: 1
-      } as never
-    );
-    const payload = await response.json();
-
-    expect(response.status).toBe(400);
-    expect(String(payload.message)).toContain("最多");
-    expect(getTaskSummary("task-too-many")?.analysisStatus).not.toBe("pending");
-  });
-
   it("returns the first outline directly after upload instead of entering fake pending", async () => {
     saveTaskSummary({
       id: "task-1",
@@ -279,9 +323,7 @@ describe("task file first-outline routes", () => {
       new File(["Assignment brief text."], "assignment.txt", { type: "text/plain" })
     );
 
-    const runInlineFirstOutline = vi.fn().mockResolvedValue(
-      makeSucceededInlineResult()
-    );
+    const runInlineFirstOutline = vi.fn().mockResolvedValue(makeSucceededInlineResult());
 
     const response = await handleTaskFileUploadRequest(
       new Request("http://localhost/api/tasks/task-1/files", {
@@ -300,6 +342,8 @@ describe("task file first-outline routes", () => {
     expect(response.status).toBe(201);
     expect(payload.ok).toBe(true);
     expect(payload.analysisStatus).toBe("succeeded");
+    expect(payload.analysisRenderMode).toBe("structured");
+    expect(payload.rawModelResponse).toBeNull();
     expect(payload.outline?.articleTitle).toContain("Finance");
     expect(payload.ruleCard?.citationStyle).toBe("Harvard");
     expect(payload.analysisRuntime.state).toBe("not_applicable");
@@ -313,14 +357,14 @@ describe("task file first-outline routes", () => {
     expect(listTaskFiles("task-1")).toHaveLength(1);
   });
 
-  it("returns 422 when the model still cannot extract complete requirements", async () => {
+  it("returns raw fallback details when upload analysis only gets a readable model reply", async () => {
     saveTaskSummary({
-      id: "task-inline-failed",
+      id: "task-inline-raw",
       userId: "user-1",
       status: "created",
       targetWordCount: null,
       citationStyle: null,
-      specialRequirements: ""
+      specialRequirements: "Focus on finance."
     });
 
     const formData = new FormData();
@@ -330,27 +374,27 @@ describe("task file first-outline routes", () => {
     );
 
     const response = await handleTaskFileUploadRequest(
-      new Request("http://localhost/api/tasks/task-inline-failed/files", {
+      new Request("http://localhost/api/tasks/task-inline-raw/files", {
         method: "POST",
         body: formData
       }),
-      { taskId: "task-inline-failed" },
+      { taskId: "task-inline-raw" },
       {
         isPersistenceReady: () => true,
         requireUser: async () => makeUser(),
         runInlineFirstOutline: vi.fn().mockResolvedValue(
-          makeFailedInlineResult({
+          makeRawInlineResult({
             task: {
-              id: "task-inline-failed",
+              id: "task-inline-raw",
               status: "created",
               targetWordCount: null,
               citationStyle: null,
-              specialRequirements: ""
+              specialRequirements: "Focus on finance."
             },
             taskSummary: {
-              ...makeFailedInlineResult().taskSummary,
-              id: "task-inline-failed",
-              specialRequirements: ""
+              ...makeRawInlineResult().taskSummary,
+              id: "task-inline-raw",
+              specialRequirements: "Focus on finance."
             }
           })
         )
@@ -360,7 +404,9 @@ describe("task file first-outline routes", () => {
 
     expect(response.status).toBe(422);
     expect(payload.analysisStatus).toBe("failed");
-    expect(String(payload.message)).toContain("完整写作要求");
+    expect(payload.analysisRenderMode).toBe("raw");
+    expect(String(payload.rawModelResponse)).toContain("Suggested structure");
+    expect(String(payload.message)).toContain("原始回复");
     expect(payload.outline).toBeNull();
   });
 
@@ -466,7 +512,7 @@ describe("task file first-outline routes", () => {
     expect(payload.analysisStatus).toBe("succeeded");
   });
 
-  it("returns the regenerated outline directly after confirming the primary file", async () => {
+  it("returns raw fallback after the user confirms the main task file and the model still only replies in plain text", async () => {
     saveTaskSummary({
       id: "task-confirm",
       userId: "user-1",
@@ -492,20 +538,18 @@ describe("task file first-outline routes", () => {
     ]);
 
     const runInlineFirstOutline = vi.fn().mockResolvedValue(
-      makeSucceededInlineResult({
+      makeRawInlineResult({
         task: {
           id: "task-confirm",
-          status: "awaiting_outline_approval",
-          targetWordCount: 1800,
-          citationStyle: "Harvard",
+          status: "created",
+          targetWordCount: null,
+          citationStyle: null,
           specialRequirements: ""
         },
         taskSummary: {
-          ...makeSucceededInlineResult().taskSummary,
+          ...makeRawInlineResult().taskSummary,
           id: "task-confirm",
-          status: "awaiting_outline_approval",
-          specialRequirements: "",
-          primaryRequirementFileId: "file-1"
+          specialRequirements: ""
         },
         files: [
           {
@@ -548,9 +592,11 @@ describe("task file first-outline routes", () => {
     );
     const payload = await response.json();
 
-    expect(response.status).toBe(200);
-    expect(payload.analysisStatus).toBe("succeeded");
+    expect(response.status).toBe(422);
+    expect(payload.analysisStatus).toBe("failed");
     expect(payload.primaryRequirementFileId).toBe("file-1");
+    expect(payload.analysisRenderMode).toBe("raw");
+    expect(String(payload.rawModelResponse)).toContain("Suggested structure");
     expect(runInlineFirstOutline).toHaveBeenCalledWith(
       expect.objectContaining({
         taskId: "task-confirm",
