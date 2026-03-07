@@ -41,6 +41,9 @@ type ParsedOutline = {
   sections?: OutlineSection[];
 };
 
+const DEFAULT_TARGET_WORD_COUNT = 2000;
+const DEFAULT_CITATION_STYLE = "APA 7";
+
 const REQUIREMENTS_TEXT_FORMAT = {
   type: "json_schema",
   name: "task_requirements_result",
@@ -54,15 +57,11 @@ const REQUIREMENTS_TEXT_FORMAT = {
       "ignoredFileIds",
       "needsUserConfirmation",
       "reasoning",
-      "targetWordCount",
-      "citationStyle",
       "topic",
       "chapterCount",
       "mustCover",
       "gradingFocus",
       "appliedSpecialRequirements",
-      "usedDefaultWordCount",
-      "usedDefaultCitationStyle",
       "warnings"
     ],
     properties: {
@@ -71,15 +70,15 @@ const REQUIREMENTS_TEXT_FORMAT = {
       ignoredFileIds: { type: "array", items: { type: "string" } },
       needsUserConfirmation: { type: "boolean" },
       reasoning: { type: "string" },
-      targetWordCount: { type: "number" },
-      citationStyle: { type: "string" },
+      targetWordCount: { type: ["number", "string", "null"] },
+      citationStyle: { type: ["string", "null"] },
       topic: { type: "string" },
       chapterCount: { type: ["number", "null"] },
       mustCover: { type: "array", items: { type: "string" } },
       gradingFocus: { type: "array", items: { type: "string" } },
       appliedSpecialRequirements: { type: "string" },
-      usedDefaultWordCount: { type: "boolean" },
-      usedDefaultCitationStyle: { type: "boolean" },
+      usedDefaultWordCount: { type: ["boolean", "string", "null"] },
+      usedDefaultCitationStyle: { type: ["boolean", "string", "null"] },
       warnings: { type: "array", items: { type: "string" } }
     }
   }
@@ -168,6 +167,15 @@ async function runRequirementsStage(input: {
   try {
     return normalizeAnalysis(firstAttempt, input);
   } catch (error) {
+    console.warn("[analysis-inline] requirements-attempt-incomplete", {
+      attempt: 1,
+      missingFields:
+        error && typeof error === "object" && "missingFields" in error
+          ? (error.missingFields as string[] | undefined) ?? []
+          : [],
+      reason: error instanceof Error ? error.message : String(error)
+    });
+
     if (!isRequirementsIncompleteError(error)) {
       throw error;
     }
@@ -177,6 +185,15 @@ async function runRequirementsStage(input: {
     try {
       return normalizeAnalysis(secondAttempt, input);
     } catch (secondError) {
+      console.warn("[analysis-inline] requirements-attempt-incomplete", {
+        attempt: 2,
+        missingFields:
+          secondError && typeof secondError === "object" && "missingFields" in secondError
+            ? (secondError.missingFields as string[] | undefined) ?? []
+            : [],
+        reason: secondError instanceof Error ? secondError.message : String(secondError)
+      });
+
       if (!isRequirementsIncompleteError(secondError)) {
         throw secondError;
       }
@@ -411,30 +428,17 @@ function normalizeAnalysis(
   const ignoredFileIds = normalizeIds(raw.ignoredFileIds, validIds).filter(
     (id) => id !== chosenTaskFileId && !supportingFileIds.includes(id)
   );
-  const targetWordCount =
-    typeof raw.targetWordCount === "number" && raw.targetWordCount > 0
-      ? Math.round(raw.targetWordCount)
-      : null;
-  const citationStyle =
-    typeof raw.citationStyle === "string" && raw.citationStyle.trim()
-      ? raw.citationStyle.trim()
-      : null;
+  const explicitTargetWordCount = normalizePositiveInteger(raw.targetWordCount);
+  const explicitCitationStyle = normalizeOptionalString(raw.citationStyle);
+  const explicitDefaultWordCount = normalizeBoolean(raw.usedDefaultWordCount);
+  const explicitDefaultCitationStyle = normalizeBoolean(raw.usedDefaultCitationStyle);
+  const targetWordCount = explicitTargetWordCount ?? DEFAULT_TARGET_WORD_COUNT;
+  const citationStyle = explicitCitationStyle ?? DEFAULT_CITATION_STYLE;
   const usedDefaultWordCount =
-    typeof raw.usedDefaultWordCount === "boolean" ? raw.usedDefaultWordCount : null;
+    explicitDefaultWordCount ?? explicitTargetWordCount === null;
   const usedDefaultCitationStyle =
-    typeof raw.usedDefaultCitationStyle === "boolean" ? raw.usedDefaultCitationStyle : null;
-
-  const missingFields: string[] = [];
-  if (targetWordCount === null) missingFields.push("targetWordCount");
-  if (citationStyle === null) missingFields.push("citationStyle");
-  if (usedDefaultWordCount === null) missingFields.push("usedDefaultWordCount");
-  if (usedDefaultCitationStyle === null) missingFields.push("usedDefaultCitationStyle");
-
-  if (missingFields.length > 0) {
-    throw createModelAnalysisError("MODEL_REQUIREMENTS_INCOMPLETE", missingFields);
-  }
-
-  return {
+    explicitDefaultCitationStyle ?? explicitCitationStyle === null;
+  const partialAnalysis: TaskAnalysisSnapshot = {
     chosenTaskFileId,
     supportingFileIds,
     ignoredFileIds,
@@ -443,23 +447,76 @@ function normalizeAnalysis(
       typeof raw.reasoning === "string" && raw.reasoning.trim()
         ? raw.reasoning.trim()
         : "The model analyzed the uploaded materials.",
-    targetWordCount: targetWordCount as number,
-    citationStyle: citationStyle as string,
+    targetWordCount,
+    citationStyle,
     topic:
       typeof raw.topic === "string" && raw.topic.trim() ? raw.topic.trim() : null,
-    chapterCount:
-      typeof raw.chapterCount === "number" && raw.chapterCount > 0
-        ? Math.round(raw.chapterCount)
-        : null,
+    chapterCount: normalizePositiveInteger(raw.chapterCount),
     mustCover: normalizeStrings(raw.mustCover),
     gradingFocus: normalizeStrings(raw.gradingFocus),
     appliedSpecialRequirements:
       typeof raw.appliedSpecialRequirements === "string"
         ? raw.appliedSpecialRequirements
         : input.specialRequirements,
-    usedDefaultWordCount: usedDefaultWordCount as boolean,
-    usedDefaultCitationStyle: usedDefaultCitationStyle as boolean,
+    usedDefaultWordCount,
+    usedDefaultCitationStyle,
     warnings: normalizeStrings(raw.warnings)
+  };
+
+  const conflictFields: string[] = [];
+  if (
+    explicitTargetWordCount !== null &&
+    explicitDefaultWordCount === true &&
+    explicitTargetWordCount !== DEFAULT_TARGET_WORD_COUNT
+  ) {
+    conflictFields.push("usedDefaultWordCount");
+  }
+  if (
+    explicitCitationStyle !== null &&
+    explicitDefaultCitationStyle === true &&
+    !isDefaultCitationStyle(explicitCitationStyle)
+  ) {
+    conflictFields.push("usedDefaultCitationStyle");
+  }
+  if (conflictFields.length > 0) {
+    throw createModelAnalysisError(
+      "MODEL_REQUIREMENTS_CONFLICTING",
+      conflictFields,
+      partialAnalysis
+    );
+  }
+
+  const missingFields: string[] = [];
+  if (!chosenTaskFileId && !Boolean(raw.needsUserConfirmation)) {
+    missingFields.push("chosenTaskFileId");
+  }
+  if (!normalizeOptionalString(raw.topic) && normalizePositiveInteger(raw.chapterCount) === null) {
+    missingFields.push("topic_or_chapterCount");
+  }
+
+  if (missingFields.length > 0) {
+    throw createModelAnalysisError(
+      "MODEL_REQUIREMENTS_INCOMPLETE",
+      missingFields,
+      partialAnalysis
+    );
+  }
+
+  const warnings = [...partialAnalysis.warnings];
+  if (explicitTargetWordCount === null) {
+    warnings.push(
+      "Program inferred the default 2000-word target because the model omitted a concrete targetWordCount."
+    );
+  }
+  if (explicitCitationStyle === null) {
+    warnings.push(
+      "Program inferred APA 7 because the model omitted a concrete citationStyle."
+    );
+  }
+
+  return {
+    ...partialAnalysis,
+    warnings
   };
 }
 
@@ -567,6 +624,52 @@ function createModelAnalysisError(
     error.partialAnalysis = partialAnalysis;
   }
   return error;
+}
+
+function normalizePositiveInteger(value: unknown) {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    const normalized = Math.round(value);
+    return normalized > 0 ? normalized : null;
+  }
+
+  if (typeof value === "string" && value.trim()) {
+    const normalized = Number.parseInt(value.trim(), 10);
+    return Number.isFinite(normalized) && normalized > 0 ? normalized : null;
+  }
+
+  return null;
+}
+
+function normalizeOptionalString(value: unknown) {
+  if (typeof value !== "string") {
+    return null;
+  }
+
+  const trimmed = value.trim();
+  return trimmed ? trimmed : null;
+}
+
+function normalizeBoolean(value: unknown) {
+  if (typeof value === "boolean") {
+    return value;
+  }
+
+  if (typeof value === "string") {
+    const normalized = value.trim().toLowerCase();
+    if (["true", "yes", "y", "1"].includes(normalized)) {
+      return true;
+    }
+    if (["false", "no", "n", "0"].includes(normalized)) {
+      return false;
+    }
+  }
+
+  return null;
+}
+
+function isDefaultCitationStyle(value: string) {
+  const normalized = value.trim().toLowerCase().replace(/\s+/g, " ");
+  return normalized === "apa 7" || normalized === "apa7" || normalized === "apa 7th";
 }
 
 function normalizeIds(value: unknown, validIds: Set<string>) {

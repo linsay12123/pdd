@@ -28,13 +28,13 @@ describe("model analysis guardrails", () => {
     requestOpenAITextResponseMock
       .mockResolvedValueOnce({
         output_text: JSON.stringify({
-          chosenTaskFileId: "file-1",
+          chosenTaskFileId: null,
           supportingFileIds: [],
           ignoredFileIds: [],
           needsUserConfirmation: false,
           reasoning: "First response missed required fields.",
-          topic: "Finance Risk Governance in ASEAN Banks",
-          chapterCount: 6,
+          topic: "",
+          chapterCount: null,
           mustCover: [],
           gradingFocus: [],
           appliedSpecialRequirements: "",
@@ -147,7 +147,7 @@ describe("model analysis guardrails", () => {
     expect(result.analysis.topic).toBe("Finance Risk Governance in ASEAN Banks");
   });
 
-  it("fails instead of silently inventing default requirements when the model omits them", async () => {
+  it("fills in default flags when the model gives explicit requirements but omits the default markers", async () => {
     requestOpenAITextResponseMock
       .mockResolvedValueOnce({
         output_text: JSON.stringify({
@@ -155,7 +155,9 @@ describe("model analysis guardrails", () => {
           supportingFileIds: [],
           ignoredFileIds: [],
           needsUserConfirmation: false,
-          reasoning: "The first response is incomplete.",
+          reasoning: "The file already states the concrete requirements.",
+          targetWordCount: 2750,
+          citationStyle: "Harvard",
           topic: "Finance Risk Governance in ASEAN Banks",
           chapterCount: 6,
           mustCover: [],
@@ -166,32 +168,83 @@ describe("model analysis guardrails", () => {
       })
       .mockResolvedValueOnce({
         output_text: JSON.stringify({
+          articleTitle: "Finance Risk Governance in ASEAN Banks",
+          sections: [
+            {
+              title: "Introduction",
+              summary: "Introduce the governance problem and essay focus.",
+              bulletPoints: ["Context", "Problem", "Argument"]
+            }
+          ]
+        })
+      });
+
+    const result = await analyzeUploadedTaskWithOpenAI({
+      specialRequirements: "",
+      files: [
+        {
+          id: "file-1",
+          originalFilename: "assignment.txt",
+          extractedText: "Write 2750 words with Harvard referencing."
+        }
+      ]
+    });
+
+    expect(result.analysis.targetWordCount).toBe(2750);
+    expect(result.analysis.citationStyle).toBe("Harvard");
+    expect(result.analysis.usedDefaultWordCount).toBe(false);
+    expect(result.analysis.usedDefaultCitationStyle).toBe(false);
+    expect(result.outline?.articleTitle).toBe("Finance Risk Governance in ASEAN Banks");
+    expect(requestOpenAITextResponseMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("applies 2000 words and APA 7 when the model omits count/style but the rest of the requirements are usable", async () => {
+    requestOpenAITextResponseMock
+      .mockResolvedValueOnce({
+        output_text: JSON.stringify({
           chosenTaskFileId: "file-1",
           supportingFileIds: [],
           ignoredFileIds: [],
           needsUserConfirmation: false,
-          reasoning: "The retry response is still incomplete.",
+          reasoning: "The uploaded files do not state a concrete word count or citation style.",
           topic: "Finance Risk Governance in ASEAN Banks",
-          chapterCount: 6,
-          mustCover: [],
-          gradingFocus: [],
+          chapterCount: 4,
+          mustCover: ["Risk governance"],
+          gradingFocus: ["Critical analysis"],
           appliedSpecialRequirements: "",
           warnings: []
         })
+      })
+      .mockResolvedValueOnce({
+        output_text: JSON.stringify({
+          articleTitle: "Finance Risk Governance in ASEAN Banks",
+          sections: [
+            {
+              title: "Introduction",
+              summary: "Introduce the governance problem and essay focus.",
+              bulletPoints: ["Context", "Problem", "Argument"]
+            }
+          ]
+        })
       });
 
-    await expect(
-      analyzeUploadedTaskWithOpenAI({
-        specialRequirements: "",
-        files: [
-          {
-            id: "file-1",
-            originalFilename: "assignment.txt",
-            extractedText: "Assignment brief text."
-          }
-        ]
-      })
-    ).rejects.toThrow("MODEL_REQUIREMENTS_INCOMPLETE_AFTER_RETRY");
+    const result = await analyzeUploadedTaskWithOpenAI({
+      specialRequirements: "",
+      files: [
+        {
+          id: "file-1",
+          originalFilename: "assignment.txt",
+          extractedText: "Assignment brief text."
+        }
+      ]
+    });
+
+    expect(result.analysis.targetWordCount).toBe(2000);
+    expect(result.analysis.citationStyle).toBe("APA 7");
+    expect(result.analysis.usedDefaultWordCount).toBe(true);
+    expect(result.analysis.usedDefaultCitationStyle).toBe(true);
+    expect(result.outline?.articleTitle).toBe("Finance Risk Governance in ASEAN Banks");
+    expect(requestOpenAITextResponseMock).toHaveBeenCalledTimes(2);
   });
 
   it("fails fast when a transport-only pdf did not get an OpenAI file id", async () => {

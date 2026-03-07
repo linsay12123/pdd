@@ -47,6 +47,14 @@ export function resolveInlineAnalysisFailure(
     };
   }
 
+  if (code === "MODEL_REQUIREMENTS_CONFLICTING") {
+    return {
+      code,
+      status: 422,
+      message: "系统已经读到文件，但不同材料里的要求彼此打架，这次没法安全判断该按哪个要求走。"
+    };
+  }
+
   if (
     code === "MODEL_OUTLINE_INCOMPLETE" ||
     code === "MODEL_OUTLINE_INCOMPLETE_AFTER_RETRY" ||
