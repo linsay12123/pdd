@@ -152,4 +152,98 @@ describe("openai client", () => {
     expect(fetchSpy).toHaveBeenCalledTimes(2);
     expect(sleepSpy).toHaveBeenCalledTimes(1);
   });
+
+  it("keeps using top-level output_text when it is present", async () => {
+    const fetchSpy = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        output_text: "top-level-text",
+        output: [
+          {
+            type: "message",
+            content: [
+              {
+                type: "output_text",
+                text: "nested-text"
+              }
+            ]
+          }
+        ]
+      })
+    });
+
+    const response = await requestOpenAITextResponse({
+      input: "prefer top level",
+      apiKey: "test-key",
+      fetchImpl: fetchSpy as typeof fetch
+    });
+
+    expect(response.output_text).toBe("top-level-text");
+  });
+
+  it("extracts text from output message content when top-level output_text is missing", async () => {
+    const fetchSpy = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        output: [
+          {
+            type: "reasoning",
+            summary: []
+          },
+          {
+            type: "message",
+            status: "completed",
+            content: [
+              {
+                type: "output_text",
+                text: "{\"analysis\":"
+              },
+              {
+                type: "output_text",
+                text: "\"ok\"}"
+              }
+            ]
+          }
+        ]
+      })
+    });
+
+    const response = await requestOpenAITextResponse({
+      input: "read nested text",
+      apiKey: "test-key",
+      fetchImpl: fetchSpy as typeof fetch
+    });
+
+    expect(response.output_text).toBe("{\"analysis\":\"ok\"}");
+  });
+
+  it("returns an empty string only when the success payload truly has no readable text", async () => {
+    const fetchSpy = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        output: [
+          {
+            type: "reasoning",
+            summary: []
+          },
+          {
+            type: "message",
+            content: [
+              {
+                type: "image"
+              }
+            ]
+          }
+        ]
+      })
+    });
+
+    const response = await requestOpenAITextResponse({
+      input: "no text anywhere",
+      apiKey: "test-key",
+      fetchImpl: fetchSpy as typeof fetch
+    });
+
+    expect(response.output_text).toBe("");
+  });
 });

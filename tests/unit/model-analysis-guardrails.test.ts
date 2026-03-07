@@ -343,4 +343,81 @@ describe("model analysis guardrails", () => {
     expect(result.analysis.providerErrorKind).toBe("timeout");
     expect(result.analysis.providerErrorBody).toBeNull();
   });
+
+  it("still succeeds when OpenAI only returns text inside output message content", async () => {
+    vi.resetModules();
+    vi.doUnmock("../../src/lib/ai/openai-client");
+    process.env.OPENAI_API_KEY = "test-key";
+
+    const fetchSpy = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        output: [
+          {
+            type: "reasoning",
+            summary: []
+          },
+          {
+            type: "message",
+            status: "completed",
+            content: [
+              {
+                type: "output_text",
+                text: JSON.stringify({
+                  analysis: {
+                    chosenTaskFileId: "file-1",
+                    supportingFileIds: [],
+                    ignoredFileIds: [],
+                    needsUserConfirmation: false,
+                    reasoning: "The first file is the task brief.",
+                    targetWordCount: 2200,
+                    citationStyle: "Harvard",
+                    topic: "Finance Risk Governance in ASEAN Banks",
+                    chapterCount: 5,
+                    mustCover: ["Governance framework", "Regional cases"],
+                    gradingFocus: ["Critical analysis"],
+                    appliedSpecialRequirements: "Only generate the first outline.",
+                    usedDefaultWordCount: false,
+                    usedDefaultCitationStyle: false,
+                    warnings: []
+                  },
+                  outline: {
+                    articleTitle: "Finance Risk Governance in ASEAN Banks",
+                    sections: [
+                      {
+                        title: "Introduction",
+                        summary: "Set the scope and thesis.",
+                        bulletPoints: ["Context", "Problem", "Argument"]
+                      }
+                    ]
+                  }
+                })
+              }
+            ]
+          }
+        ]
+      })
+    });
+    vi.stubGlobal("fetch", fetchSpy);
+
+    const { analyzeUploadedTaskWithOpenAI: analyzeWithRealClient } = await import(
+      "../../src/lib/ai/services/analyze-uploaded-task"
+    );
+
+    const result = await analyzeWithRealClient({
+      specialRequirements: "Only generate the first outline.",
+      files: [
+        {
+          id: "file-1",
+          originalFilename: "assignment.txt",
+          extractedText:
+            "Write a 2200 word essay about finance risk governance in ASEAN banks with Harvard referencing."
+        }
+      ]
+    });
+
+    expect(result.analysis.analysisRenderMode).toBe("structured");
+    expect(result.analysis.targetWordCount).toBe(2200);
+    expect(result.outline?.articleTitle).toBe("Finance Risk Governance in ASEAN Banks");
+  });
 });

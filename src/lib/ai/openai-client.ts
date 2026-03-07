@@ -121,9 +121,10 @@ export async function requestOpenAITextResponse({
       const data = (await response.json()) as {
         output_text?: string;
       } & Record<string, unknown>;
+      const outputText = resolveOpenAIOutputText(data);
 
       return {
-        output_text: data.output_text ?? "",
+        output_text: outputText,
         raw: data
       };
     } catch (error) {
@@ -233,6 +234,59 @@ function createOpenAIRequestError(
   error.providerErrorBody = input.providerErrorBody ?? null;
   error.providerErrorKind = input.providerErrorKind ?? null;
   return error;
+}
+
+function resolveOpenAIOutputText(data: Record<string, unknown>) {
+  const topLevelText =
+    typeof data.output_text === "string" && data.output_text.trim()
+      ? data.output_text
+      : null;
+
+  if (topLevelText) {
+    return topLevelText;
+  }
+
+  return extractOutputTextFromMessages(data);
+}
+
+function extractOutputTextFromMessages(data: Record<string, unknown>) {
+  const output = Array.isArray(data.output) ? data.output : [];
+  const segments: string[] = [];
+
+  for (const item of output) {
+    if (!item || typeof item !== "object") {
+      continue;
+    }
+
+    const content = Array.isArray((item as { content?: unknown }).content)
+      ? ((item as { content: unknown[] }).content ?? [])
+      : [];
+
+    for (const contentItem of content) {
+      if (!contentItem || typeof contentItem !== "object") {
+        continue;
+      }
+
+      const segment = extractContentText(contentItem as Record<string, unknown>);
+      if (segment) {
+        segments.push(segment);
+      }
+    }
+  }
+
+  return segments.join("");
+}
+
+function extractContentText(contentItem: Record<string, unknown>) {
+  if (typeof contentItem.output_text === "string" && contentItem.output_text.trim()) {
+    return contentItem.output_text;
+  }
+
+  if (typeof contentItem.text === "string" && contentItem.text.trim()) {
+    return contentItem.text;
+  }
+
+  return "";
 }
 
 function resolveRetryDelayMs(input: {
