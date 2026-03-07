@@ -59,74 +59,64 @@ type ParsedAnalyzeResponse = {
 const DEFAULT_TARGET_WORD_COUNT = 2000;
 const DEFAULT_CITATION_STYLE = "APA 7";
 
+function buildStrictObjectSchema<const T extends Record<string, unknown>>(
+  properties: T,
+  options?: { nullable?: boolean }
+) {
+  return {
+    type: options?.nullable ? (["object", "null"] as const) : "object",
+    additionalProperties: false,
+    required: Object.keys(properties),
+    properties
+  };
+}
+
+const ANALYSIS_SCHEMA_PROPERTIES = {
+  chosenTaskFileId: { type: ["string", "null"] },
+  supportingFileIds: { type: "array", items: { type: "string" } },
+  ignoredFileIds: { type: "array", items: { type: "string" } },
+  needsUserConfirmation: { type: "boolean" },
+  reasoning: { type: "string" },
+  targetWordCount: { type: ["number", "string", "null"] },
+  citationStyle: { type: ["string", "null"] },
+  topic: { type: "string" },
+  chapterCount: { type: ["number", "null"] },
+  mustCover: { type: "array", items: { type: "string" } },
+  gradingFocus: { type: "array", items: { type: "string" } },
+  appliedSpecialRequirements: { type: "string" },
+  usedDefaultWordCount: { type: ["boolean", "string", "null"] },
+  usedDefaultCitationStyle: { type: ["boolean", "string", "null"] },
+  warnings: { type: "array", items: { type: "string" } }
+} as const;
+
+const OUTLINE_SECTION_SCHEMA_PROPERTIES = {
+  title: { type: "string" },
+  summary: { type: "string" },
+  bulletPoints: {
+    type: "array",
+    items: { type: "string" }
+  }
+} as const;
+
+const OUTLINE_SCHEMA_PROPERTIES = {
+  articleTitle: { type: "string" },
+  sections: {
+    type: "array",
+    items: buildStrictObjectSchema(OUTLINE_SECTION_SCHEMA_PROPERTIES)
+  }
+} as const;
+
 const ANALYSIS_AND_OUTLINE_TEXT_FORMAT = {
   type: "json_schema",
   name: "task_analysis_and_outline_result",
   strict: true,
   schema: {
-    type: "object",
-    additionalProperties: false,
-    required: ["analysis", "outline"],
-    properties: {
-      analysis: {
-        type: "object",
-        additionalProperties: false,
-        required: [
-          "chosenTaskFileId",
-          "supportingFileIds",
-          "ignoredFileIds",
-          "needsUserConfirmation",
-          "reasoning",
-          "topic",
-          "chapterCount",
-          "mustCover",
-          "gradingFocus",
-          "appliedSpecialRequirements",
-          "warnings"
-        ],
-        properties: {
-          chosenTaskFileId: { type: ["string", "null"] },
-          supportingFileIds: { type: "array", items: { type: "string" } },
-          ignoredFileIds: { type: "array", items: { type: "string" } },
-          needsUserConfirmation: { type: "boolean" },
-          reasoning: { type: "string" },
-          targetWordCount: { type: ["number", "string", "null"] },
-          citationStyle: { type: ["string", "null"] },
-          topic: { type: "string" },
-          chapterCount: { type: ["number", "null"] },
-          mustCover: { type: "array", items: { type: "string" } },
-          gradingFocus: { type: "array", items: { type: "string" } },
-          appliedSpecialRequirements: { type: "string" },
-          usedDefaultWordCount: { type: ["boolean", "string", "null"] },
-          usedDefaultCitationStyle: { type: ["boolean", "string", "null"] },
-          warnings: { type: "array", items: { type: "string" } }
-        }
-      },
-      outline: {
-        type: ["object", "null"],
-        additionalProperties: false,
-        required: ["articleTitle", "sections"],
-        properties: {
-          articleTitle: { type: "string" },
-          sections: {
-            type: "array",
-            items: {
-              type: "object",
-              additionalProperties: false,
-              required: ["title", "summary", "bulletPoints"],
-              properties: {
-                title: { type: "string" },
-                summary: { type: "string" },
-                bulletPoints: {
-                  type: "array",
-                  items: { type: "string" }
-                }
-              }
-            }
-          }
-        }
-      }
-    }
+    ...buildStrictObjectSchema({
+      analysis: buildStrictObjectSchema(ANALYSIS_SCHEMA_PROPERTIES),
+      outline: buildStrictObjectSchema(OUTLINE_SCHEMA_PROPERTIES, {
+        nullable: true
+      })
+    })
   }
 } as const;
 

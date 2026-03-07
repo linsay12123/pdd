@@ -591,6 +591,100 @@ describe("analysis retry route", () => {
     expect(String(payload.message)).toContain("原始回复");
   });
 
+  it("treats invalid_json_schema on retry as a system request-format bug", async () => {
+    saveTaskSummary({
+      id: "task-retry-invalid-json-schema",
+      userId: "user-1",
+      status: "created",
+      targetWordCount: null,
+      citationStyle: null,
+      specialRequirements: "",
+      analysisStatus: "failed",
+      analysisErrorMessage: "PROVIDER_HTTP_ERROR"
+    });
+
+    saveTaskFileRecords([
+      {
+        id: "file-1",
+        taskId: "task-retry-invalid-json-schema",
+        userId: "user-1",
+        originalFilename: "brief.txt",
+        storagePath: "tmp/brief.txt",
+        extractedText: "brief",
+        role: "unknown",
+        isPrimary: false,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      }
+    ]);
+
+    const invalidSchemaBody = JSON.stringify({
+      error: {
+        message:
+          "Invalid schema for response_format 'task_analysis_and_outline_result': missing required targetWordCount",
+        type: "invalid_request_error",
+        param: "text.format.schema",
+        code: "invalid_json_schema"
+      }
+    });
+    const baseResult = makeProviderErrorInlineResult();
+
+    const response = await handleTaskAnalysisRetryRequest(
+      new Request("http://localhost/api/tasks/task-retry-invalid-json-schema/analysis/retry", {
+        method: "POST"
+      }),
+      { taskId: "task-retry-invalid-json-schema" },
+      {
+        isPersistenceReady: () => true,
+        requireUser: async () => makeUser(),
+        runInlineFirstOutline: vi.fn().mockResolvedValue({
+          ...baseResult,
+          task: {
+            id: "task-retry-invalid-json-schema",
+            status: "created",
+            targetWordCount: null,
+            citationStyle: null,
+            specialRequirements: ""
+          },
+          taskSummary: {
+            ...baseResult.taskSummary,
+            id: "task-retry-invalid-json-schema",
+            status: "created",
+            targetWordCount: null,
+            citationStyle: null,
+            specialRequirements: "",
+            analysisErrorMessage: "PROVIDER_HTTP_ERROR",
+            latestOutlineVersionId: null,
+            analysisSnapshot: {
+              ...baseResult.taskSummary.analysisSnapshot!,
+              providerStatusCode: 400,
+              providerErrorBody: invalidSchemaBody,
+              providerErrorKind: "http_error"
+            }
+          },
+          analysis: {
+            ...baseResult.analysis!,
+            providerStatusCode: 400,
+            providerErrorBody: invalidSchemaBody,
+            providerErrorKind: "http_error"
+          },
+          analysisRenderMode: "raw_provider_error",
+          providerStatusCode: 400,
+          providerErrorBody: invalidSchemaBody,
+          providerErrorKind: "http_error"
+        })
+      } as never
+    );
+    const payload = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(payload.analysisRenderMode).toBe("raw_provider_error");
+    expect(String(payload.providerErrorBody)).toContain("invalid_json_schema");
+    expect(String(payload.message)).toContain("系统");
+    expect(String(payload.message)).toContain("格式");
+    expect(String(payload.message)).not.toContain("上游接口这次没有返回可展示正文");
+  });
+
   it("rejects retry when there are no uploaded files", async () => {
     saveTaskSummary({
       id: "task-no-files",

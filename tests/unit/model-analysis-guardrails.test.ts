@@ -19,6 +19,60 @@ vi.mock("../../src/lib/ai/openai-client", () => ({
 
 import { analyzeUploadedTaskWithOpenAI } from "../../src/lib/ai/services/analyze-uploaded-task";
 
+function collectStrictSchemaProblems(
+  node: unknown,
+  path = "schema"
+): string[] {
+  if (!node || typeof node !== "object") {
+    return [];
+  }
+
+  const schemaNode = node as {
+    type?: string | string[];
+    properties?: Record<string, unknown>;
+    required?: string[];
+    additionalProperties?: boolean;
+    items?: unknown;
+  };
+
+  const problems: string[] = [];
+  const typeList = Array.isArray(schemaNode.type)
+    ? schemaNode.type
+    : schemaNode.type
+      ? [schemaNode.type]
+      : [];
+  const isStrictObject =
+    typeList.includes("object") &&
+    schemaNode.additionalProperties === false &&
+    schemaNode.properties &&
+    typeof schemaNode.properties === "object";
+
+  if (isStrictObject) {
+    const propertyKeys = Object.keys(schemaNode.properties ?? {});
+    const requiredKeys = Array.isArray(schemaNode.required) ? schemaNode.required : [];
+    const missingKeys = propertyKeys.filter((key) => !requiredKeys.includes(key));
+    const unexpectedKeys = requiredKeys.filter((key) => !propertyKeys.includes(key));
+
+    if (missingKeys.length > 0) {
+      problems.push(`${path} 缺少 required: ${missingKeys.join(", ")}`);
+    }
+
+    if (unexpectedKeys.length > 0) {
+      problems.push(`${path} 多写了 required: ${unexpectedKeys.join(", ")}`);
+    }
+
+    for (const [key, value] of Object.entries(schemaNode.properties ?? {})) {
+      problems.push(...collectStrictSchemaProblems(value, `${path}.properties.${key}`));
+    }
+  }
+
+  if (schemaNode.items) {
+    problems.push(...collectStrictSchemaProblems(schemaNode.items, `${path}.items`));
+  }
+
+  return problems;
+}
+
 describe("model analysis guardrails", () => {
   beforeEach(() => {
     requestOpenAITextResponseMock.mockReset();
@@ -79,6 +133,61 @@ describe("model analysis guardrails", () => {
         maxAttempts: 1
       })
     );
+  });
+
+  it("sends a strict json schema whose every object property is also listed in required", async () => {
+    requestOpenAITextResponseMock.mockResolvedValueOnce({
+      output_text: JSON.stringify({
+        analysis: {
+          chosenTaskFileId: "file-1",
+          supportingFileIds: [],
+          ignoredFileIds: [],
+          needsUserConfirmation: false,
+          reasoning: "The first file is the real task brief.",
+          targetWordCount: 2750,
+          citationStyle: "Harvard",
+          topic: "Finance Risk Governance in ASEAN Banks",
+          chapterCount: 6,
+          mustCover: ["ASEAN banking risk"],
+          gradingFocus: ["Critical analysis"],
+          appliedSpecialRequirements: "Focus on governance.",
+          usedDefaultWordCount: false,
+          usedDefaultCitationStyle: false,
+          warnings: []
+        },
+        outline: {
+          articleTitle: "Finance Risk Governance in ASEAN Banks",
+          sections: [
+            {
+              title: "Introduction",
+              summary: "Introduce the governance problem and essay focus.",
+              bulletPoints: ["Context", "Problem", "Argument"]
+            }
+          ]
+        }
+      })
+    });
+
+    await analyzeUploadedTaskWithOpenAI({
+      specialRequirements: "Focus on governance.",
+      files: [
+        {
+          id: "file-1",
+          originalFilename: "assignment.txt",
+          extractedText: "Write 2750 words with Harvard referencing."
+        }
+      ]
+    });
+
+    const request = requestOpenAITextResponseMock.mock.calls[0]?.[0] as {
+      textFormat?: {
+        schema?: unknown;
+      };
+    };
+
+    const schemaProblems = collectStrictSchemaProblems(request.textFormat?.schema);
+
+    expect(schemaProblems).toEqual([]);
   });
 
   it("returns raw fallback when the model replies with readable text but not a formal outline payload", async () => {

@@ -189,6 +189,98 @@ describe("WorkspacePage", () => {
     expect(html).not.toContain("确认大纲并生成正文");
   });
 
+  it("shows invalid_json_schema as a system request-format bug and stops encouraging retries", () => {
+    const providerErrorBody = JSON.stringify({
+      error: {
+        message:
+          "Invalid schema for response_format 'task_analysis_and_outline_result': missing required targetWordCount",
+        type: "invalid_request_error",
+        param: "text.format.schema",
+        code: "invalid_json_schema"
+      }
+    });
+
+    const html = renderToStaticMarkup(
+      <WorkspacePageClient
+        initialQuota={1500}
+        initialActiveTask={{
+          task: {
+            id: "task-invalid-json-schema",
+            status: "created",
+            targetWordCount: null,
+            citationStyle: null,
+            specialRequirements: ""
+          },
+          files: [],
+          classification: {
+            primaryRequirementFileId: null,
+            needsUserConfirmation: false,
+            reasoning: "这次不是文件问题，是系统请求格式写错了。"
+          },
+          analysisStatus: "failed",
+          analysisProgress: {
+            requestedAt: null,
+            startedAt: null,
+            completedAt: null,
+            elapsedSeconds: 0,
+            maxWaitSeconds: 600,
+            canRetry: true
+          },
+          analysisRuntime: {
+            state: "not_applicable",
+            status: null,
+            detail: "首版大纲这一步已经在当前请求里直接完成，不再走后台排队。",
+            autoRecovered: false,
+            runId: null
+          },
+          analysis: {
+            chosenTaskFileId: null,
+            supportingFileIds: [],
+            ignoredFileIds: [],
+            needsUserConfirmation: false,
+            reasoning: "这次不是文件问题，是系统请求格式写错了。",
+            targetWordCount: 2000,
+            citationStyle: "APA 7",
+            topic: null,
+            chapterCount: null,
+            mustCover: [],
+            gradingFocus: [],
+            appliedSpecialRequirements: "",
+            usedDefaultWordCount: true,
+            usedDefaultCitationStyle: true,
+            warnings: [],
+            analysisRenderMode: "raw_provider_error",
+            rawModelResponse: null,
+            providerStatusCode: 400,
+            providerErrorBody,
+            providerErrorKind: "http_error"
+          },
+          analysisRenderMode: "raw_provider_error",
+          rawModelResponse: null,
+          providerStatusCode: 400,
+          providerErrorBody,
+          providerErrorKind: "http_error",
+          ruleCard: null,
+          outline: null,
+          humanize: {
+            status: "idle",
+            provider: "undetectable",
+            requestedAt: null,
+            completedAt: null,
+            errorMessage: null
+          },
+          message: "这次不是你的文件有问题，是系统发给上游接口的格式说明写错了。下面是原始报错。"
+        } as any}
+      />
+    );
+
+    expect(html).toContain("系统请求格式写错了");
+    expect(html).toContain("不是你的文件问题");
+    expect(html).toContain("invalid_json_schema");
+    expect(html).not.toContain("一键重试分析");
+    expect(html).not.toContain("确认大纲并生成正文");
+  });
+
   it("falls back to the generic system error card when the provider failed without any raw body", () => {
     const html = renderToStaticMarkup(
       <WorkspacePageClient

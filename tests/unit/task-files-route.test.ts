@@ -561,6 +561,89 @@ describe("task file first-outline routes", () => {
     expect(String(payload.message)).toContain("原始回复");
   });
 
+  it("treats invalid_json_schema after upload as a system request-format bug", async () => {
+    saveTaskSummary({
+      id: "task-invalid-json-schema",
+      userId: "user-1",
+      status: "created",
+      targetWordCount: null,
+      citationStyle: null,
+      specialRequirements: "Focus on finance."
+    });
+
+    const invalidSchemaBody = JSON.stringify({
+      error: {
+        message:
+          "Invalid schema for response_format 'task_analysis_and_outline_result': missing required targetWordCount",
+        type: "invalid_request_error",
+        param: "text.format.schema",
+        code: "invalid_json_schema"
+      }
+    });
+    const baseResult = makeProviderErrorInlineResult();
+    const formData = new FormData();
+    formData.append(
+      "files",
+      new File(["Assignment brief text."], "assignment.txt", { type: "text/plain" })
+    );
+
+    const response = await handleTaskFileUploadRequest(
+      new Request("http://localhost/api/tasks/task-invalid-json-schema/files", {
+        method: "POST",
+        body: formData
+      }),
+      { taskId: "task-invalid-json-schema" },
+      {
+        isPersistenceReady: () => true,
+        requireUser: async () => makeUser(),
+        runInlineFirstOutline: vi.fn().mockResolvedValue({
+          ...baseResult,
+          task: {
+            id: "task-invalid-json-schema",
+            status: "created",
+            targetWordCount: null,
+            citationStyle: null,
+            specialRequirements: "Focus on finance."
+          },
+          taskSummary: {
+            ...baseResult.taskSummary,
+            id: "task-invalid-json-schema",
+            status: "created",
+            targetWordCount: null,
+            citationStyle: null,
+            specialRequirements: "Focus on finance.",
+            analysisErrorMessage: "PROVIDER_HTTP_ERROR",
+            latestOutlineVersionId: null,
+            analysisSnapshot: {
+              ...baseResult.taskSummary.analysisSnapshot!,
+              providerStatusCode: 400,
+              providerErrorBody: invalidSchemaBody,
+              providerErrorKind: "http_error"
+            }
+          },
+          analysis: {
+            ...baseResult.analysis!,
+            providerStatusCode: 400,
+            providerErrorBody: invalidSchemaBody,
+            providerErrorKind: "http_error"
+          },
+          analysisRenderMode: "raw_provider_error",
+          providerStatusCode: 400,
+          providerErrorBody: invalidSchemaBody,
+          providerErrorKind: "http_error"
+        })
+      } as never
+    );
+    const payload = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(payload.analysisRenderMode).toBe("raw_provider_error");
+    expect(String(payload.providerErrorBody)).toContain("invalid_json_schema");
+    expect(String(payload.message)).toContain("系统");
+    expect(String(payload.message)).toContain("格式");
+    expect(String(payload.message)).toContain("不是你的文件");
+  });
+
   it("returns 400 when the files never became model-ready inputs", async () => {
     saveTaskSummary({
       id: "task-input-not-ready",

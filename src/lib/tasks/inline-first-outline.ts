@@ -33,6 +33,10 @@ import {
   shouldUseSupabasePersistence
 } from "@/src/lib/persistence/runtime-mode";
 import { createSupabaseAdminClient } from "@/src/lib/supabase/admin";
+import {
+  isProviderRequestSchemaError,
+  PROVIDER_REQUEST_SCHEMA_INVALID
+} from "@/src/lib/tasks/provider-error";
 import type {
   TaskAnalysisRenderMode,
   TaskAnalysisSnapshot,
@@ -111,7 +115,7 @@ export async function runInlineFirstOutline(
       await markTaskAnalysisFailed({
         taskId: input.taskId,
         userId: input.userId,
-        reason: resolveFailureReason(renderMode),
+        reason: resolveFailureReason(analyzed.analysis, renderMode),
         analysisRetryCount: nextRetryCount,
         analysisRequestedAt: startedAt,
         analysisStartedAt: startedAt,
@@ -279,12 +283,24 @@ function buildClassificationFromTask(
   };
 }
 
-function resolveFailureReason(renderMode: TaskAnalysisRenderMode) {
+function resolveFailureReason(
+  analysis: TaskAnalysisSnapshot,
+  renderMode: TaskAnalysisRenderMode
+) {
   if (renderMode === "raw_model") {
     return MODEL_RAW_RESPONSE_ONLY;
   }
 
   if (renderMode === "raw_provider_error") {
+    if (
+      isProviderRequestSchemaError({
+        providerStatusCode: analysis.providerStatusCode,
+        providerErrorBody: analysis.providerErrorBody
+      })
+    ) {
+      return PROVIDER_REQUEST_SCHEMA_INVALID;
+    }
+
     return PROVIDER_HTTP_ERROR;
   }
 

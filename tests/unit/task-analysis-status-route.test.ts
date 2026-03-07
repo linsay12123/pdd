@@ -322,6 +322,68 @@ describe("task analysis status route", () => {
     expect(String(payload.message)).toContain("原始回复");
   });
 
+  it("labels persisted invalid_json_schema failures as system request-format bugs", async () => {
+    const providerErrorBody = JSON.stringify({
+      error: {
+        message:
+          "Invalid schema for response_format 'task_analysis_and_outline_result': missing required targetWordCount",
+        type: "invalid_request_error",
+        param: "text.format.schema",
+        code: "invalid_json_schema"
+      }
+    });
+
+    saveTaskSummary({
+      id: "task-invalid-json-schema",
+      userId: "user-1",
+      status: "created",
+      targetWordCount: null,
+      citationStyle: null,
+      specialRequirements: "",
+      analysisStatus: "failed",
+      analysisErrorMessage: "PROVIDER_HTTP_ERROR",
+      analysisSnapshot: {
+        chosenTaskFileId: null,
+        supportingFileIds: [],
+        ignoredFileIds: [],
+        needsUserConfirmation: false,
+        reasoning: "这次不是文件问题，是系统请求格式写错了。",
+        targetWordCount: 2000,
+        citationStyle: "APA 7",
+        topic: null,
+        chapterCount: null,
+        mustCover: [],
+        gradingFocus: [],
+        appliedSpecialRequirements: "",
+        usedDefaultWordCount: true,
+        usedDefaultCitationStyle: true,
+        warnings: [],
+        analysisRenderMode: "raw_provider_error",
+        rawModelResponse: null,
+        providerStatusCode: 400,
+        providerErrorBody,
+        providerErrorKind: "http_error"
+      }
+    });
+
+    const response = await handleTaskAnalysisStatusRequest(
+      new Request("http://localhost/api/tasks/task-invalid-json-schema/analysis"),
+      { taskId: "task-invalid-json-schema" },
+      {
+        isPersistenceReady: () => true,
+        requireUser: async () => makeUser()
+      }
+    );
+    const payload = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(payload.analysisRenderMode).toBe("raw_provider_error");
+    expect(payload.providerStatusCode).toBe(400);
+    expect(String(payload.providerErrorBody)).toContain("invalid_json_schema");
+    expect(String(payload.message)).toContain("系统");
+    expect(String(payload.message)).toContain("格式");
+  });
+
   it("keeps pending_version inside the startup grace window as pending", async () => {
     process.env.TRIGGER_SECRET_KEY = "tr_prod_example";
     process.env.VERCEL_ENV = "production";

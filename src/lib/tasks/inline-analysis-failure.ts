@@ -1,4 +1,8 @@
 import type { TaskAnalysisSnapshot } from "@/src/types/tasks";
+import {
+  isProviderRequestSchemaError,
+  PROVIDER_REQUEST_SCHEMA_INVALID
+} from "@/src/lib/tasks/provider-error";
 
 type InlineAnalysisFailureInfo = {
   code: string;
@@ -73,6 +77,21 @@ export function resolveInlineAnalysisFailure(
       code,
       status: 422,
       message: "模型这次已经回了原始回复，但还没有形成正式大纲。你可以先看原始回复，再决定是否重试。"
+    };
+  }
+
+  if (
+    code === PROVIDER_REQUEST_SCHEMA_INVALID ||
+    isProviderRequestSchemaError({
+      providerStatusCode: analysis?.providerStatusCode,
+      providerErrorBody: analysis?.providerErrorBody
+    })
+  ) {
+    return {
+      code: code || PROVIDER_REQUEST_SCHEMA_INVALID,
+      status: 400,
+      message:
+        "这次不是你的文件有问题，是系统发给上游接口的格式说明写错了。下面是原始报错。"
     };
   }
 

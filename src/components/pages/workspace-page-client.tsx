@@ -20,6 +20,7 @@ import {
 import { requestTaskAnalysisStatus } from "@/src/lib/tasks/request-task-analysis-status";
 import { requestTaskAnalysisRetry } from "@/src/lib/tasks/request-task-analysis-retry";
 import { getTaskAnalysisDisplayState } from "@/src/lib/tasks/analysis-render-mode";
+import { isProviderRequestSchemaError } from "@/src/lib/tasks/provider-error";
 import type {
   TaskWorkflowHumanizePayload,
   TaskWorkflowPayload
@@ -637,11 +638,16 @@ export function WorkspacePageClient({
   const providerStatusCode = analysisDisplay.providerStatusCode;
   const providerErrorBody = analysisDisplay.providerErrorBody;
   const providerErrorKind = analysisDisplay.providerErrorKind;
+  const isProviderSchemaError = isProviderRequestSchemaError({
+    providerStatusCode,
+    providerErrorBody
+  });
   const analysisStatus = activeTask?.analysisStatus ?? "pending";
   const failedAnalysisCard = getFailedAnalysisCard(
     activeTask?.message ?? null,
     analysisRenderMode,
-    providerErrorKind
+    providerErrorKind,
+    isProviderSchemaError
   );
   const analysisProgress = activeTask?.analysisProgress ?? {
     requestedAt: null,
@@ -934,7 +940,7 @@ export function WorkspacePageClient({
                     <div className="flex items-center justify-between mb-4 pb-4 border-b border-white/10">
                       <h2 className="text-xl font-bold text-cream-50 flex items-center gap-2">
                         <AlertCircle className="w-5 h-5 text-red-300" />
-                        上游接口原始报错
+                        {isProviderSchemaError ? "系统请求格式写错了" : "上游接口原始报错"}
                       </h2>
                       <span className="px-3 py-1 bg-red-500/10 text-red-200 text-xs rounded-full border border-red-500/20">
                         还不能继续正文
@@ -943,7 +949,9 @@ export function WorkspacePageClient({
 
                     <div className="space-y-4">
                       <p className="text-sm text-brand-700">
-                        这次不是程序把内容吞掉了，而是上游接口自己回了这段错误正文。下面按原样展示给你看。只要没有正式大纲，就不能继续正文写作。
+                        {isProviderSchemaError
+                          ? "这次不是你的文件问题，是系统发给上游接口的格式说明写错了。下面按原样展示报错。只要没有正式大纲，就不能继续正文写作。"
+                          : "这次不是程序把内容吞掉了，而是上游接口自己回了这段错误正文。下面按原样展示给你看。只要没有正式大纲，就不能继续正文写作。"}
                       </p>
 
                       <div className="rounded-xl border border-red-500/15 bg-brand-950/80 p-4 space-y-3">
@@ -955,19 +963,25 @@ export function WorkspacePageClient({
                         </pre>
                       </div>
 
-                      <div className="flex items-center gap-3">
-                        <Button
-                          variant="outline"
-                          onClick={() => void handleRetryAnalysis()}
-                          disabled={isRetryingAnalysis}
-                          className="border-red-400/30 text-red-200"
-                        >
-                          {isRetryingAnalysis ? "正在重试..." : "一键重试分析"}
-                        </Button>
-                        <span className="text-xs text-brand-700">
-                          不需要重新上传文件，系统会直接再跑一轮首版大纲。
-                        </span>
-                      </div>
+                      {isProviderSchemaError ? (
+                        <p className="text-xs text-brand-700">
+                          这类错误不是你反复点重试能解决的，要先把系统这边的请求格式修好。
+                        </p>
+                      ) : (
+                        <div className="flex items-center gap-3">
+                          <Button
+                            variant="outline"
+                            onClick={() => void handleRetryAnalysis()}
+                            disabled={isRetryingAnalysis}
+                            className="border-red-400/30 text-red-200"
+                          >
+                            {isRetryingAnalysis ? "正在重试..." : "一键重试分析"}
+                          </Button>
+                          <span className="text-xs text-brand-700">
+                            不需要重新上传文件，系统会直接再跑一轮首版大纲。
+                          </span>
+                        </div>
+                      )}
                     </div>
                   </div>
                 ) : analysisStatus === "failed" ? (
@@ -1477,9 +1491,17 @@ function deriveInitialStep(task: WorkspaceTaskState | null) {
 function getFailedAnalysisCard(
   message: string | null,
   analysisRenderMode: WorkspaceTaskState["analysisRenderMode"] | null,
-  providerErrorKind: WorkspaceTaskState["providerErrorKind"] | null
+  providerErrorKind: WorkspaceTaskState["providerErrorKind"] | null,
+  isProviderSchemaError = false
 ) {
   const normalized = message?.trim() || "";
+
+  if (isProviderSchemaError) {
+    return {
+      title: "系统请求格式写错了",
+      body: "这次不是你的文件问题，是系统发给上游接口的格式说明写错了。下面会继续展示原始报错，等系统修好后再试。"
+    };
+  }
 
   if (analysisRenderMode === "system_error") {
     return {
