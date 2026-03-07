@@ -1,8 +1,11 @@
 import {
   analyzeUploadedTaskWithOpenAI,
-  MODEL_RAW_RESPONSE_ONLY
+  MODEL_RAW_RESPONSE_ONLY,
+  PROVIDER_HTTP_ERROR,
+  PROVIDER_TRANSPORT_ERROR
 } from "@/src/lib/ai/services/analyze-uploaded-task";
 import { requireFormalPersistence, shouldUseSupabasePersistence } from "@/src/lib/persistence/runtime-mode";
+import { resolveTaskAnalysisRenderMode } from "@/src/lib/tasks/analysis-render-mode";
 import {
   getOwnedTaskSummary,
   listTaskFilesForModel,
@@ -70,7 +73,8 @@ export async function runAnalyzeUploadedTaskPipeline(
       "MODEL_ANALYSIS_TIMEOUT"
     );
 
-    if (analyzed.analysis.analysisRenderMode === "raw") {
+    const analysisRenderMode = resolveTaskAnalysisRenderMode(analyzed.analysis);
+    if (analysisRenderMode && analysisRenderMode !== "structured") {
       await persistTaskPartialModelAnalysis({
         taskId: input.taskId,
         userId: input.userId,
@@ -80,7 +84,12 @@ export async function runAnalyzeUploadedTaskPipeline(
       await markTaskAnalysisFailed({
         taskId: input.taskId,
         userId: input.userId,
-        reason: MODEL_RAW_RESPONSE_ONLY
+        reason:
+          analysisRenderMode === "raw_model"
+            ? MODEL_RAW_RESPONSE_ONLY
+            : analysisRenderMode === "raw_provider_error"
+              ? PROVIDER_HTTP_ERROR
+              : PROVIDER_TRANSPORT_ERROR
       });
 
       return {

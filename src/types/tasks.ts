@@ -18,7 +18,13 @@ export type TaskHumanizeStatus =
   | "completed"
   | "failed";
 
-export type TaskAnalysisRenderMode = "structured" | "raw";
+export type TaskProviderErrorKind = "http_error" | "transport_error" | "timeout";
+
+export type TaskAnalysisRenderMode =
+  | "structured"
+  | "raw_model"
+  | "raw_provider_error"
+  | "system_error";
 
 export type TaskAnalysisSnapshot = {
   chosenTaskFileId: string | null;
@@ -38,6 +44,9 @@ export type TaskAnalysisSnapshot = {
   warnings: string[];
   analysisRenderMode?: TaskAnalysisRenderMode | null;
   rawModelResponse?: string | null;
+  providerStatusCode?: number | null;
+  providerErrorBody?: string | null;
+  providerErrorKind?: TaskProviderErrorKind | null;
 };
 
 export type TaskSummary = {

@@ -65,7 +65,10 @@ function makeSucceededInlineResult(
         usedDefaultCitationStyle: false,
         warnings: [],
         analysisRenderMode: "structured",
-        rawModelResponse: null
+        rawModelResponse: null,
+        providerStatusCode: null,
+        providerErrorBody: null,
+        providerErrorKind: null
       },
       latestOutlineVersionId: "outline-1"
     },
@@ -123,10 +126,16 @@ function makeSucceededInlineResult(
       usedDefaultCitationStyle: false,
       warnings: [],
       analysisRenderMode: "structured",
-      rawModelResponse: null
+      rawModelResponse: null,
+      providerStatusCode: null,
+      providerErrorBody: null,
+      providerErrorKind: null
     },
     analysisRenderMode: "structured",
     rawModelResponse: null,
+    providerStatusCode: null,
+    providerErrorBody: null,
+    providerErrorKind: null,
     ruleCard: {
       topic: "Finance Risk Management",
       targetWordCount: 1800,
@@ -205,8 +214,11 @@ function makeRawInlineResult(
         usedDefaultWordCount: true,
         usedDefaultCitationStyle: true,
         warnings: [],
-        analysisRenderMode: "raw",
-        rawModelResponse
+        analysisRenderMode: "raw_model",
+        rawModelResponse,
+        providerStatusCode: null,
+        providerErrorBody: null,
+        providerErrorKind: null
       }
     },
     analysisStatus: "failed",
@@ -226,11 +238,97 @@ function makeRawInlineResult(
       usedDefaultWordCount: true,
       usedDefaultCitationStyle: true,
       warnings: [],
-      analysisRenderMode: "raw",
-      rawModelResponse
+      analysisRenderMode: "raw_model",
+      rawModelResponse,
+      providerStatusCode: null,
+      providerErrorBody: null,
+      providerErrorKind: null
     },
-    analysisRenderMode: "raw",
+    analysisRenderMode: "raw_model",
     rawModelResponse,
+    providerStatusCode: null,
+    providerErrorBody: null,
+    providerErrorKind: null,
+    ruleCard: null,
+    outline: null,
+    ...overrides
+  };
+}
+
+function makeProviderErrorInlineResult(
+  overrides: Partial<InlineFirstOutlineResult> = {}
+): InlineFirstOutlineResult {
+  const providerErrorBody = '{"error":{"message":"bad gateway from upstream"}}';
+
+  return {
+    ...makeSucceededInlineResult(),
+    task: {
+      id: "task-provider-error",
+      status: "created",
+      targetWordCount: null,
+      citationStyle: null,
+      specialRequirements: "Focus on finance."
+    },
+    taskSummary: {
+      ...makeSucceededInlineResult().taskSummary,
+      id: "task-provider-error",
+      status: "created",
+      targetWordCount: null,
+      citationStyle: null,
+      analysisStatus: "failed",
+      analysisErrorMessage: "PROVIDER_HTTP_ERROR",
+      latestOutlineVersionId: null,
+      analysisSnapshot: {
+        chosenTaskFileId: null,
+        supportingFileIds: [],
+        ignoredFileIds: [],
+        needsUserConfirmation: false,
+        reasoning: "上游接口返回了错误正文。",
+        targetWordCount: 2000,
+        citationStyle: "APA 7",
+        topic: null,
+        chapterCount: null,
+        mustCover: [],
+        gradingFocus: [],
+        appliedSpecialRequirements: "Focus on finance.",
+        usedDefaultWordCount: true,
+        usedDefaultCitationStyle: true,
+        warnings: [],
+        analysisRenderMode: "raw_provider_error",
+        rawModelResponse: null,
+        providerStatusCode: 502,
+        providerErrorBody,
+        providerErrorKind: "http_error"
+      }
+    },
+    analysisStatus: "failed",
+    analysis: {
+      chosenTaskFileId: null,
+      supportingFileIds: [],
+      ignoredFileIds: [],
+      needsUserConfirmation: false,
+      reasoning: "上游接口返回了错误正文。",
+      targetWordCount: 2000,
+      citationStyle: "APA 7",
+      topic: null,
+      chapterCount: null,
+      mustCover: [],
+      gradingFocus: [],
+      appliedSpecialRequirements: "Focus on finance.",
+      usedDefaultWordCount: true,
+      usedDefaultCitationStyle: true,
+      warnings: [],
+      analysisRenderMode: "raw_provider_error",
+      rawModelResponse: null,
+      providerStatusCode: 502,
+      providerErrorBody,
+      providerErrorKind: "http_error"
+    },
+    analysisRenderMode: "raw_provider_error",
+    rawModelResponse: null,
+    providerStatusCode: 502,
+    providerErrorBody,
+    providerErrorKind: "http_error",
     ruleCard: null,
     outline: null,
     ...overrides
@@ -404,10 +502,63 @@ describe("task file first-outline routes", () => {
 
     expect(response.status).toBe(422);
     expect(payload.analysisStatus).toBe("failed");
-    expect(payload.analysisRenderMode).toBe("raw");
+    expect(payload.analysisRenderMode).toBe("raw_model");
     expect(String(payload.rawModelResponse)).toContain("Suggested structure");
     expect(String(payload.message)).toContain("原始回复");
     expect(payload.outline).toBeNull();
+  });
+
+  it("returns the upstream raw error body after upload when the provider itself sends back an error response", async () => {
+    saveTaskSummary({
+      id: "task-provider-error",
+      userId: "user-1",
+      status: "created",
+      targetWordCount: null,
+      citationStyle: null,
+      specialRequirements: "Focus on finance."
+    });
+
+    const formData = new FormData();
+    formData.append(
+      "files",
+      new File(["Assignment brief text."], "assignment.txt", { type: "text/plain" })
+    );
+
+    const response = await handleTaskFileUploadRequest(
+      new Request("http://localhost/api/tasks/task-provider-error/files", {
+        method: "POST",
+        body: formData
+      }),
+      { taskId: "task-provider-error" },
+      {
+        isPersistenceReady: () => true,
+        requireUser: async () => makeUser(),
+        runInlineFirstOutline: vi.fn().mockResolvedValue(
+          makeProviderErrorInlineResult({
+            task: {
+              id: "task-provider-error",
+              status: "created",
+              targetWordCount: null,
+              citationStyle: null,
+              specialRequirements: "Focus on finance."
+            },
+            taskSummary: {
+              ...makeProviderErrorInlineResult().taskSummary,
+              id: "task-provider-error",
+              specialRequirements: "Focus on finance."
+            }
+          })
+        )
+      } as never
+    );
+    const payload = await response.json();
+
+    expect(response.status).toBe(502);
+    expect(payload.analysisStatus).toBe("failed");
+    expect(payload.analysisRenderMode).toBe("raw_provider_error");
+    expect(payload.providerStatusCode).toBe(502);
+    expect(String(payload.providerErrorBody)).toContain("bad gateway from upstream");
+    expect(String(payload.message)).toContain("原始回复");
   });
 
   it("returns 400 when the files never became model-ready inputs", async () => {
@@ -595,7 +746,7 @@ describe("task file first-outline routes", () => {
     expect(response.status).toBe(422);
     expect(payload.analysisStatus).toBe("failed");
     expect(payload.primaryRequirementFileId).toBe("file-1");
-    expect(payload.analysisRenderMode).toBe("raw");
+    expect(payload.analysisRenderMode).toBe("raw_model");
     expect(String(payload.rawModelResponse)).toContain("Suggested structure");
     expect(runInlineFirstOutline).toHaveBeenCalledWith(
       expect.objectContaining({

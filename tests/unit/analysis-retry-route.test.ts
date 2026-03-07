@@ -62,7 +62,10 @@ function makeSucceededInlineResult(
         usedDefaultCitationStyle: false,
         warnings: [],
         analysisRenderMode: "structured",
-        rawModelResponse: null
+        rawModelResponse: null,
+        providerStatusCode: null,
+        providerErrorBody: null,
+        providerErrorKind: null
       },
       latestOutlineVersionId: "outline-1",
       primaryRequirementFileId: "file-1"
@@ -121,10 +124,16 @@ function makeSucceededInlineResult(
       usedDefaultCitationStyle: false,
       warnings: [],
       analysisRenderMode: "structured",
-      rawModelResponse: null
+      rawModelResponse: null,
+      providerStatusCode: null,
+      providerErrorBody: null,
+      providerErrorKind: null
     },
     analysisRenderMode: "structured",
     rawModelResponse: null,
+    providerStatusCode: null,
+    providerErrorBody: null,
+    providerErrorKind: null,
     ruleCard: {
       topic: "Finance Risk Management",
       targetWordCount: 1800,
@@ -204,8 +213,11 @@ function makeRawInlineResult(
         usedDefaultWordCount: true,
         usedDefaultCitationStyle: true,
         warnings: [],
-        analysisRenderMode: "raw",
-        rawModelResponse
+        analysisRenderMode: "raw_model",
+        rawModelResponse,
+        providerStatusCode: null,
+        providerErrorBody: null,
+        providerErrorKind: null
       }
     },
     analysisStatus: "failed",
@@ -225,11 +237,98 @@ function makeRawInlineResult(
       usedDefaultWordCount: true,
       usedDefaultCitationStyle: true,
       warnings: [],
-      analysisRenderMode: "raw",
-      rawModelResponse
+      analysisRenderMode: "raw_model",
+      rawModelResponse,
+      providerStatusCode: null,
+      providerErrorBody: null,
+      providerErrorKind: null
     },
-    analysisRenderMode: "raw",
+    analysisRenderMode: "raw_model",
     rawModelResponse,
+    providerStatusCode: null,
+    providerErrorBody: null,
+    providerErrorKind: null,
+    ruleCard: null,
+    outline: null,
+    ...overrides
+  };
+}
+
+function makeProviderErrorInlineResult(
+  overrides: Partial<InlineFirstOutlineResult> = {}
+): InlineFirstOutlineResult {
+  const providerErrorBody = '{"error":{"message":"retry path still got bad gateway"}}';
+
+  return {
+    ...makeSucceededInlineResult(),
+    task: {
+      id: "task-retry-provider-error",
+      status: "created",
+      targetWordCount: null,
+      citationStyle: null,
+      specialRequirements: ""
+    },
+    taskSummary: {
+      ...makeSucceededInlineResult().taskSummary,
+      id: "task-retry-provider-error",
+      status: "created",
+      targetWordCount: null,
+      citationStyle: null,
+      specialRequirements: "",
+      analysisStatus: "failed",
+      analysisErrorMessage: "PROVIDER_HTTP_ERROR",
+      latestOutlineVersionId: null,
+      analysisSnapshot: {
+        chosenTaskFileId: "file-1",
+        supportingFileIds: [],
+        ignoredFileIds: [],
+        needsUserConfirmation: false,
+        reasoning: "上游接口返回了错误正文。",
+        targetWordCount: 2000,
+        citationStyle: "APA 7",
+        topic: null,
+        chapterCount: null,
+        mustCover: [],
+        gradingFocus: [],
+        appliedSpecialRequirements: "",
+        usedDefaultWordCount: true,
+        usedDefaultCitationStyle: true,
+        warnings: [],
+        analysisRenderMode: "raw_provider_error",
+        rawModelResponse: null,
+        providerStatusCode: 502,
+        providerErrorBody,
+        providerErrorKind: "http_error"
+      }
+    },
+    analysisStatus: "failed",
+    analysis: {
+      chosenTaskFileId: "file-1",
+      supportingFileIds: [],
+      ignoredFileIds: [],
+      needsUserConfirmation: false,
+      reasoning: "上游接口返回了错误正文。",
+      targetWordCount: 2000,
+      citationStyle: "APA 7",
+      topic: null,
+      chapterCount: null,
+      mustCover: [],
+      gradingFocus: [],
+      appliedSpecialRequirements: "",
+      usedDefaultWordCount: true,
+      usedDefaultCitationStyle: true,
+      warnings: [],
+      analysisRenderMode: "raw_provider_error",
+      rawModelResponse: null,
+      providerStatusCode: 502,
+      providerErrorBody,
+      providerErrorKind: "http_error"
+    },
+    analysisRenderMode: "raw_provider_error",
+    rawModelResponse: null,
+    providerStatusCode: 502,
+    providerErrorBody,
+    providerErrorKind: "http_error",
     ruleCard: null,
     outline: null,
     ...overrides
@@ -423,10 +522,73 @@ describe("analysis retry route", () => {
 
     expect(response.status).toBe(422);
     expect(payload.analysisStatus).toBe("failed");
-    expect(payload.analysisRenderMode).toBe("raw");
+    expect(payload.analysisRenderMode).toBe("raw_model");
     expect(String(payload.rawModelResponse)).toContain("Suggested structure");
     expect(String(payload.message)).toContain("原始回复");
     expect(payload.outline).toBeNull();
+  });
+
+  it("returns the upstream raw error body when retry still hits an upstream http error", async () => {
+    saveTaskSummary({
+      id: "task-retry-provider-error",
+      userId: "user-1",
+      status: "created",
+      targetWordCount: null,
+      citationStyle: null,
+      specialRequirements: "",
+      analysisStatus: "failed",
+      analysisErrorMessage: "PROVIDER_HTTP_ERROR"
+    });
+
+    saveTaskFileRecords([
+      {
+        id: "file-1",
+        taskId: "task-retry-provider-error",
+        userId: "user-1",
+        originalFilename: "brief.txt",
+        storagePath: "tmp/brief.txt",
+        extractedText: "brief",
+        role: "unknown",
+        isPrimary: false,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      }
+    ]);
+
+    const response = await handleTaskAnalysisRetryRequest(
+      new Request("http://localhost/api/tasks/task-retry-provider-error/analysis/retry", {
+        method: "POST"
+      }),
+      { taskId: "task-retry-provider-error" },
+      {
+        isPersistenceReady: () => true,
+        requireUser: async () => makeUser(),
+        runInlineFirstOutline: vi.fn().mockResolvedValue(
+          makeProviderErrorInlineResult({
+            task: {
+              id: "task-retry-provider-error",
+              status: "created",
+              targetWordCount: null,
+              citationStyle: null,
+              specialRequirements: ""
+            },
+            taskSummary: {
+              ...makeProviderErrorInlineResult().taskSummary,
+              id: "task-retry-provider-error",
+              specialRequirements: ""
+            }
+          })
+        )
+      } as never
+    );
+    const payload = await response.json();
+
+    expect(response.status).toBe(502);
+    expect(payload.analysisStatus).toBe("failed");
+    expect(payload.analysisRenderMode).toBe("raw_provider_error");
+    expect(payload.providerStatusCode).toBe(502);
+    expect(String(payload.providerErrorBody)).toContain("retry path still got bad gateway");
+    expect(String(payload.message)).toContain("原始回复");
   });
 
   it("rejects retry when there are no uploaded files", async () => {

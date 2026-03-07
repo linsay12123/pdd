@@ -1,9 +1,15 @@
 import type { OutlineScaffold } from "@/src/lib/ai/prompts/generate-outline";
 import {
   analyzeUploadedTaskWithOpenAI,
-  MODEL_RAW_RESPONSE_ONLY
+  MODEL_RAW_RESPONSE_ONLY,
+  PROVIDER_HTTP_ERROR,
+  PROVIDER_TRANSPORT_ERROR
 } from "@/src/lib/ai/services/analyze-uploaded-task";
 import { buildAnalysisProgressPayload } from "@/src/lib/tasks/analysis-progress";
+import {
+  getTaskAnalysisDisplayState,
+  resolveTaskAnalysisRenderMode
+} from "@/src/lib/tasks/analysis-render-mode";
 import type {
   TaskWorkflowAnalysisRuntimePayload,
   TaskWorkflowClassificationPayload,
@@ -30,6 +36,7 @@ import { createSupabaseAdminClient } from "@/src/lib/supabase/admin";
 import type {
   TaskAnalysisRenderMode,
   TaskAnalysisSnapshot,
+  TaskProviderErrorKind,
   TaskFileRecord,
   TaskSummary
 } from "@/src/types/tasks";
@@ -47,6 +54,9 @@ export type InlineFirstOutlineResult = {
   analysis: TaskAnalysisSnapshot | null;
   analysisRenderMode: TaskAnalysisRenderMode | null;
   rawModelResponse: string | null;
+  providerStatusCode: number | null;
+  providerErrorBody: string | null;
+  providerErrorKind: TaskProviderErrorKind | null;
   ruleCard: TaskWorkflowRuleCardPayload | null;
   outline: OutlineScaffold | null;
   humanize: ReturnType<typeof toSessionTaskHumanizePayload>;
@@ -84,7 +94,8 @@ export async function runInlineFirstOutline(
       forcedPrimaryFileId: input.forcedPrimaryFileId ?? null
     });
 
-    if (resolveAnalysisRenderMode(analyzed.analysis) === "raw") {
+    const renderMode = resolveTaskAnalysisRenderMode(analyzed.analysis);
+    if (renderMode && renderMode !== "structured") {
       await persistTaskPartialModelAnalysis({
         taskId: input.taskId,
         userId: input.userId,
@@ -100,7 +111,7 @@ export async function runInlineFirstOutline(
       await markTaskAnalysisFailed({
         taskId: input.taskId,
         userId: input.userId,
-        reason: MODEL_RAW_RESPONSE_ONLY,
+        reason: resolveFailureReason(renderMode),
         analysisRetryCount: nextRetryCount,
         analysisRequestedAt: startedAt,
         analysisStartedAt: startedAt,
@@ -176,8 +187,15 @@ export async function runInlineFirstOutline(
 
   const files = await listTaskFilesForWorkflow(input.taskId, input.userId);
   const analysis = taskAfterRun.analysisSnapshot ?? null;
-  const analysisRenderMode = resolveAnalysisRenderMode(analysis);
-  const rawModelResponse = analysis?.rawModelResponse?.trim() || null;
+  const {
+    analysisRenderMode,
+    rawModelResponse,
+    providerStatusCode,
+    providerErrorBody,
+    providerErrorKind
+  } = getTaskAnalysisDisplayState({
+    analysis
+  });
   const analysisStatus = taskAfterRun.analysisStatus === "succeeded" ? "succeeded" : "failed";
   const analysisProgress = buildAnalysisProgressPayload({
     status: analysisStatus,
@@ -207,6 +225,9 @@ export async function runInlineFirstOutline(
     analysis,
     analysisRenderMode,
     rawModelResponse,
+    providerStatusCode,
+    providerErrorBody,
+    providerErrorKind,
     ruleCard:
       analysisStatus === "succeeded" &&
       analysis &&
@@ -242,11 +263,7 @@ function resolveAnalysisRenderMode(
     return null;
   }
 
-  if (analysis.analysisRenderMode === "raw" || analysis.analysisRenderMode === "structured") {
-    return analysis.analysisRenderMode;
-  }
-
-  return analysis.rawModelResponse?.trim() ? "raw" : "structured";
+  return resolveTaskAnalysisRenderMode(analysis);
 }
 
 function buildClassificationFromTask(
@@ -260,6 +277,18 @@ function buildClassificationFromTask(
     needsUserConfirmation: analysis?.needsUserConfirmation ?? false,
     reasoning: analysis?.reasoning ?? "系统已经完成这轮分析。"
   };
+}
+
+function resolveFailureReason(renderMode: TaskAnalysisRenderMode) {
+  if (renderMode === "raw_model") {
+    return MODEL_RAW_RESPONSE_ONLY;
+  }
+
+  if (renderMode === "raw_provider_error") {
+    return PROVIDER_HTTP_ERROR;
+  }
+
+  return PROVIDER_TRANSPORT_ERROR;
 }
 
 function buildRuleCardFromAnalysis(

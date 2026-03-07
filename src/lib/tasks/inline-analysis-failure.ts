@@ -76,11 +76,22 @@ export function resolveInlineAnalysisFailure(
     };
   }
 
-  if (code === "MODEL_ANALYSIS_TIMEOUT") {
+  if (code === "PROVIDER_HTTP_ERROR") {
+    return {
+      code,
+      status:
+        typeof analysis?.providerStatusCode === "number" && Number.isFinite(analysis.providerStatusCode)
+          ? analysis.providerStatusCode
+          : 502,
+      message: "上游接口返回了错误，下面是原始回复。"
+    };
+  }
+
+  if (code === "PROVIDER_TRANSPORT_ERROR" || code === "MODEL_ANALYSIS_TIMEOUT") {
     return {
       code,
       status: 502,
-      message: "模型这次处理时间太长，请稍后再试。"
+      message: "上游接口这次没有返回可展示正文，请稍后再试。"
     };
   }
 
@@ -91,7 +102,7 @@ export function resolveInlineAnalysisFailure(
     return {
       code,
       status: 502,
-      message: "模型服务这次不稳定，请稍后再试。"
+      message: "上游接口这次没有返回可展示正文，请稍后再试。"
     };
   }
 

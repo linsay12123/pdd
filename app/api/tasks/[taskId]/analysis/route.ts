@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { requireCurrentSessionUser } from "@/src/lib/auth/current-user";
 import type { TaskWorkflowClassificationPayload } from "@/src/lib/tasks/request-task-file-upload";
 import { buildAnalysisProgressPayload } from "@/src/lib/tasks/analysis-progress";
+import { getTaskAnalysisDisplayState } from "@/src/lib/tasks/analysis-render-mode";
 import { resolveInlineAnalysisFailure } from "@/src/lib/tasks/inline-analysis-failure";
 import {
   getOwnedTaskSummary,
@@ -133,15 +134,9 @@ export async function handleTaskAnalysisStatusRequest(
       analysisStatus === "succeeded" && analysis && !analysis.needsUserConfirmation
         ? buildRuleCardFromAnalysis(analysis, outline)
         : null;
-    const analysisRenderMode =
-      analysis?.analysisRenderMode === "raw" || analysis?.analysisRenderMode === "structured"
-        ? analysis.analysisRenderMode
-        : analysis?.rawModelResponse?.trim()
-          ? "raw"
-          : analysis
-            ? "structured"
-            : null;
-    const rawModelResponse = analysis?.rawModelResponse?.trim() || null;
+    const analysisDisplay = getTaskAnalysisDisplayState({
+      analysis
+    });
 
     const classification = buildClassificationFromTask(task.primaryRequirementFileId ?? null, analysis);
 
@@ -163,8 +158,11 @@ export async function handleTaskAnalysisStatusRequest(
         analysisProgress,
         analysisRuntime,
         analysis,
-        analysisRenderMode,
-        rawModelResponse,
+        analysisRenderMode: analysisDisplay.analysisRenderMode,
+        rawModelResponse: analysisDisplay.rawModelResponse,
+        providerStatusCode: analysisDisplay.providerStatusCode,
+        providerErrorBody: analysisDisplay.providerErrorBody,
+        providerErrorKind: analysisDisplay.providerErrorKind,
         ruleCard,
         outline: analysisStatus === "succeeded" ? outline : null,
         humanize: toSessionTaskHumanizePayload(task),

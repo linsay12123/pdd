@@ -4,6 +4,7 @@ import {
   buildAnalysisProgressPayload,
   type AnalysisStatus
 } from "@/src/lib/tasks/analysis-progress";
+import { getTaskAnalysisDisplayState } from "@/src/lib/tasks/analysis-render-mode";
 import { resolveInlineAnalysisFailure } from "@/src/lib/tasks/inline-analysis-failure";
 import { runInlineFirstOutline } from "@/src/lib/tasks/inline-first-outline";
 import {
@@ -99,6 +100,10 @@ export async function handleTaskAnalysisRetryRequest(
         completedAt: task.analysisCompletedAt ?? null
       });
 
+      const currentAnalysisDisplay = getTaskAnalysisDisplayState({
+        analysis: task.analysisSnapshot ?? null
+      });
+
       return NextResponse.json(
         {
           ok: true,
@@ -124,8 +129,11 @@ export async function handleTaskAnalysisRetryRequest(
             runId: currentRunId
           },
           analysis: task.analysisSnapshot ?? null,
-          analysisRenderMode: task.analysisSnapshot?.analysisRenderMode ?? null,
-          rawModelResponse: task.analysisSnapshot?.rawModelResponse?.trim() || null,
+          analysisRenderMode: currentAnalysisDisplay.analysisRenderMode,
+          rawModelResponse: currentAnalysisDisplay.rawModelResponse,
+          providerStatusCode: currentAnalysisDisplay.providerStatusCode,
+          providerErrorBody: currentAnalysisDisplay.providerErrorBody,
+          providerErrorKind: currentAnalysisDisplay.providerErrorKind,
           ruleCard: null,
           outline: null,
           humanize: toSessionTaskHumanizePayload(task),
@@ -163,6 +171,9 @@ export async function handleTaskAnalysisRetryRequest(
       analysis: result.analysis,
       analysisRenderMode: result.analysisRenderMode,
       rawModelResponse: result.rawModelResponse,
+      providerStatusCode: result.providerStatusCode,
+      providerErrorBody: result.providerErrorBody,
+      providerErrorKind: result.providerErrorKind,
       ruleCard: result.ruleCard,
       outline: result.outline,
       humanize: result.humanize,

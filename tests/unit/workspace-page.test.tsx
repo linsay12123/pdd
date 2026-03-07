@@ -75,11 +75,17 @@ describe("WorkspacePage", () => {
             usedDefaultWordCount: true,
             usedDefaultCitationStyle: true,
             warnings: [],
-            analysisRenderMode: "raw",
-            rawModelResponse: "Suggested structure:\n1. Introduction\n2. Governance framework"
+            analysisRenderMode: "raw_model",
+            rawModelResponse: "Suggested structure:\n1. Introduction\n2. Governance framework",
+            providerStatusCode: null,
+            providerErrorBody: null,
+            providerErrorKind: null
           },
-          analysisRenderMode: "raw",
+          analysisRenderMode: "raw_model",
           rawModelResponse: "Suggested structure:\n1. Introduction\n2. Governance framework",
+          providerStatusCode: null,
+          providerErrorBody: null,
+          providerErrorKind: null,
           ruleCard: null,
           outline: null,
           humanize: {
@@ -101,7 +107,7 @@ describe("WorkspacePage", () => {
     expect(html).not.toContain("确认大纲并生成正文");
   });
 
-  it("shows a dedicated upstream model outage card instead of the old generic failure card", () => {
+  it("shows the upstream raw error body when the provider returns an http error body", () => {
     const html = renderToStaticMarkup(
       <WorkspacePageClient
         initialQuota={1500}
@@ -135,9 +141,33 @@ describe("WorkspacePage", () => {
             autoRecovered: false,
             runId: null
           },
-          analysis: null,
-          analysisRenderMode: null,
+          analysis: {
+            chosenTaskFileId: null,
+            supportingFileIds: [],
+            ignoredFileIds: [],
+            needsUserConfirmation: false,
+            reasoning: "上游接口返回了错误正文。",
+            targetWordCount: 2000,
+            citationStyle: "APA 7",
+            topic: null,
+            chapterCount: null,
+            mustCover: [],
+            gradingFocus: [],
+            appliedSpecialRequirements: "",
+            usedDefaultWordCount: true,
+            usedDefaultCitationStyle: true,
+            warnings: [],
+            analysisRenderMode: "raw_provider_error",
+            rawModelResponse: null,
+            providerStatusCode: 502,
+            providerErrorBody: '{"error":{"message":"bad gateway from upstream"}}',
+            providerErrorKind: "http_error"
+          },
+          analysisRenderMode: "raw_provider_error",
           rawModelResponse: null,
+          providerStatusCode: 502,
+          providerErrorBody: '{"error":{"message":"bad gateway from upstream"}}',
+          providerErrorKind: "http_error",
           ruleCard: null,
           outline: null,
           humanize: {
@@ -147,15 +177,96 @@ describe("WorkspacePage", () => {
             completedAt: null,
             errorMessage: null
           },
-          message: "模型服务这次不稳定，请稍后再试。"
+          message: "上游接口返回了错误，下面是原始回复。"
         } as any}
       />
     );
 
-    expect(html).toContain("模型服务这次不稳定");
-    expect(html).toContain("请稍后再试");
+    expect(html).toContain("上游接口原始报错");
+    expect(html).toContain("HTTP 502");
+    expect(html).toContain("bad gateway from upstream");
     expect(html).toContain("一键重试分析");
-    expect(html).not.toContain("系统没能完成这次分析");
+    expect(html).not.toContain("确认大纲并生成正文");
+  });
+
+  it("falls back to the generic system error card when the provider failed without any raw body", () => {
+    const html = renderToStaticMarkup(
+      <WorkspacePageClient
+        initialQuota={1500}
+        initialActiveTask={{
+          task: {
+            id: "task-provider-timeout",
+            status: "created",
+            targetWordCount: null,
+            citationStyle: null,
+            specialRequirements: ""
+          },
+          files: [],
+          classification: {
+            primaryRequirementFileId: null,
+            needsUserConfirmation: false,
+            reasoning: "上游接口这次没有返回可展示正文。"
+          },
+          analysisStatus: "failed",
+          analysisProgress: {
+            requestedAt: null,
+            startedAt: null,
+            completedAt: null,
+            elapsedSeconds: 0,
+            maxWaitSeconds: 600,
+            canRetry: true
+          },
+          analysisRuntime: {
+            state: "not_applicable",
+            status: null,
+            detail: "首版大纲这一步已经在当前请求里直接完成，不再走后台排队。",
+            autoRecovered: false,
+            runId: null
+          },
+          analysis: {
+            chosenTaskFileId: null,
+            supportingFileIds: [],
+            ignoredFileIds: [],
+            needsUserConfirmation: false,
+            reasoning: "上游接口这次没有返回可展示正文。",
+            targetWordCount: 2000,
+            citationStyle: "APA 7",
+            topic: null,
+            chapterCount: null,
+            mustCover: [],
+            gradingFocus: [],
+            appliedSpecialRequirements: "",
+            usedDefaultWordCount: true,
+            usedDefaultCitationStyle: true,
+            warnings: [],
+            analysisRenderMode: "system_error",
+            rawModelResponse: null,
+            providerStatusCode: null,
+            providerErrorBody: null,
+            providerErrorKind: "timeout"
+          },
+          analysisRenderMode: "system_error",
+          rawModelResponse: null,
+          providerStatusCode: null,
+          providerErrorBody: null,
+          providerErrorKind: "timeout",
+          ruleCard: null,
+          outline: null,
+          humanize: {
+            status: "idle",
+            provider: "undetectable",
+            requestedAt: null,
+            completedAt: null,
+            errorMessage: null
+          },
+          message: "上游接口这次没有返回可展示正文，请稍后再试。"
+        } as any}
+      />
+    );
+
+    expect(html).toContain("上游接口这次没有返回可展示正文");
+    expect(html).toContain("一键重试分析");
+    expect(html).not.toContain("HTTP 502");
   });
 
   it("shows a dedicated file-not-ready card when files never reached the model", () => {

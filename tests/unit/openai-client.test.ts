@@ -104,14 +104,25 @@ describe("openai client", () => {
       text: async () => '{"error":{"message":"bad input"}}'
     });
 
-    await expect(
-      requestOpenAITextResponse({
+    try {
+      await requestOpenAITextResponse({
         input: "bad",
         apiKey: "test-key",
         fetchImpl: fetchSpy as typeof fetch,
         maxAttempts: 1
-      })
-    ).rejects.toThrow("bad input");
+      });
+      throw new Error("expected requestOpenAITextResponse to throw");
+    } catch (error) {
+      const providerError = error as Error & {
+        providerStatusCode?: number;
+        providerErrorBody?: string;
+        providerErrorKind?: string;
+      };
+      expect(providerError.message).toContain("bad input");
+      expect(providerError.providerStatusCode).toBe(400);
+      expect(providerError.providerErrorBody).toContain("bad input");
+      expect(providerError.providerErrorKind).toBe("http_error");
+    }
   });
 
   it("times out and retries according to maxAttempts", async () => {

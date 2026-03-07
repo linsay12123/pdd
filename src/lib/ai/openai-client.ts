@@ -1,5 +1,6 @@
 import "server-only";
 import { env } from "@/src/config/env";
+import type { TaskProviderErrorKind } from "@/src/types/tasks";
 
 export const defaultOpenAIModel = "gpt-5.2";
 
@@ -22,6 +23,14 @@ type OpenAITextResponse = {
   output_text: string;
   raw?: Record<string, unknown>;
 };
+
+export type OpenAIRequestError = Error & {
+  providerStatusCode?: number | null;
+  providerErrorBody?: string | null;
+  providerErrorKind?: TaskProviderErrorKind | null;
+};
+
+const MAX_ERROR_BODY_LENGTH = 2_000;
 
 export async function requestOpenAITextResponse({
   input,
@@ -85,10 +94,15 @@ export async function requestOpenAITextResponse({
 
       if (!response.ok) {
         const bodyText = await safeReadResponseBody(response);
-        const error = new Error(
+        const error = createOpenAIRequestError(
           bodyText
             ? `OpenAI request failed with status ${response.status}: ${bodyText}`
-            : `OpenAI request failed with status ${response.status}`
+            : `OpenAI request failed with status ${response.status}`,
+          {
+            providerStatusCode: response.status,
+            providerErrorBody: bodyText || null,
+            providerErrorKind: "http_error"
+          }
         );
 
         if (!isRetryableStatus(response.status) || attempt >= Math.max(1, maxAttempts)) {
@@ -151,7 +165,7 @@ async function safeReadResponseBody(response: Response) {
     if (!normalized) {
       return "";
     }
-    return normalized.slice(0, 500);
+    return normalized.slice(0, MAX_ERROR_BODY_LENGTH);
   } catch {
     return "";
   }
@@ -172,11 +186,53 @@ function isRetryableRuntimeError(error: Error) {
 function normalizeOpenAIError(error: unknown) {
   if (error instanceof Error) {
     if (error.name === "AbortError") {
-      return new Error("OpenAI request timed out");
+      return createOpenAIRequestError("OpenAI request timed out", {
+        providerStatusCode: null,
+        providerErrorBody: null,
+        providerErrorKind: "timeout"
+      });
     }
-    return error;
+
+    const existing = error as OpenAIRequestError;
+    if (
+      existing.providerErrorKind !== undefined ||
+      existing.providerStatusCode !== undefined ||
+      existing.providerErrorBody !== undefined
+    ) {
+      return existing;
+    }
+
+    const normalizedMessage = error.message.toLowerCase();
+    if (normalizedMessage.includes("fetch failed") || normalizedMessage.includes("network")) {
+      return createOpenAIRequestError(error.message, {
+        providerStatusCode: null,
+        providerErrorBody: null,
+        providerErrorKind: "transport_error"
+      });
+    }
+
+    return error as OpenAIRequestError;
   }
-  return new Error(String(error));
+  return createOpenAIRequestError(String(error), {
+    providerStatusCode: null,
+    providerErrorBody: null,
+    providerErrorKind: "transport_error"
+  });
+}
+
+function createOpenAIRequestError(
+  message: string,
+  input: {
+    providerStatusCode?: number | null;
+    providerErrorBody?: string | null;
+    providerErrorKind?: TaskProviderErrorKind | null;
+  }
+) {
+  const error = new Error(message) as OpenAIRequestError;
+  error.providerStatusCode = input.providerStatusCode ?? null;
+  error.providerErrorBody = input.providerErrorBody ?? null;
+  error.providerErrorKind = input.providerErrorKind ?? null;
+  return error;
 }
 
 function resolveRetryDelayMs(input: {

@@ -131,7 +131,12 @@ describe("task analysis status route", () => {
         appliedSpecialRequirements: "Focus on ASEAN",
         usedDefaultWordCount: false,
         usedDefaultCitationStyle: false,
-        warnings: []
+        warnings: [],
+        analysisRenderMode: "structured",
+        rawModelResponse: null,
+        providerStatusCode: null,
+        providerErrorBody: null,
+        providerErrorKind: null
       }
     });
 
@@ -263,6 +268,58 @@ describe("task analysis status route", () => {
     expect(payload.analysisStatus).toBe("failed");
     expect(String(payload.message)).toContain("一键重试分析");
     expect(String(payload.message)).not.toContain("重试一次上传");
+  });
+
+  it("returns persisted provider error details so refresh can still show the upstream raw body", async () => {
+    saveTaskSummary({
+      id: "task-provider-http-error",
+      userId: "user-1",
+      status: "created",
+      targetWordCount: null,
+      citationStyle: null,
+      specialRequirements: "",
+      analysisStatus: "failed",
+      analysisErrorMessage: "PROVIDER_HTTP_ERROR",
+      analysisSnapshot: {
+        chosenTaskFileId: null,
+        supportingFileIds: [],
+        ignoredFileIds: [],
+        needsUserConfirmation: false,
+        reasoning: "上游接口返回了错误正文。",
+        targetWordCount: 2000,
+        citationStyle: "APA 7",
+        topic: null,
+        chapterCount: null,
+        mustCover: [],
+        gradingFocus: [],
+        appliedSpecialRequirements: "",
+        usedDefaultWordCount: true,
+        usedDefaultCitationStyle: true,
+        warnings: [],
+        analysisRenderMode: "raw_provider_error",
+        rawModelResponse: null,
+        providerStatusCode: 502,
+        providerErrorBody: '{"error":{"message":"bad gateway from upstream"}}',
+        providerErrorKind: "http_error"
+      }
+    });
+
+    const response = await handleTaskAnalysisStatusRequest(
+      new Request("http://localhost/api/tasks/task-provider-http-error/analysis"),
+      { taskId: "task-provider-http-error" },
+      {
+        isPersistenceReady: () => true,
+        requireUser: async () => makeUser()
+      }
+    );
+    const payload = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(payload.analysisStatus).toBe("failed");
+    expect(payload.analysisRenderMode).toBe("raw_provider_error");
+    expect(payload.providerStatusCode).toBe(502);
+    expect(String(payload.providerErrorBody)).toContain("bad gateway from upstream");
+    expect(String(payload.message)).toContain("原始回复");
   });
 
   it("keeps pending_version inside the startup grace window as pending", async () => {

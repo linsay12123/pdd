@@ -1,10 +1,16 @@
 import type { OutlineScaffold, OutlineSection } from "@/src/lib/ai/prompts/generate-outline";
 import { isMeaningfulOutline } from "@/src/lib/ai/outline-quality";
 import { buildAnalyzeUploadedTaskInstruction } from "@/src/lib/ai/prompts/analyze-uploaded-task";
-import { requestOpenAITextResponse, safeParseJSON } from "@/src/lib/ai/openai-client";
-import type { TaskAnalysisSnapshot } from "@/src/types/tasks";
+import {
+  requestOpenAITextResponse,
+  safeParseJSON,
+  type OpenAIRequestError
+} from "@/src/lib/ai/openai-client";
+import type { TaskAnalysisSnapshot, TaskProviderErrorKind } from "@/src/types/tasks";
 
 export const MODEL_RAW_RESPONSE_ONLY = "MODEL_RAW_RESPONSE_ONLY";
+export const PROVIDER_HTTP_ERROR = "PROVIDER_HTTP_ERROR";
+export const PROVIDER_TRANSPORT_ERROR = "PROVIDER_TRANSPORT_ERROR";
 
 export type ModelReadyTaskFile = {
   id: string;
@@ -33,6 +39,9 @@ type AnalyzeServiceError = Error & {
   code?: string;
   missingFields?: string[];
   partialAnalysis?: TaskAnalysisSnapshot;
+  providerStatusCode?: number | null;
+  providerErrorBody?: string | null;
+  providerErrorKind?: TaskProviderErrorKind | null;
 };
 
 type ParsedRequirements = Partial<TaskAnalysisSnapshot>;
@@ -134,7 +143,33 @@ export async function analyzeUploadedTaskWithOpenAI(
 ): Promise<AnalyzeUploadedTaskResult> {
   ensureModelInputsReady(input.files);
 
-  const response = await requestStructuredAttempt(input);
+  let response: Awaited<ReturnType<typeof requestStructuredAttempt>>;
+  try {
+    response = await requestStructuredAttempt(input);
+  } catch (error) {
+    const serviceError = error as AnalyzeServiceError;
+    if (
+      serviceError.code === PROVIDER_HTTP_ERROR ||
+      serviceError.code === PROVIDER_TRANSPORT_ERROR
+    ) {
+      return {
+        analysis: buildProviderFailureAnalysis({
+          specialRequirements: input.specialRequirements,
+          providerStatusCode: serviceError.providerStatusCode,
+          providerErrorBody: serviceError.providerErrorBody,
+          providerErrorKind: serviceError.providerErrorKind,
+          renderMode:
+            serviceError.code === PROVIDER_HTTP_ERROR &&
+            Boolean(serviceError.providerErrorBody?.trim())
+              ? "raw_provider_error"
+              : "system_error"
+        }),
+        outline: null
+      };
+    }
+
+    throw serviceError;
+  }
   const parsed = response.parsed;
 
   let analysis: TaskAnalysisSnapshot;
@@ -216,7 +251,8 @@ async function requestStructuredAttempt(input: {
         }
       ],
       reasoningEffort: "medium",
-      textFormat: ANALYSIS_AND_OUTLINE_TEXT_FORMAT as unknown as Record<string, unknown>
+      textFormat: ANALYSIS_AND_OUTLINE_TEXT_FORMAT as unknown as Record<string, unknown>,
+      maxAttempts: 1
     });
 
     return {
@@ -367,7 +403,10 @@ function normalizeAnalysis(
     usedDefaultCitationStyle,
     warnings: normalizeStrings(raw.warnings),
     analysisRenderMode: "structured",
-    rawModelResponse: null
+    rawModelResponse: null,
+    providerStatusCode: null,
+    providerErrorBody: null,
+    providerErrorKind: null
   };
 
   const conflictFields: string[] = [];
@@ -475,7 +514,10 @@ function withStructuredRenderMeta(analysis: TaskAnalysisSnapshot): TaskAnalysisS
   return {
     ...analysis,
     analysisRenderMode: "structured",
-    rawModelResponse: null
+    rawModelResponse: null,
+    providerStatusCode: null,
+    providerErrorBody: null,
+    providerErrorKind: null
   };
 }
 
@@ -504,8 +546,45 @@ function buildRawFallbackAnalysis(input: {
     usedDefaultWordCount: partial?.usedDefaultWordCount ?? true,
     usedDefaultCitationStyle: partial?.usedDefaultCitationStyle ?? true,
     warnings: partial?.warnings ?? [],
-    analysisRenderMode: "raw",
-    rawModelResponse: input.rawText.trim()
+    analysisRenderMode: "raw_model",
+    rawModelResponse: input.rawText.trim(),
+    providerStatusCode: null,
+    providerErrorBody: null,
+    providerErrorKind: null
+  };
+}
+
+function buildProviderFailureAnalysis(input: {
+  specialRequirements: string;
+  providerStatusCode?: number | null;
+  providerErrorBody?: string | null;
+  providerErrorKind?: TaskProviderErrorKind | null;
+  renderMode: "raw_provider_error" | "system_error";
+}): TaskAnalysisSnapshot {
+  return {
+    chosenTaskFileId: null,
+    supportingFileIds: [],
+    ignoredFileIds: [],
+    needsUserConfirmation: false,
+    reasoning:
+      input.renderMode === "raw_provider_error"
+        ? "上游接口返回了错误正文。"
+        : "上游接口这次没有返回可展示正文。",
+    targetWordCount: DEFAULT_TARGET_WORD_COUNT,
+    citationStyle: DEFAULT_CITATION_STYLE,
+    topic: null,
+    chapterCount: null,
+    mustCover: [],
+    gradingFocus: [],
+    appliedSpecialRequirements: input.specialRequirements,
+    usedDefaultWordCount: true,
+    usedDefaultCitationStyle: true,
+    warnings: [],
+    analysisRenderMode: input.renderMode,
+    rawModelResponse: null,
+    providerStatusCode: input.providerStatusCode ?? null,
+    providerErrorBody: input.providerErrorBody?.trim() || null,
+    providerErrorKind: input.providerErrorKind ?? null
   };
 }
 
@@ -533,18 +612,16 @@ function shouldUseRawFallback(error: unknown, rawText: string) {
 }
 
 function mapOpenAIServiceError(error: unknown) {
-  const message = error instanceof Error ? error.message : String(error);
-
-  if (message === "OpenAI request timed out") {
-    return createModelAnalysisError("MODEL_ANALYSIS_TIMEOUT");
-  }
-
-  if (
-    message.startsWith("OpenAI request failed with status") ||
-    message.includes("fetch failed") ||
-    message.includes("network")
-  ) {
-    return createModelAnalysisError("UPSTREAM_MODEL_UNAVAILABLE");
+  const providerMeta = extractProviderErrorMeta(error);
+  if (providerMeta) {
+    return createModelAnalysisError(
+      providerMeta.providerErrorKind === "http_error" && providerMeta.providerErrorBody?.trim()
+        ? PROVIDER_HTTP_ERROR
+        : PROVIDER_TRANSPORT_ERROR,
+      undefined,
+      undefined,
+      providerMeta
+    );
   }
 
   return error instanceof Error ? error : new Error(String(error));
@@ -553,7 +630,12 @@ function mapOpenAIServiceError(error: unknown) {
 function createModelAnalysisError(
   code: string,
   missingFields?: string[],
-  partialAnalysis?: TaskAnalysisSnapshot
+  partialAnalysis?: TaskAnalysisSnapshot,
+  providerMeta?: {
+    providerStatusCode?: number | null;
+    providerErrorBody?: string | null;
+    providerErrorKind?: TaskProviderErrorKind | null;
+  }
 ) {
   const error = new Error(code) as AnalyzeServiceError;
   error.code = code;
@@ -563,7 +645,58 @@ function createModelAnalysisError(
   if (partialAnalysis) {
     error.partialAnalysis = partialAnalysis;
   }
+  if (providerMeta) {
+    error.providerStatusCode = providerMeta.providerStatusCode ?? null;
+    error.providerErrorBody = providerMeta.providerErrorBody ?? null;
+    error.providerErrorKind = providerMeta.providerErrorKind ?? null;
+  }
   return error;
+}
+
+function extractProviderErrorMeta(error: unknown) {
+  if (error instanceof Error) {
+    const providerError = error as OpenAIRequestError;
+    if (
+      providerError.providerErrorKind ||
+      providerError.providerStatusCode !== undefined ||
+      providerError.providerErrorBody !== undefined
+    ) {
+      return {
+        providerStatusCode: providerError.providerStatusCode ?? null,
+        providerErrorBody: providerError.providerErrorBody?.trim() || null,
+        providerErrorKind: providerError.providerErrorKind ?? null
+      };
+    }
+
+    const statusMatch = error.message.match(
+      /^OpenAI request failed with status (\d+)(?::\s*([\s\S]+))?$/
+    );
+    if (statusMatch) {
+      return {
+        providerStatusCode: Number(statusMatch[1]),
+        providerErrorBody: statusMatch[2]?.trim() || null,
+        providerErrorKind: "http_error" as const
+      };
+    }
+
+    if (error.message === "OpenAI request timed out") {
+      return {
+        providerStatusCode: null,
+        providerErrorBody: null,
+        providerErrorKind: "timeout" as const
+      };
+    }
+
+    if (error.message.includes("fetch failed") || error.message.includes("network")) {
+      return {
+        providerStatusCode: null,
+        providerErrorBody: null,
+        providerErrorKind: "transport_error" as const
+      };
+    }
+  }
+
+  return null;
 }
 
 function normalizePositiveInteger(value: unknown) {

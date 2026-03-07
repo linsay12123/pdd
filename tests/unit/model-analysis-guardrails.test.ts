@@ -74,6 +74,11 @@ describe("model analysis guardrails", () => {
     expect(result.analysis.rawModelResponse).toBeNull();
     expect(result.outline?.articleTitle).toBe("Finance Risk Governance in ASEAN Banks");
     expect(requestOpenAITextResponseMock).toHaveBeenCalledTimes(1);
+    expect(requestOpenAITextResponseMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        maxAttempts: 1
+      })
+    );
   });
 
   it("returns raw fallback when the model replies with readable text but not a formal outline payload", async () => {
@@ -99,7 +104,7 @@ describe("model analysis guardrails", () => {
     });
 
     expect(result.outline).toBeNull();
-    expect(result.analysis.analysisRenderMode).toBe("raw");
+    expect(result.analysis.analysisRenderMode).toBe("raw_model");
     expect(result.analysis.rawModelResponse).toContain("Suggested structure");
     expect(result.analysis.appliedSpecialRequirements).toBe("Focus on governance.");
     expect(requestOpenAITextResponseMock).toHaveBeenCalledTimes(1);
@@ -170,22 +175,63 @@ describe("model analysis guardrails", () => {
     expect(requestOpenAITextResponseMock).not.toHaveBeenCalled();
   });
 
-  it("keeps upstream model outages as real failures instead of pretending raw fallback succeeded", async () => {
-    requestOpenAITextResponseMock.mockRejectedValueOnce(
-      new Error("OpenAI request failed with status 502: bad gateway")
-    );
+  it("returns provider raw error details when the upstream api fails but still returns a body", async () => {
+    const providerError = new Error(
+      'OpenAI request failed with status 502: {"error":{"message":"upstream gateway exploded"}}'
+    ) as Error & {
+      providerStatusCode?: number;
+      providerErrorBody?: string;
+      providerErrorKind?: string;
+    };
+    providerError.providerStatusCode = 502;
+    providerError.providerErrorBody = '{"error":{"message":"upstream gateway exploded"}}';
+    providerError.providerErrorKind = "http_error";
 
-    await expect(
-      analyzeUploadedTaskWithOpenAI({
-        specialRequirements: "",
-        files: [
-          {
-            id: "file-1",
-            originalFilename: "assignment.txt",
-            extractedText: "Assignment brief text."
-          }
-        ]
-      })
-    ).rejects.toThrow("UPSTREAM_MODEL_UNAVAILABLE");
+    requestOpenAITextResponseMock.mockRejectedValueOnce(providerError);
+
+    const result = await analyzeUploadedTaskWithOpenAI({
+      specialRequirements: "",
+      files: [
+        {
+          id: "file-1",
+          originalFilename: "assignment.txt",
+          extractedText: "Assignment brief text."
+        }
+      ]
+    });
+
+    expect(result.outline).toBeNull();
+    expect(result.analysis.analysisRenderMode).toBe("raw_provider_error");
+    expect(result.analysis.providerStatusCode).toBe(502);
+    expect(result.analysis.providerErrorKind).toBe("http_error");
+    expect(result.analysis.providerErrorBody).toContain("gateway exploded");
+    expect(result.analysis.rawModelResponse).toBeNull();
+  });
+
+  it("falls back to system error mode when the upstream api fails without any response body", async () => {
+    const providerError = new Error("OpenAI request timed out") as Error & {
+      providerStatusCode?: number;
+      providerErrorBody?: string;
+      providerErrorKind?: string;
+    };
+    providerError.providerErrorKind = "timeout";
+
+    requestOpenAITextResponseMock.mockRejectedValueOnce(providerError);
+
+    const result = await analyzeUploadedTaskWithOpenAI({
+      specialRequirements: "",
+      files: [
+        {
+          id: "file-1",
+          originalFilename: "assignment.txt",
+          extractedText: "Assignment brief text."
+        }
+      ]
+    });
+
+    expect(result.outline).toBeNull();
+    expect(result.analysis.analysisRenderMode).toBe("system_error");
+    expect(result.analysis.providerErrorKind).toBe("timeout");
+    expect(result.analysis.providerErrorBody).toBeNull();
   });
 });
