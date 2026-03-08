@@ -69,5 +69,11 @@ describe("topic selection policy prompts", () => {
     expect(prompt).toContain("TOPIC_SELECTION_POLICY");
     expect(prompt).toContain("must not override explicit fixed-topic requirements");
     expect(prompt).toContain("Never output a generic placeholder topic/title");
+    expect(prompt).toContain("CURRENT_TARGET_WORD_COUNT: 2500");
+    expect(prompt).toContain("1000 words or fewer = exactly 3 chapters");
+    expect(prompt).toContain("800 -> 3");
+    expect(prompt).toContain("2001 -> 5");
+    expect(prompt).toContain("Each section must contain 3 to 5 specific bullet points");
+    expect(prompt).toContain("Never output fewer than 3 or more than 5 bullet points");
   });
 });

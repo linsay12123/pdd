@@ -1,3 +1,9 @@
+import {
+  DEFAULT_BULLET_POINT_RULE_TEXT,
+  DEFAULT_CHAPTER_COUNT_EXAMPLES_TEXT,
+  DEFAULT_CHAPTER_COUNT_RULE_TEXT
+} from "@/src/lib/ai/prompts/generate-outline";
+
 function buildSharedPolicyLines(input: {
   specialRequirements: string;
   forcedPrimaryFileId?: string | null;
@@ -19,15 +25,14 @@ function buildSharedPolicyLines(input: {
     "  5) In reasoning, explicitly state which policy branch was applied: brief-defined, user-defined, or model-proposed.",
     "- If no explicit word count is found anywhere, set targetWordCount to 2000 and usedDefaultWordCount to true.",
     "- If no explicit citation style is found anywhere, set citationStyle to 'APA 7' and usedDefaultCitationStyle to true.",
-    "- Choose chapterCount based on explicit task requirements when present; otherwise derive it from targetWordCount using this exact rule: 1000 words or fewer = exactly 3 chapters; above 1000 words, add 1 chapter for every additional 1000 words, and round any remainder up to the next chapter.",
-    "- ChapterCount examples you must follow when no explicit chapter requirement exists: 800 -> 3, 1000 -> 3, 1001 -> 4, 1800 -> 4, 2000 -> 4, 2001 -> 5.",
+    `- Choose chapterCount based on explicit task requirements when present; otherwise derive it from targetWordCount using this exact rule: ${DEFAULT_CHAPTER_COUNT_RULE_TEXT}`,
+    `- ChapterCount examples you must follow when no explicit chapter requirement exists: ${DEFAULT_CHAPTER_COUNT_EXAMPLES_TEXT}`,
     "- If you genuinely cannot tell which file is the true task brief, set needsUserConfirmation to true and outline to null.",
     "- If needsUserConfirmation is false, outline must not be null and must contain at least one section.",
     "- The outline must be in English.",
     "- Each section title must be short, not a full sentence.",
     "- Each summary must describe concrete content or argument, not a placeholder.",
-    "- Each section must contain 3 to 5 specific bullet points.",
-    "- Never output fewer than 3 or more than 5 bullet points in any section.",
+    `- ${DEFAULT_BULLET_POINT_RULE_TEXT}`,
     "- Bullet points must be specific, not generic placeholders.",
     "",
     `USER_SPECIAL_REQUIREMENTS: ${input.specialRequirements || "(none)"}`

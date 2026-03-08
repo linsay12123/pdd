@@ -31,8 +31,21 @@ export type GenerateOutlineInput = OutlineScaffoldInput & {
   previousOutline?: OutlineScaffold | null;
 };
 
+export const DEFAULT_CHAPTER_COUNT_RULE_TEXT =
+  "1000 words or fewer = exactly 3 chapters; above 1000 words, add 1 chapter for every additional 1000 words, and round any remainder up to the next chapter.";
+
+export const DEFAULT_CHAPTER_COUNT_EXAMPLES_TEXT =
+  "800 -> 3, 1000 -> 3, 1001 -> 4, 1800 -> 4, 2000 -> 4, 2001 -> 5.";
+
+export const DEFAULT_BULLET_POINT_RULE_TEXT =
+  "Each section must contain 3 to 5 specific bullet points. Never output fewer than 3 or more than 5 bullet points in any section.";
+
 export function calculateDefaultChapterCount(targetWordCount: number) {
-  return Math.max(1, Math.ceil(targetWordCount / 500));
+  if (targetWordCount <= 1000) {
+    return 3;
+  }
+
+  return 3 + Math.ceil((targetWordCount - 1000) / 1000);
 }
 
 export function determineOutlineBulletCount(
@@ -77,6 +90,9 @@ export function buildGenerateOutlinePrompt(input: GenerateOutlineInput) {
     `- CITATION_STYLE: ${input.citationStyle}`,
     `- SECTION_COUNT: exactly ${sectionCount} sections`,
     `- BULLET_POINTS_PER_SECTION: ${bulletCount}`,
+    `- DEFAULT_SECTION_COUNT_RULE: ${DEFAULT_CHAPTER_COUNT_RULE_TEXT}`,
+    `- DEFAULT_SECTION_COUNT_EXAMPLES: ${DEFAULT_CHAPTER_COUNT_EXAMPLES_TEXT}`,
+    `- BULLET_POINT_RULE: ${DEFAULT_BULLET_POINT_RULE_TEXT}`,
     `- MUST_ANSWER: ${input.mustAnswer?.length ? input.mustAnswer.join("; ") : "(none)"}`,
     `- GRADING_PRIORITIES: ${input.gradingPriorities?.length ? input.gradingPriorities.join("; ") : "(none)"}`,
     `- SPECIAL_REQUIREMENTS: ${input.specialRequirements || "(none)"}`,
