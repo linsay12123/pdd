@@ -115,6 +115,15 @@ export function buildAnalyzeUploadedTaskInstruction(input: {
     "      }",
     "    ]",
     "  } | null",
-    "}"
+    "}",
+    "",
+    "Output constraints for the final outline:",
+    "- outline.sections.length must exactly equal analysis.chapterCount.",
+    "- Return exactly that many sections, no more and no fewer.",
+    "- For a 1000-word task, exactly 3 sections means the full outline structure already includes the opening section and the concluding section.",
+    "- When analysis.chapterCount is 3, do not add any extra middle section beyond those 3 sections.",
+    "- Each section must contain 3 to 5 bullet points, no fewer and no more.",
+    "- References, Appendix, Appendices, and Bibliography must not appear in outline.sections.",
+    "- References can still be mentioned as a requirement for the finished article, but they are not outline sections and must not occupy a section slot."
   ].join("\n");
 }

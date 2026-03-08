@@ -30,6 +30,13 @@ describe("topic selection policy prompts", () => {
     expect(prompt).toContain("2001 -> 5");
     expect(prompt).toContain("Each section must contain 3 to 5 specific bullet points");
     expect(prompt).toContain("Never output fewer than 3 or more than 5 bullet points");
+    expect(prompt).toContain("outline.sections.length");
+    expect(prompt).toContain("must exactly equal analysis.chapterCount");
+    expect(prompt).toContain("Return exactly that many sections, no more and no fewer");
+    expect(prompt).toContain("References");
+    expect(prompt).toContain("Appendix");
+    expect(prompt).toContain("Bibliography");
+    expect(prompt).toContain("must not appear in outline.sections");
   });
 
   it("includes fixed-topic guardrail in outline revision prompt", () => {
