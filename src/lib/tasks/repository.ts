@@ -1,5 +1,6 @@
 import { incrementMetric } from "@/src/lib/observability/metrics";
 import { logTaskTransition } from "@/src/lib/observability/logger";
+import { resolveTaskOutputExpiresAt } from "@/src/lib/tasks/task-output-expiry";
 import { assertStatusTransition } from "@/src/lib/tasks/status-machine";
 import type {
   TaskDraftVersion,
@@ -203,15 +204,18 @@ export function resetTaskReferenceCheckStore() {
 
 export function saveTaskOutputRecord(record: TaskOutputRecordInput) {
   const existing = taskOutputStore.get(record.taskId) ?? [];
+  const createdAt = record.createdAt || new Date().toISOString();
+  const expiresAt = resolveTaskOutputExpiresAt({
+    createdAt,
+    expiresAt: record.expiresAt ?? null
+  });
   const normalizedRecord: TaskOutputRecord = {
     ...record,
     id: record.id || `out_${record.taskId}_${existing.length + 1}`,
-    createdAt: record.createdAt || new Date().toISOString(),
+    createdAt,
     isActive: record.isActive ?? true,
-    expiresAt:
-      record.expiresAt ||
-      new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toISOString(),
-    expired: record.expired ?? false
+    expiresAt,
+    expired: record.expired ?? expiresAt <= new Date().toISOString()
   };
   const nextOutputs = [...existing, normalizedRecord];
 

@@ -10,6 +10,7 @@ import {
   getTaskOutputs,
   saveTaskOutputRecord
 } from "@/src/lib/tasks/repository";
+import { resolveTaskOutputExpiresAt } from "@/src/lib/tasks/task-output-expiry";
 import type { TaskOutputKind, TaskOutputRecord } from "@/src/types/tasks";
 
 type SaveTaskOutputInput = {
@@ -89,6 +90,11 @@ function saveTaskOutputLocally(input: SaveTaskOutputInput) {
 
 async function saveTaskOutputWithSupabase(input: SaveTaskOutputInput) {
   const client = createSupabaseAdminClient();
+  const createdAt = new Date().toISOString();
+  const expiresAt = resolveTaskOutputExpiresAt({
+    createdAt,
+    expiresAt: input.expiresAt ?? null
+  });
 
   if (input.isActive ?? true) {
     const { error: deactivateError } = await client
@@ -114,7 +120,8 @@ async function saveTaskOutputWithSupabase(input: SaveTaskOutputInput) {
       output_kind: input.outputKind,
       storage_path: input.storagePath,
       is_active: input.isActive ?? true,
-      expires_at: input.expiresAt ?? undefined
+      created_at: createdAt,
+      expires_at: expiresAt
     })
     .select("id,task_id,user_id,output_kind,storage_path,is_active,expires_at,created_at")
     .single();
@@ -234,9 +241,10 @@ function mapTaskOutputRow(row: {
   expires_at: string | null;
   created_at: string;
 }) {
-  const expiresAt =
-    row.expires_at ??
-    new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toISOString();
+  const expiresAt = resolveTaskOutputExpiresAt({
+    createdAt: row.created_at,
+    expiresAt: row.expires_at
+  });
 
   return {
     id: String(row.id),

@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   expireTaskOutputs,
   getTaskOutputs,
@@ -8,6 +8,15 @@ import {
 import { createSignedDownloadUrl } from "../../src/lib/storage/signed-url";
 
 describe("expiry rules", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-03-03T09:30:00.000Z"));
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   it("keeps output history visible but blocks signed download links after expiry", () => {
     resetTaskOutputStore();
     const output = saveTaskOutputRecord({
