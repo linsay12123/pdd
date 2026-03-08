@@ -22,7 +22,7 @@ export async function generateOutlineForTask(
   });
   const parsed =
     parseOutlineResponse(response.output_text) ??
-    (await repairOutlineResponse(response.output_text));
+    (await repairOutlineResponse(response.output_text, input));
 
   if (
     !parsed?.articleTitle ||
@@ -71,9 +71,12 @@ function parseOutlineResponse(text: string) {
   }>(text);
 }
 
-async function repairOutlineResponse(rawText: string) {
+async function repairOutlineResponse(rawText: string, input: GenerateOutlineInput) {
   try {
+    const originalPrompt = buildGenerateOutlinePrompt(input);
     const repairPrompt = [
+      originalPrompt,
+      "",
       "Repair the following outline response into valid JSON.",
       "Return ONLY valid JSON with this exact structure:",
       "{",

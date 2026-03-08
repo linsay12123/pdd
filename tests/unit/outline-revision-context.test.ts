@@ -152,6 +152,7 @@ describe("outline revision context", () => {
       expect.objectContaining({
         feedback: "写三个章节，每个章节写具体分析点",
         previousOutline,
+        specialRequirements: "Focus on listed banks in Southeast Asia.",
         analysis: expect.objectContaining({
           topic: "Corporate Governance in ASEAN"
         })

@@ -73,4 +73,46 @@ describe("generate outline guardrails", () => {
       reasoningEffort: "medium"
     });
   });
+
+  it("keeps the chapter rule inside the legacy first-outline repair prompt", async () => {
+    requestOpenAITextResponseMock
+      .mockResolvedValueOnce({
+        output_text: "not valid json"
+      })
+      .mockResolvedValueOnce({
+        output_text: JSON.stringify({
+          articleTitle: "Corporate Governance",
+          sections: [
+            {
+              title: "Introduction",
+              summary: "Set up the problem and thesis.",
+              bulletPoints: ["Context", "Problem", "Argument"]
+            },
+            {
+              title: "Analysis",
+              summary: "Analyze the key evidence.",
+              bulletPoints: ["Evidence", "Debate", "Implications"]
+            },
+            {
+              title: "Conclusion",
+              summary: "Close the argument.",
+              bulletPoints: ["Findings", "Limits", "Takeaway"]
+            }
+          ]
+        })
+      });
+
+    await generateOutlineForTask({
+      topic: "Corporate Governance",
+      targetWordCount: 1000,
+      citationStyle: "APA 7",
+      specialRequirements: "Focus on ASEAN listed banks."
+    });
+
+    const repairPrompt = String(requestOpenAITextResponseMock.mock.calls[1]?.[0]?.input ?? "");
+
+    expect(repairPrompt).toContain("SPECIAL_REQUIREMENTS: Focus on ASEAN listed banks.");
+    expect(repairPrompt).toContain("1000 words or fewer = exactly 3 chapters");
+    expect(repairPrompt).toContain("Each section must contain 3 to 5 specific bullet points");
+  });
 });

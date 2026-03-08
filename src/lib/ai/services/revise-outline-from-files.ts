@@ -10,6 +10,7 @@ type ReviseOutlineFromFilesInput = {
   analysis: TaskAnalysisSnapshot;
   previousOutline: OutlineScaffold | null;
   feedback: string;
+  specialRequirements: string;
 };
 
 export async function reviseOutlineFromFilesWithOpenAI(
@@ -27,7 +28,7 @@ export async function reviseOutlineFromFilesWithOpenAI(
 
   const parsed =
     parseOutline(response.output_text) ??
-    (await repairOutline(response.output_text));
+    (await repairOutline(response.output_text, input));
 
   if (
     !parsed?.articleTitle ||
@@ -74,7 +75,8 @@ function buildRevisionContent(input: ReviseOutlineFromFilesInput) {
       text: buildReviseOutlineInstruction({
         analysis: input.analysis,
         previousOutline: input.previousOutline,
-        feedback: input.feedback
+        feedback: input.feedback,
+        specialRequirements: input.specialRequirements
       })
     }
   ];
@@ -122,10 +124,30 @@ function parseOutline(text: string) {
   }>(text);
 }
 
-async function repairOutline(rawText: string) {
+async function repairOutline(rawText: string, input: ReviseOutlineFromFilesInput) {
   try {
+    const revisionContext = buildReviseOutlineInstruction({
+      analysis: input.analysis,
+      previousOutline: input.previousOutline,
+      feedback: input.feedback,
+      specialRequirements: input.specialRequirements
+    });
+    const repairContext = [
+      revisionContext,
+      ...input.files.flatMap((file) => [
+        [
+          `FILE_ID: ${file.id}`,
+          `FILE_NAME: ${file.originalFilename}`,
+          "RAW_EXTRACTED_TEXT_START",
+          file.extractedText || "(no extracted text available)",
+          "RAW_EXTRACTED_TEXT_END"
+        ].join("\n")
+      ])
+    ];
     const repaired = await requestOpenAITextResponse({
       input: [
+        ...repairContext,
+        "",
         "Repair the following outline response into valid JSON.",
         "Return ONLY valid JSON with this structure:",
         "{",

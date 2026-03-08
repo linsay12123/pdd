@@ -133,6 +133,22 @@ describe("model analysis guardrails", () => {
         maxAttempts: 1
       })
     );
+
+    const request = requestOpenAITextResponseMock.mock.calls[0]?.[0] as {
+      input?: Array<{
+        role?: string;
+        content?: Array<{ type?: string; text?: string }>;
+      }>;
+    };
+    const content = request.input?.[0]?.content ?? [];
+    const joinedText = content
+      .filter((part) => part.type === "input_text")
+      .map((part) => String(part.text ?? ""))
+      .join("\n");
+
+    expect(joinedText).toContain("USER_SPECIAL_REQUIREMENTS: Focus on governance.");
+    expect(joinedText).toContain("1000 words or fewer = exactly 3 chapters");
+    expect(joinedText).toContain("RAW_EXTRACTED_TEXT_START");
   });
 
   it("sends a strict json schema whose every object property is also listed in required", async () => {

@@ -214,7 +214,8 @@ async function reviseOutlineVersionLocally({
     files,
     analysis: task.analysisSnapshot,
     previousOutline,
-    feedback
+    feedback,
+    specialRequirements: task.specialRequirements ?? ""
   });
   const nextTask = patchTaskSummary(taskId, {
     outlineRevisionCount: (task.outlineRevisionCount ?? 0) + 1,
@@ -261,7 +262,8 @@ async function reviseOutlineVersionWithSupabase({
     files,
     analysis: task.analysisSnapshot,
     previousOutline: previousOutline?.outline ?? null,
-    feedback
+    feedback,
+    specialRequirements: task.specialRequirements ?? ""
   });
   const updatedTask = {
     ...task,
