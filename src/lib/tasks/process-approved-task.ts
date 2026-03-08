@@ -56,7 +56,6 @@ type ProcessDocxExporter = (
   }
 ) => Promise<{
   outputPath: string;
-  payloadPath: string;
 }>;
 
 type ProcessReferenceReportExporter = (
@@ -65,7 +64,6 @@ type ProcessReferenceReportExporter = (
   }
 ) => Promise<{
   outputPath: string;
-  payloadPath: string;
 }>;
 
 type ProcessApprovedTaskDependencies = {

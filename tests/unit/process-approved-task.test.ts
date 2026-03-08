@@ -125,8 +125,7 @@ describe("process approved task", () => {
           });
 
           return {
-            outputPath: output.storagePath,
-            payloadPath: `/tmp/${taskId}-final.json`
+            outputPath: output.storagePath
           };
         },
         exportReferenceReport: async ({ taskId, userId }) => {
@@ -138,8 +137,7 @@ describe("process approved task", () => {
           });
 
           return {
-            outputPath: output.storagePath,
-            payloadPath: `/tmp/${taskId}-report.json`
+            outputPath: output.storagePath
           };
         }
       }

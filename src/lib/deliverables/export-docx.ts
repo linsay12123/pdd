@@ -1,7 +1,7 @@
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { spawn } from "node:child_process";
-import { createTaskOutputStoragePath, resolveStoredFileDiskPath } from "@/src/lib/storage/task-output-files";
+import { createTaskOutputStoragePath } from "@/src/lib/storage/task-output-files";
 import { saveTaskArtifact } from "@/src/lib/storage/task-artifacts";
 import { saveTaskOutput } from "@/src/lib/tasks/task-output-store";
 import type { TaskOutputKind } from "@/src/types/tasks";
@@ -23,16 +23,6 @@ export type DocxExportInput = {
   outputKind?: TaskOutputKind;
 };
 
-export function resolveDocxOutputPath(
-  userId: string,
-  taskId: string,
-  variant: "final" | "humanized" = "final"
-) {
-  return resolveStoredFileDiskPath(
-    createTaskOutputStoragePath(userId, taskId, `${variant}.docx`)
-  );
-}
-
 export function prepareDocxExportPayload(input: DocxExportInput) {
   if (!input.title.trim() || !input.references.length) {
     throw new Error("DOCX export requires a title and at least one reference");
@@ -52,7 +42,6 @@ export async function exportDocx(input: DocxExportInput) {
     const tempOutputPath = path.join(tempDir, `${variant}.docx`);
     const payloadPath = path.join(tempDir, "payload.json");
 
-    await mkdir(tempDir, { recursive: true });
     await writeFile(payloadPath, JSON.stringify(payload, null, 2), "utf8");
 
     await runPythonWorker(
@@ -77,7 +66,6 @@ export async function exportDocx(input: DocxExportInput) {
     return {
       outputId: output.id,
       outputPath: artifact.outputPath,
-      payloadPath,
       storagePath
     };
   });
@@ -89,14 +77,36 @@ function runPythonWorker(scriptPath: string, args: string[]) {
       cwd: process.cwd(),
       stdio: "inherit"
     });
+    let settled = false;
 
-    child.on("exit", (code) => {
-      if (code === 0) {
-        resolve();
+    const settleOnce = (callback: () => void) => {
+      if (settled) {
         return;
       }
 
-      reject(new Error(`Python worker failed with exit code ${code ?? -1}`));
+      settled = true;
+      callback();
+    };
+
+    child.on("error", (error) => {
+      settleOnce(() => {
+        reject(
+          new Error(
+            `Python worker failed to start: ${error instanceof Error ? error.message : String(error)}`
+          )
+        );
+      });
+    });
+
+    child.on("exit", (code) => {
+      settleOnce(() => {
+        if (code === 0) {
+          resolve();
+          return;
+        }
+
+        reject(new Error(`Python worker failed with exit code ${code ?? -1}`));
+      });
     });
   });
 }

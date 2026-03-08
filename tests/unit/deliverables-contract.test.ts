@@ -1,16 +1,11 @@
-import { existsSync } from "node:fs";
-import os from "node:os";
-import path from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   exportDocx,
-  prepareDocxExportPayload,
-  resolveDocxOutputPath
+  prepareDocxExportPayload
 } from "../../src/lib/deliverables/export-docx";
 import {
   exportReferenceReport,
-  prepareReferenceReportPayload,
-  resolveReferenceReportOutputPath
+  prepareReferenceReportPayload
 } from "../../src/lib/deliverables/export-report";
 import { getTaskOutputs, resetTaskOutputStore } from "../../src/lib/tasks/repository";
 
@@ -33,9 +28,6 @@ describe("docx export contract", () => {
     expect(payload.title).toBe("Sustainable Finance");
     expect(payload.sections).toHaveLength(1);
     expect(payload.references).toHaveLength(1);
-    expect(resolveDocxOutputPath("user-1", "task-1")).toContain(
-      "storage/users/user-1/tasks/task-1/outputs/final.docx"
-    );
   });
 
   it("rejects an export with no title or no references", () => {
@@ -71,9 +63,6 @@ describe("docx export contract", () => {
     expect(result.outputPath).toContain(
       "storage/users/user-1/tasks/task-docx-export/outputs/final.docx"
     );
-    expect(result.payloadPath.startsWith(os.tmpdir())).toBe(true);
-    expect(result.payloadPath).not.toContain(path.join(process.cwd(), "tmp"));
-    expect(existsSync(result.payloadPath)).toBe(false);
     expect(getTaskOutputs("task-docx-export")).toEqual([
       expect.objectContaining({
         outputKind: "final_docx",
@@ -105,9 +94,6 @@ describe("pdf report export contract", () => {
     });
 
     expect(payload.entries).toHaveLength(1);
-    expect(resolveReferenceReportOutputPath("user-1", "task-1")).toContain(
-      "storage/users/user-1/tasks/task-1/outputs/reference-report.pdf"
-    );
   });
 
   it("rejects an export with no report rows", () => {
@@ -152,9 +138,6 @@ describe("pdf report export contract", () => {
     expect(result.outputPath).toContain(
       "storage/users/user-1/tasks/task-report-export/outputs/reference-report.pdf"
     );
-    expect(result.payloadPath.startsWith(os.tmpdir())).toBe(true);
-    expect(result.payloadPath).not.toContain(path.join(process.cwd(), "tmp"));
-    expect(existsSync(result.payloadPath)).toBe(false);
     expect(getTaskOutputs("task-report-export")).toEqual([
       expect.objectContaining({
         outputKind: "reference_report_pdf",
