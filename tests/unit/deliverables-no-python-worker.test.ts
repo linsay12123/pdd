@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const uploadMock = vi.fn();
 const deactivateMock = vi.fn();
@@ -50,9 +50,7 @@ vi.mock("../../src/lib/supabase/admin", () => ({
   })
 }));
 
-describe("deliverables export in /var/task style runtime", () => {
-  let cwdSpy: ReturnType<typeof vi.spyOn>;
-
+describe("deliverables export without local python", () => {
   beforeEach(() => {
     vi.resetModules();
     uploadMock.mockReset();
@@ -78,50 +76,48 @@ describe("deliverables export in /var/task style runtime", () => {
       },
       error: null
     });
-
-    cwdSpy = vi.spyOn(process, "cwd").mockReturnValue("/var/task");
   });
 
-  afterEach(() => {
-    cwdSpy.mockRestore();
-    process.env.NEXT_PUBLIC_SUPABASE_URL = "";
-    process.env.SUPABASE_SERVICE_ROLE_KEY = "";
-  });
-
-  it("exports docx without touching /var/task/tmp or spawning python", async () => {
+  it("exports docx without spawning python3", async () => {
     const { exportDocx } = await import("../../src/lib/deliverables/export-docx");
 
-    const result = await exportDocx({
-      taskId: "task-docx-runtime-temp",
-      userId: "user-1",
-      title: "Sustainable Finance",
-      sections: [
-        {
-          heading: "Introduction",
-          paragraphs: ["Paragraph one."]
-        }
-      ],
-      references: ["Smith, A. (2024). Source."],
-      citationStyle: "APA 7"
-    });
+    await expect(
+      exportDocx({
+        taskId: "task-docx-no-python",
+        userId: "user-1",
+        title: "Sustainable Finance",
+        sections: [
+          {
+            heading: "Introduction",
+            paragraphs: ["Paragraph one."]
+          }
+        ],
+        references: ["Smith, A. (2024). Source."],
+        citationStyle: "APA 7"
+      })
+    ).resolves.toEqual(
+      expect.objectContaining({
+        outputPath: "users/user-1/tasks/task-docx-no-python/outputs/final.docx",
+        storagePath: "users/user-1/tasks/task-docx-no-python/outputs/final.docx"
+      })
+    );
 
-    expect(result.outputPath).toBe("users/user-1/tasks/task-docx-runtime-temp/outputs/final.docx");
     expect(spawnMock).not.toHaveBeenCalled();
     expect(uploadMock).toHaveBeenCalledWith(
-      "users/user-1/tasks/task-docx-runtime-temp/outputs/final.docx",
+      "users/user-1/tasks/task-docx-no-python/outputs/final.docx",
       expect.any(Buffer),
       expect.objectContaining({ upsert: true })
     );
   });
 
-  it("exports reference report without touching /var/task/tmp or spawning python", async () => {
+  it("exports reference report without spawning python3", async () => {
     insertSelectSingleMock.mockResolvedValueOnce({
       data: {
         id: "out-2",
-        task_id: "task-report-runtime-temp",
+        task_id: "task-report-no-python",
         user_id: "user-1",
         output_kind: "reference_report_pdf",
-        storage_path: "users/user-1/tasks/task-report-runtime-temp/outputs/reference-report.pdf",
+        storage_path: "users/user-1/tasks/task-report-no-python/outputs/reference-report.pdf",
         is_active: true,
         expires_at: null,
         created_at: "2026-03-03T10:00:00.000Z"
@@ -131,31 +127,35 @@ describe("deliverables export in /var/task style runtime", () => {
 
     const { exportReferenceReport } = await import("../../src/lib/deliverables/export-report");
 
-    const result = await exportReferenceReport({
-      taskId: "task-report-runtime-temp",
-      userId: "user-1",
-      reportId: "REF-001",
-      createdAt: "2026-03-02T10:00:00.000Z",
-      taskSummary: {
-        targetWordCount: 2000,
-        citationStyle: "APA 7"
-      },
-      entries: [
-        {
-          rawReference: "Smith, A. (2024). Source.",
-          verdictLabel: "基本可对应",
-          reasoning: "Title and metadata align."
-        }
-      ],
-      closingSummary: "Most references look usable."
-    });
-
-    expect(result.outputPath).toBe(
-      "users/user-1/tasks/task-report-runtime-temp/outputs/reference-report.pdf"
+    await expect(
+      exportReferenceReport({
+        taskId: "task-report-no-python",
+        userId: "user-1",
+        reportId: "REF-001",
+        createdAt: "2026-03-02T10:00:00.000Z",
+        taskSummary: {
+          targetWordCount: 2000,
+          citationStyle: "APA 7"
+        },
+        entries: [
+          {
+            rawReference: "Smith, A. (2024). Source.",
+            verdictLabel: "基本可对应",
+            reasoning: "Title and metadata align."
+          }
+        ],
+        closingSummary: "Most references look usable."
+      })
+    ).resolves.toEqual(
+      expect.objectContaining({
+        outputPath: "users/user-1/tasks/task-report-no-python/outputs/reference-report.pdf",
+        storagePath: "users/user-1/tasks/task-report-no-python/outputs/reference-report.pdf"
+      })
     );
+
     expect(spawnMock).not.toHaveBeenCalled();
     expect(uploadMock).toHaveBeenCalledWith(
-      "users/user-1/tasks/task-report-runtime-temp/outputs/reference-report.pdf",
+      "users/user-1/tasks/task-report-no-python/outputs/reference-report.pdf",
       expect.any(Buffer),
       expect.objectContaining({ upsert: true })
     );
