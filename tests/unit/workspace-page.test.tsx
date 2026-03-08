@@ -417,4 +417,101 @@ describe("WorkspacePage", () => {
     expect(html).toContain("一键重试分析");
     expect(html).not.toContain("系统没能完成这次分析");
   });
+
+  it("uses a darker warning color so analysis reminders stay readable", () => {
+    const html = renderToStaticMarkup(
+      <WorkspacePageClient
+        initialQuota={1500}
+        initialActiveTask={{
+          task: {
+            id: "task-warning-style",
+            status: "created",
+            targetWordCount: 1000,
+            citationStyle: "APA 7",
+            specialRequirements: ""
+          },
+          files: [
+            {
+              id: "file-1",
+              originalFilename: "brief.pdf",
+              role: "task_requirement",
+              isPrimary: true
+            }
+          ],
+          classification: {
+            primaryRequirementFileId: "file-1",
+            needsUserConfirmation: false,
+            reasoning: "模型已找到主任务文件。"
+          },
+          analysisStatus: "succeeded",
+          analysisProgress: {
+            requestedAt: null,
+            startedAt: null,
+            completedAt: null,
+            elapsedSeconds: 0,
+            maxWaitSeconds: 600,
+            canRetry: false
+          },
+          analysisRuntime: {
+            state: "not_applicable",
+            status: null,
+            detail: "首版大纲已经生成完成。",
+            autoRecovered: false,
+            runId: null
+          },
+          analysis: {
+            chosenTaskFileId: "file-1",
+            supportingFileIds: [],
+            ignoredFileIds: [],
+            needsUserConfirmation: false,
+            reasoning: "模型已经完成分析。",
+            targetWordCount: 1000,
+            citationStyle: "APA 7",
+            topic: "Sample Topic",
+            chapterCount: 3,
+            mustCover: [],
+            gradingFocus: [],
+            appliedSpecialRequirements: "",
+            usedDefaultWordCount: false,
+            usedDefaultCitationStyle: false,
+            warnings: [
+              "Topic is self-selected; ensure it aligns with your existing extended project topic."
+            ],
+            analysisRenderMode: "structured",
+            rawModelResponse: null,
+            providerStatusCode: null,
+            providerErrorBody: null,
+            providerErrorKind: null
+          },
+          analysisRenderMode: "structured",
+          rawModelResponse: null,
+          providerStatusCode: null,
+          providerErrorBody: null,
+          providerErrorKind: null,
+          ruleCard: null,
+          outline: {
+            articleTitle: "Sample Topic",
+            sections: [
+              {
+                title: "Introduction",
+                summary: "Summary",
+                bulletPoints: ["Point 1", "Point 2", "Point 3"]
+              }
+            ]
+          },
+          humanize: {
+            status: "idle",
+            provider: "undetectable",
+            requestedAt: null,
+            completedAt: null,
+            errorMessage: null
+          },
+          message: null
+        } as any}
+      />
+    );
+
+    expect(html).toContain("border-amber-500/60 bg-amber-100");
+    expect(html).toContain("text-amber-950");
+  });
 });

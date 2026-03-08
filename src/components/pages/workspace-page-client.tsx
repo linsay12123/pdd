@@ -775,7 +775,7 @@ export function WorkspacePageClient({
                         notice.tone === "error"
                           ? "border-red-500/30 bg-red-500/10 text-red-200"
                           : notice.tone === "success"
-                            ? "border-green-500/30 bg-green-500/10 text-green-200"
+                            ? "border-emerald-600/70 bg-emerald-100 text-emerald-950"
                             : "border-gold-500/30 bg-gold-500/10 text-gold-200"
                       }`}
                     >
@@ -853,7 +853,7 @@ export function WorkspacePageClient({
                       notice.tone === "error"
                         ? "border-red-500/30 bg-red-500/10 text-red-200"
                         : notice.tone === "success"
-                          ? "border-green-500/30 bg-green-500/10 text-green-200"
+                          ? "border-emerald-600/70 bg-emerald-100 text-emerald-950"
                           : "border-gold-500/30 bg-gold-500/10 text-gold-200"
                     }`}
                   >
@@ -1117,8 +1117,8 @@ export function WorkspacePageClient({
                             </p>
                           )}
                           {analysis.warnings.length > 0 && (
-                            <div className="rounded-xl border border-yellow-500/20 bg-yellow-500/5 px-4 py-3">
-                              <p className="text-xs text-yellow-100">提醒：{analysis.warnings.join("；")}</p>
+                            <div className="rounded-xl border border-amber-500/60 bg-amber-100 px-4 py-3">
+                              <p className="text-xs text-amber-950">提醒：{analysis.warnings.join("；")}</p>
                             </div>
                           )}
                         </div>
@@ -1251,7 +1251,7 @@ export function WorkspacePageClient({
                       notice.tone === "error"
                         ? "border-red-500/30 bg-red-500/10 text-red-200"
                         : notice.tone === "success"
-                          ? "border-green-500/30 bg-green-500/10 text-green-200"
+                          ? "border-emerald-600/70 bg-emerald-100 text-emerald-950"
                           : "border-gold-500/30 bg-gold-500/10 text-gold-200"
                     }`}
                   >
