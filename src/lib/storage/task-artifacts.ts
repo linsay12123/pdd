@@ -1,4 +1,4 @@
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import {
   requireFormalArtifactStorage,
@@ -17,6 +17,10 @@ type SaveTaskArtifactInput = {
 };
 
 type ReadTaskArtifactInput = {
+  storagePath: string;
+};
+
+type DeleteTaskArtifactInput = {
   storagePath: string;
 };
 
@@ -72,4 +76,26 @@ export async function readTaskArtifact(input: ReadTaskArtifactInput) {
   }
 
   return Buffer.from(await data.arrayBuffer());
+}
+
+export async function deleteTaskArtifact(input: DeleteTaskArtifactInput) {
+  if (!shouldUseSupabasePersistence()) {
+    if (!shouldUseLocalTestPersistence()) {
+      requireFormalArtifactStorage();
+    }
+
+    await rm(resolveStoredFileDiskPath(input.storagePath), {
+      force: true
+    });
+    return;
+  }
+
+  const client = createSupabaseAdminClient();
+  const { error } = await client.storage
+    .from(taskArtifactBucket)
+    .remove([input.storagePath]);
+
+  if (error && !String(error.message ?? "").toLowerCase().includes("not found")) {
+    throw new Error(`删除交付文件失败：${error.message}`);
+  }
 }

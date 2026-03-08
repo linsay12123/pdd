@@ -4,12 +4,16 @@ vi.mock("server-only", () => ({}));
 
 import { handleTaskAnalysisStatusRequest } from "../../app/api/tasks/[taskId]/analysis/route";
 import {
+  resetTaskDraftStore,
   getTaskSummary,
+  resetTaskOutputStore,
   resetTaskFileStore,
   resetTaskOutlineStore,
   resetTaskStore,
+  saveTaskDraftVersion,
   saveTaskFileRecords,
   saveTaskOutlineVersion,
+  saveTaskOutputRecord,
   saveTaskSummary
 } from "../../src/lib/tasks/repository";
 
@@ -30,6 +34,8 @@ describe("task analysis status route", () => {
     resetTaskStore();
     resetTaskFileStore();
     resetTaskOutlineStore();
+    resetTaskDraftStore();
+    resetTaskOutputStore();
   });
 
   it("returns pending status while background analysis is still running", async () => {
@@ -492,5 +498,184 @@ describe("task analysis status route", () => {
     expect(payload.analysisStatus).toBe("failed");
     expect(String(payload.message)).toContain("旧的后台任务编号");
     expect(String(payload.message)).toContain("一键重试分析");
+  });
+
+  it("returns deliverable downloads and final word count after the writing pipeline finishes", async () => {
+    saveTaskSummary({
+      id: "task-ready",
+      userId: "user-1",
+      status: "deliverable_ready",
+      targetWordCount: 1000,
+      citationStyle: "Harvard",
+      specialRequirements: "",
+      latestOutlineVersionId: "outline-ready",
+      latestDraftVersionId: "draft-ready",
+      analysisStatus: "succeeded"
+    });
+
+    saveTaskOutlineVersion({
+      id: "outline-ready",
+      taskId: "task-ready",
+      userId: "user-1",
+      versionNumber: 1,
+      outline: {
+        articleTitle: "Sample title",
+        targetWordCount: 1000,
+        citationStyle: "Harvard",
+        chineseMirrorPending: true,
+        sections: [
+          {
+            title: "Introduction",
+            summary: "Intro",
+            bulletPoints: ["a", "b", "c"]
+          }
+        ]
+      },
+      feedback: "",
+      isApproved: true,
+      targetWordCount: 1000,
+      citationStyle: "Harvard"
+    });
+
+    saveTaskDraftVersion({
+      id: "draft-ready",
+      taskId: "task-ready",
+      userId: "user-1",
+      versionNumber: 1,
+      title: "Sample title",
+      bodyMarkdown: "A finished body paragraph.",
+      bodyWordCount: 1004,
+      referencesMarkdown: "Author. (2024). Source.",
+      isActive: true,
+      isCandidate: false
+    });
+
+    saveTaskOutputRecord({
+      id: "out-final",
+      taskId: "task-ready",
+      userId: "user-1",
+      outputKind: "final_docx",
+      storagePath: "users/user-1/tasks/task-ready/outputs/final.docx"
+    });
+
+    saveTaskOutputRecord({
+      id: "out-report",
+      taskId: "task-ready",
+      userId: "user-1",
+      outputKind: "reference_report_pdf",
+      storagePath: "users/user-1/tasks/task-ready/outputs/reference-report.pdf"
+    });
+
+    const response = await handleTaskAnalysisStatusRequest(
+      new Request("http://localhost/api/tasks/task-ready/analysis"),
+      { taskId: "task-ready" },
+      {
+        isPersistenceReady: () => true,
+        requireUser: async () => makeUser()
+      }
+    );
+    const payload = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(payload.task.status).toBe("deliverable_ready");
+    expect(payload.downloads.finalDocxOutputId).toBe("out-final");
+    expect(payload.downloads.referenceReportOutputId).toBe("out-report");
+    expect(payload.finalWordCount).toBe(1004);
+  });
+
+  it("does not query or expose downloads while the task is still drafting", async () => {
+    saveTaskSummary({
+      id: "task-drafting",
+      userId: "user-1",
+      status: "drafting",
+      targetWordCount: 1000,
+      citationStyle: "Harvard",
+      specialRequirements: "",
+      latestOutlineVersionId: "outline-drafting",
+      latestDraftVersionId: "draft-drafting",
+      analysisStatus: "succeeded",
+      lastWorkflowStage: "drafting"
+    } as any);
+
+    saveTaskDraftVersion({
+      id: "draft-drafting",
+      taskId: "task-drafting",
+      userId: "user-1",
+      versionNumber: 1,
+      title: "Sample title",
+      bodyMarkdown: "A partial body paragraph.",
+      bodyWordCount: 402,
+      referencesMarkdown: "",
+      isActive: true,
+      isCandidate: false
+    });
+
+    saveTaskOutputRecord({
+      id: "out-drafting-final",
+      taskId: "task-drafting",
+      userId: "user-1",
+      outputKind: "final_docx",
+      storagePath: "users/user-1/tasks/task-drafting/outputs/final.docx"
+    });
+
+    const response = await handleTaskAnalysisStatusRequest(
+      new Request("http://localhost/api/tasks/task-drafting/analysis"),
+      { taskId: "task-drafting" },
+      {
+        isPersistenceReady: () => true,
+        requireUser: async () => makeUser()
+      }
+    );
+    const payload = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(payload.task.status).toBe("drafting");
+    expect(payload.task.lastWorkflowStage).toBe("drafting");
+    expect(payload.downloads.finalDocxOutputId).toBeNull();
+    expect(payload.downloads.referenceReportOutputId).toBeNull();
+    expect(payload.finalWordCount).toBeNull();
+  });
+
+  it("returns the last workflow stage when a post-approval task fails", async () => {
+    saveTaskSummary({
+      id: "task-post-approval-failed",
+      userId: "user-1",
+      status: "failed",
+      targetWordCount: 1200,
+      citationStyle: "Harvard",
+      specialRequirements: "",
+      latestOutlineVersionId: "outline-failed",
+      latestDraftVersionId: "draft-failed",
+      analysisStatus: "succeeded",
+      lastWorkflowStage: "verifying_references"
+    } as any);
+
+    saveTaskDraftVersion({
+      id: "draft-failed",
+      taskId: "task-post-approval-failed",
+      userId: "user-1",
+      versionNumber: 1,
+      title: "Sample title",
+      bodyMarkdown: "A nearly finished body paragraph.",
+      bodyWordCount: 1189,
+      referencesMarkdown: "Author. (2024). Source.",
+      isActive: true,
+      isCandidate: false
+    });
+
+    const response = await handleTaskAnalysisStatusRequest(
+      new Request("http://localhost/api/tasks/task-post-approval-failed/analysis"),
+      { taskId: "task-post-approval-failed" },
+      {
+        isPersistenceReady: () => true,
+        requireUser: async () => makeUser()
+      }
+    );
+    const payload = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(payload.task.status).toBe("failed");
+    expect(payload.task.lastWorkflowStage).toBe("verifying_references");
+    expect(String(payload.message)).toContain("正文");
   });
 });

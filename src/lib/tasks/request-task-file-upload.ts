@@ -10,6 +10,7 @@ export type TaskWorkflowTaskPayload = {
   targetWordCount: number | null;
   citationStyle: string | null;
   specialRequirements: string;
+  lastWorkflowStage?: "drafting" | "adjusting_word_count" | "verifying_references" | "exporting" | null;
 };
 
 export type TaskWorkflowFilePayload = {
@@ -76,6 +77,12 @@ export type TaskWorkflowPayload = {
   providerErrorKind: TaskProviderErrorKind | null;
   ruleCard: TaskWorkflowRuleCardPayload | null;
   outline: OutlineScaffold | null;
+  downloads?: {
+    finalDocxOutputId: string | null;
+    referenceReportOutputId: string | null;
+    humanizedDocxOutputId: string | null;
+  };
+  finalWordCount?: number | null;
   humanize?: TaskWorkflowHumanizePayload | null;
   message: string;
 };

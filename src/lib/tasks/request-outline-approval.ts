@@ -7,6 +7,7 @@ export type OutlineApprovalPayload = {
     targetWordCount: number | null;
     citationStyle: string | null;
     specialRequirements: string;
+    lastWorkflowStage?: "drafting" | "adjusting_word_count" | "verifying_references" | "exporting" | null;
   };
   outlineVersion: {
     id: string;
@@ -17,7 +18,7 @@ export type OutlineApprovalPayload = {
     referenceReportOutputId: string | null;
   };
   humanize?: TaskWorkflowHumanizePayload | null;
-  finalWordCount: number;
+  finalWordCount: number | null;
   message: string;
 };
 

@@ -21,7 +21,6 @@ import {
 import { setOwnedTaskStatusInSupabase } from "@/src/lib/tasks/supabase-task-records";
 import { saveDraftVersion } from "@/src/lib/tasks/save-draft-version";
 import { saveReferenceChecks } from "@/src/lib/tasks/save-reference-checks";
-import { listOwnedTaskOutputs } from "@/src/lib/tasks/task-output-store";
 import type {
   TaskOutlineVersion,
   TaskSummary
@@ -54,7 +53,9 @@ type ProcessDocxExporter = (
     userId?: string;
   }
 ) => Promise<{
+  outputId: string;
   outputPath: string;
+  storagePath: string;
 }>;
 
 type ProcessReferenceReportExporter = (
@@ -62,7 +63,9 @@ type ProcessReferenceReportExporter = (
     userId?: string;
   }
 ) => Promise<{
+  outputId: string;
   outputPath: string;
+  storagePath: string;
 }>;
 
 type ProcessApprovedTaskDependencies = {
@@ -91,6 +94,11 @@ type ProcessApprovedTaskResult = {
     finalDocxOutputId: string | null;
     referenceReportOutputId: string | null;
   };
+  generatedOutputs: Array<{
+    id: string;
+    userId: string;
+    storagePath: string;
+  }>;
   finalDraftMarkdown: string;
 };
 
@@ -199,7 +207,7 @@ export async function processApprovedTask(
   await setTaskStatus(input.taskId, input.userId, "exporting");
 
   const docxContent = draftToDocxContent(wordCountResult.chosenDraft);
-  await runTaskStage("exporting", async () => {
+  const exportedDocx = await runTaskStage("exporting", async () => {
     return exportDocxImpl({
       taskId: input.taskId,
       userId: input.userId,
@@ -212,7 +220,7 @@ export async function processApprovedTask(
       citationStyle
     });
   });
-  await runTaskStage("exporting", async () => {
+  const exportedReferenceReport = await runTaskStage("exporting", async () => {
     return exportReferenceReportImpl({
       taskId: input.taskId,
       userId: input.userId,
@@ -231,21 +239,30 @@ export async function processApprovedTask(
     });
   });
 
-  const nextTask = await setTaskStatus(input.taskId, input.userId, "deliverable_ready");
-  const outputs = await listOwnedTaskOutputs({
-    taskId: input.taskId,
-    userId: input.userId
-  });
+  const nextTask =
+    (shouldUseSupabasePersistence()
+      ? await loadApprovedTaskContextWithSupabase(input.taskId, input.userId)
+      : loadApprovedTaskContextLocally(input.taskId, input.userId)).task;
 
   return {
     task: nextTask,
     outlineVersion: context.outlineVersion,
     downloads: {
-      finalDocxOutputId:
-        outputs.find((output) => output.outputKind === "final_docx")?.id ?? null,
-      referenceReportOutputId:
-        outputs.find((output) => output.outputKind === "reference_report_pdf")?.id ?? null
+      finalDocxOutputId: exportedDocx.outputId,
+      referenceReportOutputId: exportedReferenceReport.outputId
     },
+    generatedOutputs: [
+      {
+        id: exportedDocx.outputId,
+        userId: input.userId,
+        storagePath: exportedDocx.storagePath
+      },
+      {
+        id: exportedReferenceReport.outputId,
+        userId: input.userId,
+        storagePath: exportedReferenceReport.storagePath
+      }
+    ],
     finalDraftMarkdown: wordCountResult.chosenDraft
   };
 }

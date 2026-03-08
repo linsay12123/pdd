@@ -26,7 +26,7 @@ describe("process approved task", () => {
     resetTaskOutputStore();
   });
 
-  it("turns an approved outline into a draft, reference checks, and deliverables", async () => {
+  it("turns an approved outline into a draft, reference checks, and exported files before final settlement", async () => {
     saveTaskSummary({
       id: "task-process-1",
       userId: "user-1",
@@ -125,7 +125,9 @@ describe("process approved task", () => {
           });
 
           return {
-            outputPath: output.storagePath
+            outputId: output.id,
+            outputPath: output.storagePath,
+            storagePath: output.storagePath
           };
         },
         exportReferenceReport: async ({ taskId, userId }) => {
@@ -137,13 +139,15 @@ describe("process approved task", () => {
           });
 
           return {
-            outputPath: output.storagePath
+            outputId: output.id,
+            outputPath: output.storagePath,
+            storagePath: output.storagePath
           };
         }
       }
     );
 
-    expect(result.task.status).toBe("deliverable_ready");
+    expect(result.task.status).toBe("exporting");
     expect(listTaskDraftVersions("task-process-1")).toHaveLength(3);
     expect(listTaskReferenceChecks("task-process-1")).toHaveLength(1);
     expect(getTaskOutputs("task-process-1")).toHaveLength(2);

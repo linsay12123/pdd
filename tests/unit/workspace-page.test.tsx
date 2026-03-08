@@ -13,7 +13,8 @@ describe("WorkspacePage", () => {
     expect(html).toContain("不会每30秒重复调用大模型");
     expect(html).toContain("任务进度");
     expect(html).toContain("大纲生成与确认");
-    expect(html).toContain("交付与降AI");
+    expect(html).toContain("字数校正");
+    expect(html).toContain("导出交付");
     expect(html).toContain("积分兑换");
     expect(html).toContain('href="/billing"');
   });
@@ -513,5 +514,251 @@ describe("WorkspacePage", () => {
 
     expect(html).toContain("border-amber-500/60 bg-amber-100");
     expect(html).toContain("text-amber-950");
+  });
+
+  it("shows the drafting stage instead of jumping straight to the download screen", () => {
+    const html = renderToStaticMarkup(
+      <WorkspacePageClient
+        initialQuota={1500}
+        initialActiveTask={{
+          task: {
+            id: "task-drafting",
+            status: "drafting",
+            targetWordCount: 1000,
+            citationStyle: "Harvard",
+            specialRequirements: "Use strong critical analysis."
+          },
+          files: [],
+          classification: {
+            primaryRequirementFileId: "file-1",
+            needsUserConfirmation: false
+          },
+          analysisStatus: "succeeded",
+          analysisProgress: {
+            requestedAt: null,
+            startedAt: null,
+            completedAt: null,
+            elapsedSeconds: 0,
+            maxWaitSeconds: 600,
+            canRetry: false
+          },
+          analysisRuntime: {
+            state: "not_applicable",
+            status: null,
+            detail: "done",
+            autoRecovered: false,
+            runId: null
+          },
+          analysis: null,
+          analysisRenderMode: "structured",
+          rawModelResponse: null,
+          providerStatusCode: null,
+          providerErrorBody: null,
+          providerErrorKind: null,
+          ruleCard: null,
+          outline: {
+            articleTitle: "Sample title",
+            targetWordCount: 1000,
+            citationStyle: "Harvard",
+            chineseMirrorPending: true,
+            sections: [
+              {
+                title: "Introduction",
+                summary: "Intro",
+                bulletPoints: ["a", "b", "c"]
+              }
+            ]
+          },
+          downloads: {
+            finalDocxOutputId: null,
+            referenceReportOutputId: null,
+            humanizedDocxOutputId: null
+          },
+          humanize: {
+            status: "idle",
+            provider: "undetectable",
+            requestedAt: null,
+            completedAt: null,
+            errorMessage: null
+          },
+          message: "系统已进入正文写作。"
+        } as any}
+      />
+    );
+
+    expect(html).toContain("正文写作中");
+    expect(html).toContain("系统正在根据你确认的大纲一次性写完整篇文章");
+    expect(html).toContain("字数校正");
+    expect(html).not.toContain("任务已完成");
+    expect(html).not.toContain("下载文档");
+  });
+
+  it("shows the word-count adjustment and reference verification stages from real task statuses", () => {
+    const adjustingHtml = renderToStaticMarkup(
+      <WorkspacePageClient
+        initialQuota={1500}
+        initialActiveTask={{
+          task: {
+            id: "task-adjusting",
+            status: "adjusting_word_count",
+            targetWordCount: 1000,
+            citationStyle: "Harvard",
+            specialRequirements: ""
+          },
+          files: [],
+          classification: {
+            primaryRequirementFileId: "file-1",
+            needsUserConfirmation: false
+          },
+          analysisStatus: "succeeded",
+          analysisProgress: {
+            requestedAt: null,
+            startedAt: null,
+            completedAt: null,
+            elapsedSeconds: 0,
+            maxWaitSeconds: 600,
+            canRetry: false
+          },
+          analysis: null,
+          analysisRenderMode: "structured",
+          rawModelResponse: null,
+          providerStatusCode: null,
+          providerErrorBody: null,
+          providerErrorKind: null,
+          ruleCard: null,
+          outline: null,
+          downloads: {
+            finalDocxOutputId: null,
+            referenceReportOutputId: null,
+            humanizedDocxOutputId: null
+          },
+          humanize: {
+            status: "idle",
+            provider: "undetectable",
+            requestedAt: null,
+            completedAt: null,
+            errorMessage: null
+          },
+          message: "系统正在校正正文部分字数。"
+        } as any}
+      />
+    );
+
+    expect(adjustingHtml).toContain("字数校正中");
+    expect(adjustingHtml).toContain("系统正在把正文部分校正到目标字数的正负 10 以内");
+    expect(adjustingHtml).not.toContain("任务已完成");
+
+    const verifyingHtml = renderToStaticMarkup(
+      <WorkspacePageClient
+        initialQuota={1500}
+        initialActiveTask={{
+          task: {
+            id: "task-verifying",
+            status: "verifying_references",
+            targetWordCount: 1000,
+            citationStyle: "Harvard",
+            specialRequirements: ""
+          },
+          files: [],
+          classification: {
+            primaryRequirementFileId: "file-1",
+            needsUserConfirmation: false
+          },
+          analysisStatus: "succeeded",
+          analysisProgress: {
+            requestedAt: null,
+            startedAt: null,
+            completedAt: null,
+            elapsedSeconds: 0,
+            maxWaitSeconds: 600,
+            canRetry: false
+          },
+          analysis: null,
+          analysisRenderMode: "structured",
+          rawModelResponse: null,
+          providerStatusCode: null,
+          providerErrorBody: null,
+          providerErrorKind: null,
+          ruleCard: null,
+          outline: null,
+          downloads: {
+            finalDocxOutputId: null,
+            referenceReportOutputId: null,
+            humanizedDocxOutputId: null
+          },
+          humanize: {
+            status: "idle",
+            provider: "undetectable",
+            requestedAt: null,
+            completedAt: null,
+            errorMessage: null
+          },
+          message: "系统正在核验引用。"
+        } as any}
+      />
+    );
+
+    expect(verifyingHtml).toContain("引用核验中");
+    expect(verifyingHtml).toContain("系统正在逐条核对参考文献与来源链接");
+    expect(verifyingHtml).not.toContain("任务已完成");
+  });
+
+  it("shows a failed writing-stage card instead of pretending the task is complete", () => {
+    const html = renderToStaticMarkup(
+      <WorkspacePageClient
+        initialQuota={1500}
+        initialActiveTask={{
+          task: {
+            id: "task-writing-failed",
+            status: "failed",
+            targetWordCount: 1000,
+            citationStyle: "Harvard",
+            specialRequirements: "",
+            lastWorkflowStage: "verifying_references"
+          },
+          files: [],
+          classification: {
+            primaryRequirementFileId: "file-1",
+            needsUserConfirmation: false
+          },
+          analysisStatus: "succeeded",
+          analysisProgress: {
+            requestedAt: null,
+            startedAt: null,
+            completedAt: null,
+            elapsedSeconds: 0,
+            maxWaitSeconds: 600,
+            canRetry: false
+          },
+          analysis: null,
+          analysisRenderMode: "structured",
+          rawModelResponse: null,
+          providerStatusCode: null,
+          providerErrorBody: null,
+          providerErrorKind: null,
+          ruleCard: null,
+          outline: null,
+          downloads: {
+            finalDocxOutputId: null,
+            referenceReportOutputId: null,
+            humanizedDocxOutputId: null
+          },
+          humanize: {
+            status: "idle",
+            provider: "undetectable",
+            requestedAt: null,
+            completedAt: null,
+            errorMessage: null
+          },
+          message: "正文流水线失败，请重新开始正文生成。"
+        } as any}
+      />
+    );
+
+    expect(html).toContain("正文生成失败");
+    expect(html).toContain("重新开始正文生成");
+    expect(html).toContain("引用核验");
+    expect(html).not.toContain("任务已完成");
+    expect(html).not.toContain("下载文档");
   });
 });

@@ -81,7 +81,7 @@ export async function getOwnedTaskSummary(taskId: string, userId: string) {
   const { data, error } = await client
     .from("writing_tasks")
     .select(
-      "id,status,target_word_count,citation_style,special_requirements,primary_requirement_file_id,topic,requested_chapter_count,outline_revision_count,latest_outline_version_id,analysis_snapshot,analysis_status,analysis_model,analysis_retry_count,analysis_error_message,analysis_trigger_run_id,analysis_requested_at,analysis_started_at,analysis_completed_at"
+      "id,status,target_word_count,citation_style,special_requirements,primary_requirement_file_id,topic,requested_chapter_count,outline_revision_count,latest_outline_version_id,latest_draft_version_id,analysis_snapshot,analysis_status,analysis_model,analysis_retry_count,analysis_error_message,analysis_trigger_run_id,analysis_requested_at,analysis_started_at,analysis_completed_at,approval_attempt_count,last_workflow_stage"
     )
     .eq("id", taskId)
     .eq("user_id", userId)
@@ -117,6 +117,9 @@ export async function getOwnedTaskSummary(taskId: string, userId: string) {
     latestOutlineVersionId: data.latest_outline_version_id
       ? String(data.latest_outline_version_id)
       : null,
+    latestDraftVersionId: data.latest_draft_version_id
+      ? String(data.latest_draft_version_id)
+      : null,
     analysisSnapshot:
       data.analysis_snapshot && typeof data.analysis_snapshot === "object"
         ? (data.analysis_snapshot as TaskAnalysisSnapshot)
@@ -141,7 +144,12 @@ export async function getOwnedTaskSummary(taskId: string, userId: string) {
       : null,
     analysisCompletedAt: data.analysis_completed_at
       ? String(data.analysis_completed_at)
-      : null
+      : null,
+    approvalAttemptCount: Number((data as { approval_attempt_count?: number | null }).approval_attempt_count ?? 0),
+    lastWorkflowStage:
+      (data as { last_workflow_stage?: string | null }).last_workflow_stage
+        ? String((data as { last_workflow_stage?: string | null }).last_workflow_stage) as TaskSummary["lastWorkflowStage"]
+        : null
   } satisfies TaskSummary;
 }
 

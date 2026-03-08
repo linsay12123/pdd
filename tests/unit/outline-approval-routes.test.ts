@@ -2,9 +2,16 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("server-only", () => ({}));
 
-const { reviseOutlineFromFilesWithOpenAIMock, listTaskFilesForModelMock } = vi.hoisted(() => ({
+const { reviseOutlineFromFilesWithOpenAIMock, listTaskFilesForModelMock, triggerTaskMock } = vi.hoisted(() => ({
   reviseOutlineFromFilesWithOpenAIMock: vi.fn(),
-  listTaskFilesForModelMock: vi.fn()
+  listTaskFilesForModelMock: vi.fn(),
+  triggerTaskMock: vi.fn()
+}));
+
+vi.mock("@trigger.dev/sdk/v3", () => ({
+  tasks: {
+    trigger: triggerTaskMock
+  }
 }));
 
 vi.mock("../../src/lib/ai/services/revise-outline-from-files", () => ({
@@ -41,7 +48,6 @@ import {
 import { freezeQuota } from "../../src/lib/billing/freeze-quota";
 import { releaseQuota } from "../../src/lib/billing/release-quota";
 import { settleQuota } from "../../src/lib/billing/settle-quota";
-import { TaskProcessingStageError } from "../../src/lib/tasks/process-approved-task";
 import { saveOutlineVersion } from "../../src/lib/tasks/save-outline-version";
 
 describe("outline approval routes", () => {
@@ -59,6 +65,7 @@ describe("outline approval routes", () => {
     });
     reviseOutlineFromFilesWithOpenAIMock.mockReset();
     listTaskFilesForModelMock.mockReset();
+    triggerTaskMock.mockReset();
   });
 
   function makeApprovedOutlineDeps(taskId: string, outlineVersionId: string, userId = "user-1") {
@@ -83,6 +90,8 @@ describe("outline approval routes", () => {
         };
       },
       reserveQuotaForTask: async () => {
+        const previousStatus = getTaskSummary(taskId)?.status ?? "awaiting_outline_approval";
+        const previousLastWorkflowStage = getTaskSummary(taskId)?.lastWorkflowStage ?? null;
         const wallet = getUserWallet(userId);
         const frozen = freezeQuota({
           wallet,
@@ -95,10 +104,17 @@ describe("outline approval routes", () => {
         appendPaymentLedgerEntry(userId, frozen.entry);
         patchTaskSummary(taskId, {
           status: "drafting",
-          quotaReservation: frozen.reservation
+          quotaReservation: frozen.reservation,
+          approvalAttemptCount: (getTaskSummary(taskId)?.approvalAttemptCount ?? 0) + 1,
+          lastWorkflowStage: "drafting"
         });
 
-        return frozen.reservation;
+        return {
+          reservation: frozen.reservation,
+          approvalAttemptCount: getTaskSummary(taskId)?.approvalAttemptCount ?? 1,
+          previousStatus,
+          previousLastWorkflowStage
+        };
       },
       settleQuotaForTask: async (_taskId: string, settleUserId: string, reservation: any) => {
         const wallet = getUserWallet(settleUserId);
@@ -123,7 +139,8 @@ describe("outline approval routes", () => {
         patchTaskSummary(taskId, {
           quotaReservation: undefined
         });
-      }
+      },
+      enqueueApprovedTaskProcessing: async () => {}
     };
   }
 
@@ -339,7 +356,7 @@ describe("outline approval routes", () => {
     expect(payload.message).toContain("上限");
   });
 
-  it("approves the chosen outline version and keeps the approved version linked on the task", async () => {
+  it("approves the chosen outline version, freezes quota, and returns drafting immediately", async () => {
     const initialVersion = await saveOutlineVersion({
       task: {
         id: "task-outline-3",
@@ -361,6 +378,8 @@ describe("outline approval routes", () => {
       }
     });
 
+    const enqueueSpy = vi.fn().mockResolvedValue(undefined);
+
     const response = await handleOutlineApprovalRequest(
       new Request("http://localhost/api/tasks/task-outline-3/outline/approve", {
         method: "POST",
@@ -376,32 +395,23 @@ describe("outline approval routes", () => {
       },
       {
         ...makeApprovedOutlineDeps("task-outline-3", initialVersion.id),
-        processTask: async () => ({
-          task: {
-            ...getTaskSummary("task-outline-3")!,
-            status: "deliverable_ready"
-          },
-          outlineVersion: {
-            ...initialVersion,
-            isApproved: true
-          },
-          downloads: {
-            finalDocxOutputId: "out-final-1",
-            referenceReportOutputId: "out-report-1"
-          },
-          finalDraftMarkdown: "# Title"
-        })
+        enqueueApprovedTaskProcessing: enqueueSpy
       }
     );
     const payload = await response.json();
 
-    expect(response.status).toBe(200);
-    expect(payload.task.status).toBe("deliverable_ready");
+    expect(response.status).toBe(202);
+    expect(payload.task.status).toBe("drafting");
     expect(payload.outlineVersion.isApproved).toBe(true);
+    expect(payload.downloads.finalDocxOutputId).toBeNull();
+    expect(payload.downloads.referenceReportOutputId).toBeNull();
+    expect(payload.finalWordCount).toBeNull();
+    expect(payload.message).toContain("正文写作");
+    expect(enqueueSpy).toHaveBeenCalledTimes(1);
     expect(getTaskSummary("task-outline-3")?.latestOutlineVersionId).toBe(initialVersion.id);
   });
 
-  it("can continue straight into final deliverables after approval when the processing step succeeds", async () => {
+  it("releases quota and rolls back when enqueueing the writing pipeline fails", async () => {
     const initialVersion = await saveOutlineVersion({
       task: {
         id: "task-outline-4",
@@ -438,151 +448,24 @@ describe("outline approval routes", () => {
       },
       {
         ...makeApprovedOutlineDeps("task-outline-4", initialVersion.id),
-        processTask: async () => ({
-          task: {
-            ...getTaskSummary("task-outline-4")!,
-            status: "deliverable_ready"
-          },
-          outlineVersion: {
-            ...initialVersion,
-            isApproved: true
-          },
-          downloads: {
-            finalDocxOutputId: "out-final-1",
-            referenceReportOutputId: "out-report-1"
-          },
-          finalDraftMarkdown: "# Title"
-        })
-      }
-    );
-    const payload = await response.json();
-
-    expect(response.status).toBe(200);
-    expect(payload.task.status).toBe("deliverable_ready");
-    expect(payload.downloads.finalDocxOutputId).toBe("out-final-1");
-    expect(payload.downloads.referenceReportOutputId).toBe("out-report-1");
-  });
-
-  it("refunds the charged quota when writing fails during drafting", async () => {
-    const initialVersion = await saveOutlineVersion({
-      task: {
-        id: "task-outline-5",
-        userId: "user-1",
-        status: "awaiting_outline_approval",
-        targetWordCount: 2200,
-        citationStyle: "APA 7",
-        specialRequirements: "",
-        topic: "Corporate Governance",
-        outlineRevisionCount: 0
-      },
-      userId: "user-1",
-      outline: {
-        articleTitle: "Corporate Governance: A Structured Analysis",
-        targetWordCount: 2200,
-        citationStyle: "APA 7",
-        chineseMirrorPending: true,
-        sections: []
-      }
-    });
-
-    const response = await handleOutlineApprovalRequest(
-      new Request("http://localhost/api/tasks/task-outline-5/outline/approve", {
-        method: "POST",
-        body: JSON.stringify({
-          outlineVersionId: initialVersion.id
-        }),
-        headers: {
-          "content-type": "application/json"
-        }
-      }),
-      {
-        taskId: "task-outline-5"
-      },
-      {
-        ...makeApprovedOutlineDeps("task-outline-5", initialVersion.id),
-        processTask: async () => {
-          throw new TaskProcessingStageError(
-            "drafting",
-            new Error("drafting exploded")
-          );
+        enqueueApprovedTaskProcessing: async () => {
+          throw new Error("queue exploded");
         }
       }
     );
     const payload = await response.json();
 
     expect(response.status).toBe(500);
-    expect(payload.message).toContain("drafting exploded");
+    expect(payload.message).toContain("queue exploded");
     expect(getUserWallet("user-1")).toEqual({
       rechargeQuota: 5000,
       subscriptionQuota: 0,
       frozenQuota: 0
     });
+    expect(getTaskSummary("task-outline-4")?.status).toBe("awaiting_outline_approval");
     expect(
       [...getPaymentLedgerEntries("user-1").map((entry) => entry.kind)].sort()
     ).toEqual(["task_freeze", "task_release"]);
-  });
-
-  it("refunds the frozen quota even when the task fails in later stages", async () => {
-    const initialVersion = await saveOutlineVersion({
-      task: {
-        id: "task-outline-6",
-        userId: "user-1",
-        status: "awaiting_outline_approval",
-        targetWordCount: 2200,
-        citationStyle: "APA 7",
-        specialRequirements: "",
-        topic: "Corporate Governance",
-        outlineRevisionCount: 0
-      },
-      userId: "user-1",
-      outline: {
-        articleTitle: "Corporate Governance: A Structured Analysis",
-        targetWordCount: 2200,
-        citationStyle: "APA 7",
-        chineseMirrorPending: true,
-        sections: []
-      }
-    });
-
-    const response = await handleOutlineApprovalRequest(
-      new Request("http://localhost/api/tasks/task-outline-6/outline/approve", {
-        method: "POST",
-        body: JSON.stringify({
-          outlineVersionId: initialVersion.id
-        }),
-        headers: {
-          "content-type": "application/json"
-        }
-      }),
-      {
-        taskId: "task-outline-6"
-      },
-      {
-        ...makeApprovedOutlineDeps("task-outline-6", initialVersion.id),
-        processTask: async () => {
-          throw new TaskProcessingStageError(
-            "verifying_references",
-            new Error("verification exploded")
-          );
-        }
-      }
-    );
-    const payload = await response.json();
-
-    expect(response.status).toBe(500);
-    expect(payload.message).toContain("verification exploded");
-    expect(getUserWallet("user-1")).toEqual({
-      rechargeQuota: 5000,
-      subscriptionQuota: 0,
-      frozenQuota: 0
-    });
-    expect(
-      [...getPaymentLedgerEntries("user-1").map((entry) => entry.kind)].sort()
-    ).toEqual([
-      "task_freeze",
-      "task_release"
-    ]);
-    expect(getTaskSummary("task-outline-6")?.status).toBe("failed");
   });
 
   it("returns 409 when the same task is already being processed", async () => {
@@ -692,5 +575,106 @@ describe("outline approval routes", () => {
     );
 
     consoleErrorSpy.mockRestore();
+  });
+
+  it("increments the approval attempt count and passes it into the background trigger", async () => {
+    const initialVersion = await saveOutlineVersion({
+      task: {
+        id: "task-outline-retry",
+        userId: "user-1",
+        status: "awaiting_outline_approval",
+        targetWordCount: 1000,
+        citationStyle: "APA 7",
+        specialRequirements: "",
+        topic: "Corporate Governance",
+        outlineRevisionCount: 0
+      },
+      userId: "user-1",
+      outline: {
+        articleTitle: "Corporate Governance: A Structured Analysis",
+        targetWordCount: 1000,
+        citationStyle: "APA 7",
+        chineseMirrorPending: true,
+        sections: []
+      }
+    });
+
+    const deps1 = makeApprovedOutlineDeps("task-outline-retry", initialVersion.id) as any;
+    delete deps1.enqueueApprovedTaskProcessing;
+
+    const response1 = await handleOutlineApprovalRequest(
+      new Request("http://localhost/api/tasks/task-outline-retry/outline/approve", {
+        method: "POST",
+        body: JSON.stringify({
+          outlineVersionId: initialVersion.id
+        }),
+        headers: {
+          "content-type": "application/json"
+        }
+      }),
+      {
+        taskId: "task-outline-retry"
+      },
+      deps1
+    );
+    const payload1 = await response1.json();
+
+    expect(response1.status).toBe(202);
+    expect(payload1.task.status).toBe("drafting");
+    expect(payload1.task.lastWorkflowStage).toBe("drafting");
+    expect(triggerTaskMock).toHaveBeenNthCalledWith(
+      1,
+      "process-approved-task",
+      expect.objectContaining({
+        taskId: "task-outline-retry",
+        userId: "user-1"
+      }),
+      expect.objectContaining({
+        concurrencyKey: "process-approved-task-task-outline-retry",
+        idempotencyKey: "process-approved-task-task-outline-retry-attempt-1"
+      })
+    );
+
+    updateTaskStatus("task-outline-retry", "failed");
+    patchTaskSummary("task-outline-retry", {
+      quotaReservation: undefined,
+      lastWorkflowStage: "exporting"
+    });
+
+    const deps2 = makeApprovedOutlineDeps("task-outline-retry", initialVersion.id) as any;
+    delete deps2.enqueueApprovedTaskProcessing;
+
+    const response2 = await handleOutlineApprovalRequest(
+      new Request("http://localhost/api/tasks/task-outline-retry/outline/approve", {
+        method: "POST",
+        body: JSON.stringify({
+          outlineVersionId: initialVersion.id
+        }),
+        headers: {
+          "content-type": "application/json"
+        }
+      }),
+      {
+        taskId: "task-outline-retry"
+      },
+      deps2
+    );
+    const payload2 = await response2.json();
+
+    expect(response2.status).toBe(202);
+    expect(payload2.task.status).toBe("drafting");
+    expect(payload2.task.lastWorkflowStage).toBe("drafting");
+    expect(triggerTaskMock).toHaveBeenNthCalledWith(
+      2,
+      "process-approved-task",
+      expect.objectContaining({
+        taskId: "task-outline-retry",
+        userId: "user-1"
+      }),
+      expect.objectContaining({
+        concurrencyKey: "process-approved-task-task-outline-retry",
+        idempotencyKey: "process-approved-task-task-outline-retry-attempt-2"
+      })
+    );
   });
 });

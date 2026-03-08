@@ -19,6 +19,10 @@ const analysisRuntimeCleanupMigration = resolve(
   migrationsDir,
   "202603060001_analysis_runtime_cleanup.sql"
 );
+const taskWorkflowAttemptStageMigration = resolve(
+  migrationsDir,
+  "202603090001_task_workflow_attempt_stage.sql"
+);
 
 describe("database cleanup migrations", () => {
   it("keeps task creation nullable until model analysis fills the requirements", () => {
@@ -76,5 +80,21 @@ describe("database cleanup migrations", () => {
     expect(sql).toContain("add column if not exists analysis_error_message");
     expect(sql).toContain("analysis_model");
     expect(sql).not.toContain("analysis_auto_recovered_once");
+  });
+
+  it("ships a workflow-attempt migration that records retry attempts and failed stage positions", () => {
+    expect(existsSync(taskWorkflowAttemptStageMigration)).toBe(true);
+
+    const sql = readFileSync(taskWorkflowAttemptStageMigration, "utf8");
+
+    expect(sql).toContain("add column if not exists approval_attempt_count integer");
+    expect(sql).toContain("alter column approval_attempt_count set default 0");
+    expect(sql).toContain("alter column approval_attempt_count set not null");
+    expect(sql).toContain("add column if not exists last_workflow_stage text");
+    expect(sql).toContain("writing_tasks_last_workflow_stage_check");
+    expect(sql).toContain("'drafting'");
+    expect(sql).toContain("'adjusting_word_count'");
+    expect(sql).toContain("'verifying_references'");
+    expect(sql).toContain("'exporting'");
   });
 });

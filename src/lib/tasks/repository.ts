@@ -17,7 +17,8 @@ import type {
   TaskReferenceCheck,
   TaskReferenceCheckInput,
   TaskStatus,
-  TaskSummary
+  TaskSummary,
+  TaskWorkflowStage
 } from "@/src/types/tasks";
 
 const taskStore = new Map<string, TaskSummary>();
@@ -60,7 +61,33 @@ export function patchTaskSummary(taskId: string, patch: Partial<TaskSummary>) {
   return nextTask;
 }
 
-export function updateTaskStatus(taskId: string, status: TaskStatus) {
+function resolveWorkflowStageForStatus(
+  status: TaskStatus,
+  override?: TaskWorkflowStage | null
+) {
+  if (override !== undefined) {
+    return override;
+  }
+
+  if (
+    status === "drafting" ||
+    status === "adjusting_word_count" ||
+    status === "verifying_references" ||
+    status === "exporting"
+  ) {
+    return status;
+  }
+
+  return undefined;
+}
+
+export function updateTaskStatus(
+  taskId: string,
+  status: TaskStatus,
+  options: {
+    lastWorkflowStage?: TaskWorkflowStage | null;
+  } = {}
+) {
   const existing = taskStore.get(taskId);
 
   if (!existing) {
@@ -71,7 +98,15 @@ export function updateTaskStatus(taskId: string, status: TaskStatus) {
 
   const nextTask = {
     ...existing,
-    status
+    status,
+    ...(resolveWorkflowStageForStatus(status, options.lastWorkflowStage) !== undefined
+      ? {
+          lastWorkflowStage: resolveWorkflowStageForStatus(
+            status,
+            options.lastWorkflowStage
+          )
+        }
+      : {})
   };
 
   taskStore.set(taskId, nextTask);
@@ -233,6 +268,15 @@ export function saveTaskOutputRecord(record: TaskOutputRecordInput) {
 
 export function getTaskOutputs(taskId: string) {
   return (taskOutputStore.get(taskId) ?? []).map((output) => normalizeTaskOutputRecord(output));
+}
+
+export function deleteTaskOutputRecord(taskId: string, outputId: string, userId: string) {
+  const existing = taskOutputStore.get(taskId) ?? [];
+  const nextOutputs = existing.filter(
+    (output) => !(output.id === outputId && output.userId === userId)
+  );
+
+  taskOutputStore.set(taskId, nextOutputs);
 }
 
 export function getTaskOutput(taskId: string, outputId: string) {

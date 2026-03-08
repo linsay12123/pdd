@@ -5,6 +5,7 @@ import {
 } from "@/src/lib/persistence/runtime-mode";
 import { createSupabaseAdminClient } from "@/src/lib/supabase/admin";
 import {
+  deleteTaskOutputRecord,
   findTaskOutputByStoragePath,
   getTaskOutput,
   getTaskOutputs,
@@ -75,6 +76,22 @@ export async function findOwnedTaskOutputByStoragePath(input: {
 
   if (shouldUseLocalTestPersistence()) {
     return findOwnedTaskOutputByStoragePathLocally(input);
+  }
+
+  requireFormalPersistence();
+}
+
+export async function deleteOwnedTaskOutput(input: {
+  taskId: string;
+  outputId: string;
+  userId: string;
+}) {
+  if (shouldUseSupabasePersistence()) {
+    return deleteOwnedTaskOutputWithSupabase(input);
+  }
+
+  if (shouldUseLocalTestPersistence()) {
+    return deleteOwnedTaskOutputLocally(input);
   }
 
   requireFormalPersistence();
@@ -211,6 +228,18 @@ function findOwnedTaskOutputByStoragePathLocally({
   return output && output.userId === userId ? output : null;
 }
 
+function deleteOwnedTaskOutputLocally({
+  taskId,
+  outputId,
+  userId
+}: {
+  taskId: string;
+  outputId: string;
+  userId: string;
+}) {
+  deleteTaskOutputRecord(taskId, outputId, userId);
+}
+
 async function findOwnedTaskOutputByStoragePathWithSupabase({
   storagePath,
   userId
@@ -232,6 +261,28 @@ async function findOwnedTaskOutputByStoragePathWithSupabase({
   }
 
   return data ? mapTaskOutputRow(data) : null;
+}
+
+async function deleteOwnedTaskOutputWithSupabase({
+  taskId,
+  outputId,
+  userId
+}: {
+  taskId: string;
+  outputId: string;
+  userId: string;
+}) {
+  const client = createSupabaseAdminClient();
+  const { error } = await client
+    .from("task_outputs")
+    .delete()
+    .eq("id", outputId)
+    .eq("task_id", taskId)
+    .eq("user_id", userId);
+
+  if (error) {
+    throw new Error(`删除交付文件记录失败：${error.message}`);
+  }
 }
 
 function mapTaskOutputRow(row: {

@@ -10,6 +10,15 @@ export type TaskStatus =
   | "failed"
   | "expired";
 
+export const taskWorkflowStages = [
+  "drafting",
+  "adjusting_word_count",
+  "verifying_references",
+  "exporting"
+] as const;
+
+export type TaskWorkflowStage = (typeof taskWorkflowStages)[number];
+
 export type TaskHumanizeStatus =
   | "idle"
   | "queued"
@@ -81,6 +90,8 @@ export type TaskSummary = {
   humanizeRequestedAt?: string | null;
   humanizeCompletedAt?: string | null;
   quotaReservation?: import("@/src/types/billing").FrozenQuotaReservation;
+  approvalAttemptCount?: number;
+  lastWorkflowStage?: TaskWorkflowStage | null;
 };
 
 export type TaskFileRole = "requirement" | "background" | "irrelevant" | "unknown";

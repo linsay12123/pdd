@@ -6,7 +6,8 @@ import type {
   TaskAnalysisSnapshot,
   TaskDraftVersion,
   TaskStatus,
-  TaskSummary
+  TaskSummary,
+  TaskWorkflowStage
 } from "@/src/types/tasks";
 import type { HumanizeProfile } from "@/src/lib/humanize/humanize-provider";
 
@@ -41,6 +42,8 @@ type TaskRow = {
   humanize_error_message: string | null;
   humanize_requested_at: string | null;
   humanize_completed_at: string | null;
+  approval_attempt_count: number | null;
+  last_workflow_stage: TaskWorkflowStage | null;
   quota_reservation?: TaskSummary["quotaReservation"];
 };
 
@@ -62,7 +65,7 @@ export async function getOwnedTaskFromSupabase(taskId: string, userId: string) {
   const { data, error } = await client
     .from("writing_tasks")
     .select(
-      "id,user_id,status,target_word_count,citation_style,special_requirements,topic,requested_chapter_count,outline_revision_count,primary_requirement_file_id,analysis_snapshot,analysis_status,analysis_model,analysis_retry_count,analysis_error_message,analysis_trigger_run_id,analysis_requested_at,analysis_started_at,analysis_completed_at,latest_outline_version_id,latest_draft_version_id,current_candidate_draft_id,quota_reservation"
+      "id,user_id,status,target_word_count,citation_style,special_requirements,topic,requested_chapter_count,outline_revision_count,primary_requirement_file_id,analysis_snapshot,analysis_status,analysis_model,analysis_retry_count,analysis_error_message,analysis_trigger_run_id,analysis_requested_at,analysis_started_at,analysis_completed_at,latest_outline_version_id,latest_draft_version_id,current_candidate_draft_id,approval_attempt_count,last_workflow_stage,quota_reservation"
       + ",humanize_status,humanize_provider,humanize_profile_snapshot,humanize_document_id,humanize_retry_document_id,humanize_error_message,humanize_requested_at,humanize_completed_at"
     )
     .eq("id", taskId)
@@ -123,6 +126,7 @@ export async function setOwnedTaskStatusInSupabase(
   status: TaskStatus,
   options: {
     fromStatuses?: TaskStatus[];
+    lastWorkflowStage?: TaskWorkflowStage | null;
   } = {}
 ) {
   const currentStatus = await readOwnedTaskStatus(taskId, userId);
@@ -134,14 +138,29 @@ export async function setOwnedTaskStatusInSupabase(
   assertStatusTransition(currentStatus, status);
 
   const client = createSupabaseAdminClient();
+  const nextWorkflowStage =
+    options.lastWorkflowStage !== undefined
+      ? options.lastWorkflowStage
+      : status === "drafting" ||
+          status === "adjusting_word_count" ||
+          status === "verifying_references" ||
+          status === "exporting"
+        ? status
+        : undefined;
+
   const { data, error } = await client
     .from("writing_tasks")
-    .update({ status })
+    .update({
+      status,
+      ...(nextWorkflowStage !== undefined
+        ? { last_workflow_stage: nextWorkflowStage }
+        : {})
+    })
     .eq("id", taskId)
     .eq("user_id", userId)
     .eq("status", currentStatus)
     .select(
-      "id,user_id,status,target_word_count,citation_style,special_requirements,topic,requested_chapter_count,outline_revision_count,primary_requirement_file_id,analysis_snapshot,analysis_status,analysis_model,analysis_retry_count,analysis_error_message,analysis_trigger_run_id,analysis_requested_at,analysis_started_at,analysis_completed_at,latest_outline_version_id,latest_draft_version_id,current_candidate_draft_id,quota_reservation"
+      "id,user_id,status,target_word_count,citation_style,special_requirements,topic,requested_chapter_count,outline_revision_count,primary_requirement_file_id,analysis_snapshot,analysis_status,analysis_model,analysis_retry_count,analysis_error_message,analysis_trigger_run_id,analysis_requested_at,analysis_started_at,analysis_completed_at,latest_outline_version_id,latest_draft_version_id,current_candidate_draft_id,approval_attempt_count,last_workflow_stage,quota_reservation"
       + ",humanize_status,humanize_provider,humanize_profile_snapshot,humanize_document_id,humanize_retry_document_id,humanize_error_message,humanize_requested_at,humanize_completed_at"
     )
     .maybeSingle();
@@ -189,7 +208,7 @@ export async function updateOwnedTaskHumanizeStateInSupabase(
     .eq("id", taskId)
     .eq("user_id", userId)
     .select(
-      "id,user_id,status,target_word_count,citation_style,special_requirements,topic,requested_chapter_count,outline_revision_count,primary_requirement_file_id,analysis_snapshot,analysis_status,analysis_model,analysis_retry_count,analysis_error_message,analysis_trigger_run_id,analysis_requested_at,analysis_started_at,analysis_completed_at,latest_outline_version_id,latest_draft_version_id,current_candidate_draft_id,quota_reservation"
+      "id,user_id,status,target_word_count,citation_style,special_requirements,topic,requested_chapter_count,outline_revision_count,primary_requirement_file_id,analysis_snapshot,analysis_status,analysis_model,analysis_retry_count,analysis_error_message,analysis_trigger_run_id,analysis_requested_at,analysis_started_at,analysis_completed_at,latest_outline_version_id,latest_draft_version_id,current_candidate_draft_id,approval_attempt_count,last_workflow_stage,quota_reservation"
       + ",humanize_status,humanize_provider,humanize_profile_snapshot,humanize_document_id,humanize_retry_document_id,humanize_error_message,humanize_requested_at,humanize_completed_at"
     )
     .maybeSingle();
@@ -291,6 +310,10 @@ function mapTaskRow(row: TaskRow) {
       : null,
     humanizeCompletedAt: row.humanize_completed_at
       ? String(row.humanize_completed_at)
+      : null,
+    approvalAttemptCount: Number(row.approval_attempt_count ?? 0),
+    lastWorkflowStage: row.last_workflow_stage
+      ? (String(row.last_workflow_stage) as TaskWorkflowStage)
       : null,
     quotaReservation: row.quota_reservation ?? undefined
   } satisfies TaskSummary;

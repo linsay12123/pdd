@@ -33,6 +33,7 @@ import {
   CheckCircle2,
   AlertCircle,
   Download,
+  RefreshCw,
   FileSearch,
   ShieldCheck,
   MessageSquare,
@@ -59,7 +60,7 @@ type WorkspaceTaskState = TaskWorkflowPayload & {
     referenceReportOutputId: string | null;
     humanizedDocxOutputId: string | null;
   };
-  finalWordCount?: number;
+  finalWordCount?: number | null;
 };
 
 const defaultHumanizeState: TaskWorkflowHumanizePayload = {
@@ -73,6 +74,7 @@ const defaultHumanizeState: TaskWorkflowHumanizePayload = {
 const MAX_UPLOAD_FILE_COUNT = 10;
 const MAX_UPLOAD_FILE_BYTES = 25 * 1024 * 1024;
 const MAX_UPLOAD_FILE_MB = MAX_UPLOAD_FILE_BYTES / (1024 * 1024);
+const POST_APPROVAL_POLL_INTERVAL_MS = 5_000;
 
 export function WorkspacePageClient({
   initialQuota,
@@ -228,23 +230,31 @@ export function WorkspacePageClient({
   }, [activeTask, step]);
 
   useEffect(() => {
-    if (!activeTask || step !== 2) {
+    if (!activeTask) {
       return;
     }
 
-    if (activeTask.analysisStatus !== "pending") {
+    const shouldPollAnalysis =
+      step === 2 &&
+      activeTask.analysisStatus === "pending" &&
+      !activeTask.analysisProgress.canRetry;
+    const shouldPollPostApproval =
+      step === 3 &&
+      ["drafting", "adjusting_word_count", "verifying_references", "exporting"].includes(
+        activeTask.task.status
+      );
+
+    if (!shouldPollAnalysis && !shouldPollPostApproval) {
       return;
     }
 
-    // 超过等待上限后进入“可重试”状态，停止继续自动轮询，避免无意义请求刷屏
-    if (activeTask.analysisProgress.canRetry) {
-      return;
-    }
-
+    const intervalMs = shouldPollAnalysis
+      ? ANALYSIS_POLL_INTERVAL_MS
+      : POST_APPROVAL_POLL_INTERVAL_MS;
     let cancelled = false;
     const timer = window.setTimeout(() => {
       void requestTaskAnalysisStatus({ taskId: activeTask.task.id })
-        .then((result) => {
+        .then(async (result) => {
           if (cancelled) {
             return;
           }
@@ -257,27 +267,49 @@ export function WorkspacePageClient({
             return {
               ...currentTask,
               ...result,
-              downloads: currentTask.downloads,
+              downloads: result.downloads ?? currentTask.downloads,
+              finalWordCount:
+                typeof result.finalWordCount === "number"
+                  ? result.finalWordCount
+                  : currentTask.finalWordCount,
               frozenQuota: currentTask.frozenQuota,
               humanize: result.humanize ?? currentTask.humanize ?? defaultHumanizeState
             };
           });
 
-          if (result.analysisStatus === "succeeded") {
-            setNotice({
-              tone: "success",
-              text: result.message
-            });
-          } else if (result.analysisStatus === "pending" && result.analysisProgress.canRetry) {
-            setNotice({
-              tone: "error",
-              text: result.message
-            });
-          } else if (result.analysisStatus === "failed") {
-            setNotice({
-              tone: "error",
-              text: result.message
-            });
+          if (shouldPollAnalysis) {
+            if (result.analysisStatus === "succeeded") {
+              setNotice({
+                tone: "success",
+                text: result.message
+              });
+            } else if (result.analysisStatus === "pending" && result.analysisProgress.canRetry) {
+              setNotice({
+                tone: "error",
+                text: result.message
+              });
+            } else if (result.analysisStatus === "failed") {
+              setNotice({
+                tone: "error",
+                text: result.message
+              });
+            }
+
+            return;
+          }
+
+          setNotice({
+            tone:
+              result.task.status === "deliverable_ready"
+                ? "success"
+                : result.task.status === "failed"
+                  ? "error"
+                  : "info",
+            text: result.message
+          });
+
+          if (result.task.status === "deliverable_ready" || result.task.status === "failed") {
+            await syncWallet();
           }
         })
         .catch(() => {
@@ -287,16 +319,30 @@ export function WorkspacePageClient({
 
           setNotice({
             tone: "error",
-            text: "读取分析进度失败，请稍后再试。"
+            text: shouldPollAnalysis
+              ? "读取分析进度失败，请稍后再试。"
+              : "读取正文写作进度失败，请稍后再试。"
           });
         });
-    }, ANALYSIS_POLL_INTERVAL_MS);
+    }, intervalMs);
 
     return () => {
       cancelled = true;
       window.clearTimeout(timer);
     };
   }, [activeTask, step]);
+
+  useEffect(() => {
+    if (!activeTask || step !== 3) {
+      return;
+    }
+
+    if (activeTask.task.status !== "deliverable_ready" && activeTask.task.status !== "failed") {
+      return;
+    }
+
+    void syncWallet();
+  }, [activeTask?.task.status, activeTask?.task.id, step]);
 
   const handleRetryAnalysis = async () => {
     if (!activeTask) {
@@ -577,7 +623,7 @@ export function WorkspacePageClient({
           : currentTask
       );
       setNotice({
-        tone: "success",
+        tone: "info",
         text: result.message
       });
       setStep(3);
@@ -683,6 +729,22 @@ export function WorkspacePageClient({
   const humanize = activeTask?.humanize ?? defaultHumanizeState;
   const isHumanizeRunning = ["queued", "processing", "retrying"].includes(humanize.status);
   const humanizeButtonBusy = isSubmittingHumanize || isHumanizeRunning;
+  const workflowStageIndex = deriveWorkflowStageIndex({
+    task: activeTask,
+    step,
+    analysisStatus,
+    hasOutline,
+    needsPrimaryFileConfirmation
+  });
+  const postApprovalStage = getPostApprovalStage(
+    activeTask?.task.status ?? null,
+    activeTask?.task.lastWorkflowStage ?? null
+  );
+  const postApprovalCard = getPostApprovalStageCard(
+    postApprovalStage,
+    activeTask?.task.lastWorkflowStage ?? null
+  );
+  const PostApprovalIcon = postApprovalCard.icon;
 
   return (
     <div className="min-h-screen pt-24 pb-16 bg-brand-950">
@@ -724,26 +786,31 @@ export function WorkspacePageClient({
 
               <div className="relative border-l border-white/10 ml-3 space-y-8 pb-4">
                 {[
-                  { id: 1, title: "上传材料与要求", desc: "支持多文件解析", active: step >= 1, current: step === 1 },
-                  { id: 2, title: "系统分析", desc: "提取核心要求", active: step > 1, current: false },
-                  { id: 3, title: "大纲生成与确认", desc: "需用户手动确认", active: step >= 2, current: step === 2 },
-                  { id: 4, title: "正文生成", desc: "严格遵循大纲", active: step > 2, current: false },
-                  { id: 5, title: "引用核验", desc: "生成 PDF 报告", active: step > 2, current: false },
-                  { id: 6, title: "交付与降AI", desc: "输出最终文件", active: step >= 3, current: step === 3 }
+                  { id: 1, title: "上传材料与要求", desc: "支持多文件解析" },
+                  { id: 2, title: "系统分析", desc: "提取核心要求" },
+                  { id: 3, title: "大纲生成与确认", desc: "需用户手动确认" },
+                  { id: 4, title: "正文写作", desc: "按确认大纲一次性完成" },
+                  { id: 5, title: "字数校正", desc: "正文控制在目标字数附近" },
+                  { id: 6, title: "引用核验", desc: "核对来源并整理报告" },
+                  { id: 7, title: "导出交付", desc: "生成最终文件并提供下载" }
                 ].map((item) => (
                   <div key={item.id} className="relative pl-8">
                     <div
                       className={`absolute -left-1.5 top-1 w-3 h-3 rounded-full border-2 ${
-                        item.current
+                        workflowStageIndex === item.id
                           ? "bg-gold-500 border-gold-400 shadow-[0_0_10px_rgba(245,158,11,0.5)]"
-                          : item.active
+                          : workflowStageIndex > item.id
                             ? "bg-gold-500/50 border-gold-500/50"
                             : "bg-brand-950 border-white/20"
                       }`}
                     />
                     <h4
                       className={`text-sm font-bold mb-1 ${
-                        item.current ? "text-gold-400" : item.active ? "text-cream-50" : "text-brand-700"
+                        workflowStageIndex === item.id
+                          ? "text-gold-400"
+                          : workflowStageIndex > item.id
+                            ? "text-cream-50"
+                            : "text-brand-700"
                       }`}
                     >
                       {item.title}
@@ -1259,6 +1326,7 @@ export function WorkspacePageClient({
                   </div>
                 )}
 
+                {postApprovalStage === "deliverable_ready" ? (
                 <div className="glass-panel p-8 rounded-2xl border-gold-glow relative overflow-hidden">
                   <div className="absolute top-0 right-0 w-64 h-64 bg-green-500/10 rounded-full blur-3xl" />
 
@@ -1460,6 +1528,128 @@ export function WorkspacePageClient({
                     </div>
                   </div>
                 </div>
+                ) : postApprovalStage === "failed" ? (
+                  <div className="glass-panel p-8 rounded-2xl border border-red-500/30 relative overflow-hidden">
+                    <div className="absolute top-0 right-0 w-64 h-64 bg-red-500/10 rounded-full blur-3xl" />
+
+                    <div className="relative z-10">
+                      <div className="w-16 h-16 rounded-full bg-red-500/15 flex items-center justify-center mx-auto mb-4 border border-red-500/30">
+                        <AlertCircle className="w-8 h-8 text-red-300" />
+                      </div>
+                      <h2 className="text-2xl font-bold text-cream-50 text-center mb-3">
+                        {postApprovalCard.title}
+                      </h2>
+                      <p className="text-brand-700 text-center mb-8">
+                        {postApprovalCard.body}
+                      </p>
+
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                        {[
+                          {
+                            title: "失败环节",
+                            value: postApprovalCard.currentStep
+                          },
+                          {
+                            title: "目标字数",
+                            value:
+                              typeof activeTask?.task.targetWordCount === "number"
+                                ? `${activeTask.task.targetWordCount.toLocaleString("en-US")} words`
+                                : "还没确定"
+                          },
+                          {
+                            title: "引用格式",
+                            value: activeTask?.task.citationStyle ?? "还没确定"
+                          }
+                        ].map((item) => (
+                          <div
+                            key={item.title}
+                            className="rounded-xl border border-white/5 bg-brand-950/70 p-4"
+                          >
+                            <div className="text-xs uppercase tracking-[0.18em] text-brand-700 mb-2">
+                              {item.title}
+                            </div>
+                            <div className="text-sm text-cream-100">{item.value}</div>
+                          </div>
+                        ))}
+                      </div>
+
+                      <div className="mt-8 rounded-xl border border-white/5 bg-brand-950/70 p-5">
+                        <h3 className="text-sm font-bold text-red-200 uppercase tracking-wider mb-3">
+                          这一步为什么停住了
+                        </h3>
+                        <p className="text-sm text-brand-700 leading-7">
+                          {postApprovalCard.detail}
+                        </p>
+                      </div>
+
+                      <div className="mt-6 flex justify-center">
+                        <Button
+                          onClick={() => void handleApproveOutline()}
+                          className="gap-2"
+                          disabled={isApprovingOutline}
+                        >
+                          <RefreshCw className="w-4 h-4" />
+                          {isApprovingOutline ? "重新启动中..." : "重新开始正文生成"}
+                        </Button>
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="glass-panel p-8 rounded-2xl border-gold-glow relative overflow-hidden">
+                    <div className="absolute top-0 right-0 w-64 h-64 bg-gold-500/10 rounded-full blur-3xl" />
+
+                    <div className="relative z-10">
+                      <div className="w-16 h-16 rounded-full bg-gold-500/15 flex items-center justify-center mx-auto mb-4 border border-gold-500/30">
+                        <PostApprovalIcon className="w-8 h-8 text-gold-400" />
+                      </div>
+                      <h2 className="text-2xl font-bold text-cream-50 text-center mb-3">
+                        {postApprovalCard.title}
+                      </h2>
+                      <p className="text-brand-700 text-center mb-8">
+                        {postApprovalCard.body}
+                      </p>
+
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                        {[
+                          {
+                            title: "当前环节",
+                            value: postApprovalCard.currentStep
+                          },
+                          {
+                            title: "目标字数",
+                            value:
+                              typeof activeTask?.task.targetWordCount === "number"
+                                ? `${activeTask.task.targetWordCount.toLocaleString("en-US")} words`
+                                : "还没确定"
+                          },
+                          {
+                            title: "引用格式",
+                            value: activeTask?.task.citationStyle ?? "还没确定"
+                          }
+                        ].map((item) => (
+                          <div
+                            key={item.title}
+                            className="rounded-xl border border-white/5 bg-brand-950/70 p-4"
+                          >
+                            <div className="text-xs uppercase tracking-[0.18em] text-brand-700 mb-2">
+                              {item.title}
+                            </div>
+                            <div className="text-sm text-cream-100">{item.value}</div>
+                          </div>
+                        ))}
+                      </div>
+
+                      <div className="mt-8 rounded-xl border border-white/5 bg-brand-950/70 p-5">
+                        <h3 className="text-sm font-bold text-gold-400 uppercase tracking-wider mb-3">
+                          现在系统在做什么
+                        </h3>
+                        <p className="text-sm text-brand-700 leading-7">
+                          {postApprovalCard.detail}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                )}
               </div>
             )}
           </div>
@@ -1480,12 +1670,185 @@ function deriveInitialStep(task: WorkspaceTaskState | null) {
     task.task.status === "verifying_references" ||
     task.task.status === "exporting" ||
     task.task.status === "deliverable_ready" ||
-    task.task.status === "humanizing"
+    task.task.status === "humanizing" ||
+    (task.task.status === "failed" && Boolean(task.task.lastWorkflowStage))
   ) {
     return 3;
   }
 
   return 2;
+}
+
+function deriveWorkflowStageIndex(input: {
+  task: WorkspaceTaskState | null;
+  step: number;
+  analysisStatus: "pending" | "succeeded" | "failed";
+  hasOutline: boolean;
+  needsPrimaryFileConfirmation: boolean;
+}) {
+  if (!input.task) {
+    return 1;
+  }
+
+  if (input.task.task.status === "drafting") {
+    return 4;
+  }
+
+  if (input.task.task.status === "adjusting_word_count") {
+    return 5;
+  }
+
+  if (input.task.task.status === "verifying_references") {
+    return 6;
+  }
+
+  if (input.task.task.status === "failed" && input.task.task.lastWorkflowStage) {
+    if (input.task.task.lastWorkflowStage === "drafting") {
+      return 4;
+    }
+
+    if (input.task.task.lastWorkflowStage === "adjusting_word_count") {
+      return 5;
+    }
+
+    if (input.task.task.lastWorkflowStage === "verifying_references") {
+      return 6;
+    }
+
+    return 7;
+  }
+
+  if (
+    input.task.task.status === "exporting" ||
+    input.task.task.status === "deliverable_ready"
+  ) {
+    return 7;
+  }
+
+  if (
+    input.analysisStatus === "succeeded" &&
+    (input.hasOutline || input.needsPrimaryFileConfirmation)
+  ) {
+    return 3;
+  }
+
+  if (input.step >= 2) {
+    return 2;
+  }
+
+  return 1;
+}
+
+function getPostApprovalStage(
+  taskStatus: string | null,
+  _lastWorkflowStage: WorkspaceTaskState["task"]["lastWorkflowStage"] | null
+): "drafting" | "adjusting_word_count" | "verifying_references" | "exporting" | "failed" | "deliverable_ready" {
+  if (taskStatus === "drafting") {
+    return "drafting";
+  }
+
+  if (taskStatus === "adjusting_word_count") {
+    return "adjusting_word_count";
+  }
+
+  if (taskStatus === "verifying_references") {
+    return "verifying_references";
+  }
+
+  if (taskStatus === "exporting") {
+    return "exporting";
+  }
+
+  if (taskStatus === "failed") {
+    return "failed";
+  }
+
+  return "deliverable_ready";
+}
+
+function getPostApprovalStageCard(
+  stage: ReturnType<typeof getPostApprovalStage>,
+  lastWorkflowStage: WorkspaceTaskState["task"]["lastWorkflowStage"] | null
+) {
+  if (stage === "drafting") {
+    return {
+      icon: FileText,
+      title: "正文写作中",
+      body: "系统正在根据你确认的大纲一次性写完整篇文章。",
+      currentStep: "正文写作",
+      detail:
+        "这一段会把你确认过的大纲一次性展开成完整正文，按章节连续写完，不会只写半截。"
+    };
+  }
+
+  if (stage === "adjusting_word_count") {
+    return {
+      icon: Settings,
+      title: "字数校正中",
+      body: "系统正在把正文部分校正到目标字数的正负 10 以内。",
+      currentStep: "字数校正",
+      detail:
+        "这一段只改正文部分，不会删标题，也不会删 References。目标是把正文控制到你要求字数的正负 10 以内。"
+    };
+  }
+
+  if (stage === "verifying_references") {
+    return {
+      icon: ShieldCheck,
+      title: "引用核验中",
+      body: "系统正在逐条核对参考文献与来源链接。",
+      currentStep: "引用核验",
+      detail:
+        "这一段会逐条检查参考文献是不是能对上来源，并为后面的核验报告整理结果。"
+    };
+  }
+
+  if (stage === "exporting") {
+    return {
+      icon: Download,
+      title: "导出生成中",
+      body: "系统正在生成最终文档和引用核验报告。",
+      currentStep: "导出交付",
+      detail:
+        "这一段会把正文导出成可下载的 Word 文件，同时生成引用核验报告。导出完成后页面会自动切到下载区。"
+    };
+  }
+
+  if (stage === "failed") {
+    const failedStep =
+      lastWorkflowStage === "adjusting_word_count"
+        ? "字数校正"
+        : lastWorkflowStage === "verifying_references"
+          ? "引用核验"
+          : lastWorkflowStage === "exporting"
+            ? "导出生成"
+            : "正文写作";
+
+    const failedDetail =
+      lastWorkflowStage === "adjusting_word_count"
+        ? "正文已经写出来了，但系统在把正文校到目标字数正负 10 以内这一步停住了。你可以直接重新开始正文生成。"
+        : lastWorkflowStage === "verifying_references"
+          ? "正文和字数校正已经完成，但系统在逐条核对参考文献与来源链接这一步停住了。你可以直接重新开始正文生成。"
+          : lastWorkflowStage === "exporting"
+            ? "正文、字数校正和引用核验都已经跑完了，但系统在生成最终下载文件这一步停住了。你可以直接重新开始正文生成。"
+            : "系统在根据你确认的大纲写正文这一步停住了。你可以直接重新开始正文生成。";
+
+    return {
+      icon: AlertCircle,
+      title: "正文生成失败",
+      body: `系统停在“${failedStep}”这一步了，还没有进入可下载状态。你可以直接重新开始正文生成。`,
+      currentStep: failedStep,
+      detail: failedDetail
+    };
+  }
+
+  return {
+    icon: CheckCircle2,
+    title: "任务已完成",
+    body: "您的文章与核验报告已生成完毕，请下载查阅。",
+    currentStep: "导出交付",
+    detail: "最终文件已经准备好。"
+  };
 }
 
 function getFailedAnalysisCard(
