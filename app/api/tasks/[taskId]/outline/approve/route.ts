@@ -89,9 +89,22 @@ export async function handleOutlineApprovalRequest(
     });
 
     // 2. Freeze quota NOW (right before writing starts), and claim single execution lock
-    const reservation = await (
-      dependencies.reserveQuotaForTask ?? reserveQuotaForTask
-    )(params.taskId, user.id);
+    let reservation;
+    try {
+      reservation = await (
+        dependencies.reserveQuotaForTask ?? reserveQuotaForTask
+      )(params.taskId, user.id);
+    } catch (reservationError) {
+      console.error("[outline-approve] quota reservation failed:", {
+        taskId: params.taskId,
+        userId: user.id,
+        error:
+          reservationError instanceof Error
+            ? reservationError.message
+            : String(reservationError)
+      });
+      throw reservationError;
+    }
 
     // 3. Process the task (writing pipeline) and settle quota only after success
     let processed;

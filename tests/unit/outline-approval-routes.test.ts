@@ -633,4 +633,64 @@ describe("outline approval routes", () => {
     expect(payload.ok).toBe(false);
     expect(payload.message).toContain("处理中");
   });
+
+  it("logs the raw database error when quota reservation fails before drafting starts", async () => {
+    const initialVersion = await saveOutlineVersion({
+      task: {
+        id: "task-outline-8",
+        userId: "user-1",
+        status: "awaiting_outline_approval",
+        targetWordCount: 1000,
+        citationStyle: "APA 7",
+        specialRequirements: "",
+        topic: "Corporate Governance",
+        outlineRevisionCount: 0
+      },
+      userId: "user-1",
+      outline: {
+        articleTitle: "Corporate Governance: A Structured Analysis",
+        targetWordCount: 1000,
+        citationStyle: "APA 7",
+        chineseMirrorPending: true,
+        sections: []
+      }
+    });
+    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const response = await handleOutlineApprovalRequest(
+      new Request("http://localhost/api/tasks/task-outline-8/outline/approve", {
+        method: "POST",
+        body: JSON.stringify({
+          outlineVersionId: initialVersion.id
+        }),
+        headers: {
+          "content-type": "application/json"
+        }
+      }),
+      {
+        taskId: "task-outline-8"
+      },
+      {
+        ...makeApprovedOutlineDeps("task-outline-8", initialVersion.id),
+        reserveQuotaForTask: async () => {
+          throw new Error('原子更新积分失败：column reference "recharge_quota" is ambiguous');
+        }
+      }
+    );
+    const payload = await response.json();
+
+    expect(response.status).toBe(500);
+    expect(payload.message).toContain('recharge_quota');
+    expect(getTaskSummary("task-outline-8")?.status).toBe("awaiting_outline_approval");
+    expect(consoleErrorSpy).toHaveBeenCalledWith(
+      "[outline-approve] quota reservation failed:",
+      expect.objectContaining({
+        taskId: "task-outline-8",
+        userId: "user-1",
+        error: '原子更新积分失败：column reference "recharge_quota" is ambiguous'
+      })
+    );
+
+    consoleErrorSpy.mockRestore();
+  });
 });
