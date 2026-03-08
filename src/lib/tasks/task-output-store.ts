@@ -10,7 +10,10 @@ import {
   getTaskOutputs,
   saveTaskOutputRecord
 } from "@/src/lib/tasks/repository";
-import { resolveTaskOutputExpiresAt } from "@/src/lib/tasks/task-output-expiry";
+import {
+  isTaskOutputExpired,
+  resolveTaskOutputExpiresAt
+} from "@/src/lib/tasks/task-output-expiry";
 import type { TaskOutputKind, TaskOutputRecord } from "@/src/types/tasks";
 
 type SaveTaskOutputInput = {
@@ -255,6 +258,9 @@ function mapTaskOutputRow(row: {
     isActive: Boolean(row.is_active),
     createdAt: String(row.created_at),
     expiresAt,
-    expired: expiresAt <= new Date().toISOString()
+    expired: isTaskOutputExpired({
+      expiresAt,
+      now: new Date().toISOString()
+    })
   } satisfies TaskOutputRecord;
 }

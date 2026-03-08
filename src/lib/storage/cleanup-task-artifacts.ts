@@ -1,6 +1,7 @@
 import { shouldUseSupabasePersistence } from "@/src/lib/persistence/runtime-mode";
 import { createSupabaseAdminClient } from "@/src/lib/supabase/admin";
 import { taskArtifactBucket } from "@/src/lib/storage/task-artifacts";
+import { TASK_OUTPUT_TTL_DAYS } from "@/src/lib/tasks/task-output-expiry";
 
 const TERMINAL_TASK_STATUSES = ["deliverable_ready", "failed", "expired"] as const;
 const DEFAULT_UPLOAD_RETENTION_DAYS = 3;
@@ -170,6 +171,9 @@ async function defaultListOutputCandidates(input: {
 }): Promise<OutputCandidate[]> {
   const client = createSupabaseAdminClient();
   const candidates = new Map<string, OutputCandidate>();
+  const legacyExpiryCutoffIso = new Date(
+    Date.parse(input.nowIso) - TASK_OUTPUT_TTL_DAYS * 24 * 60 * 60 * 1000
+  ).toISOString();
 
   const inactiveResult = await client
     .from("task_outputs")
@@ -206,6 +210,34 @@ async function defaultListOutputCandidates(input: {
   }
 
   for (const row of expiredResult.data ?? []) {
+    if (!row?.id || !row?.user_id || !row?.storage_path) {
+      continue;
+    }
+
+    if (candidates.size >= input.limit) {
+      break;
+    }
+
+    candidates.set(String(row.id), {
+      id: String(row.id),
+      userId: String(row.user_id),
+      storagePath: String(row.storage_path)
+    });
+  }
+
+  const legacyNullExpiryResult = await client
+    .from("task_outputs")
+    .select("id,user_id,storage_path")
+    .is("expires_at", null)
+    .lt("created_at", legacyExpiryCutoffIso)
+    .order("created_at", { ascending: true })
+    .limit(input.limit);
+
+  if (legacyNullExpiryResult.error) {
+    throw new Error(`读取旧版待清理交付文件失败：${legacyNullExpiryResult.error.message}`);
+  }
+
+  for (const row of legacyNullExpiryResult.data ?? []) {
     if (!row?.id || !row?.user_id || !row?.storage_path) {
       continue;
     }

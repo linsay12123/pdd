@@ -84,4 +84,23 @@ describe("expiry rules", () => {
     expect(result.expiredOutputIds).toHaveLength(1);
     expect(result.taskHistoryStillVisible).toBe(true);
   });
+
+  it("keeps local-memory outputs and persisted outputs on the same expiry rule", () => {
+    resetTaskOutputStore();
+    saveTaskOutputRecord({
+      taskId: "task-expire-4",
+      userId: "u4",
+      outputKind: "final_docx",
+      storagePath: "users/u4/tasks/task-expire-4/final.docx",
+      createdAt: "2026-03-03T09:00:00.000Z",
+      expiresAt: "2026-03-06T09:00:00.000Z"
+    });
+
+    vi.setSystemTime(new Date("2026-03-06T09:01:00.000Z"));
+
+    const outputs = getTaskOutputs("task-expire-4");
+
+    expect(outputs).toHaveLength(1);
+    expect(outputs[0]?.expired).toBe(true);
+  });
 });

@@ -1,6 +1,9 @@
 import { incrementMetric } from "@/src/lib/observability/metrics";
 import { logTaskTransition } from "@/src/lib/observability/logger";
-import { resolveTaskOutputExpiresAt } from "@/src/lib/tasks/task-output-expiry";
+import {
+  isTaskOutputExpired,
+  resolveTaskOutputExpiresAt
+} from "@/src/lib/tasks/task-output-expiry";
 import { assertStatusTransition } from "@/src/lib/tasks/status-machine";
 import type {
   TaskDraftVersion,
@@ -209,14 +212,19 @@ export function saveTaskOutputRecord(record: TaskOutputRecordInput) {
     createdAt,
     expiresAt: record.expiresAt ?? null
   });
-  const normalizedRecord: TaskOutputRecord = {
+  const normalizedRecord = normalizeTaskOutputRecord({
     ...record,
     id: record.id || `out_${record.taskId}_${existing.length + 1}`,
     createdAt,
     isActive: record.isActive ?? true,
     expiresAt,
-    expired: record.expired ?? expiresAt <= new Date().toISOString()
-  };
+    expired:
+      record.expired ??
+      isTaskOutputExpired({
+        expiresAt,
+        now: new Date().toISOString()
+      })
+  });
   const nextOutputs = [...existing, normalizedRecord];
 
   taskOutputStore.set(record.taskId, nextOutputs);
@@ -224,7 +232,7 @@ export function saveTaskOutputRecord(record: TaskOutputRecordInput) {
 }
 
 export function getTaskOutputs(taskId: string) {
-  return taskOutputStore.get(taskId) ?? [];
+  return (taskOutputStore.get(taskId) ?? []).map((output) => normalizeTaskOutputRecord(output));
 }
 
 export function getTaskOutput(taskId: string, outputId: string) {
@@ -233,7 +241,9 @@ export function getTaskOutput(taskId: string, outputId: string) {
 
 export function findTaskOutputByStoragePath(storagePath: string) {
   for (const outputs of taskOutputStore.values()) {
-    const match = outputs.find((output) => output.storagePath === storagePath);
+    const match = outputs
+      .map((output) => normalizeTaskOutputRecord(output))
+      .find((output) => output.storagePath === storagePath);
 
     if (match) {
       return match;
@@ -252,17 +262,26 @@ export function expireTaskOutputs({
 
   for (const [taskId, outputs] of taskOutputStore.entries()) {
     const nextOutputs = outputs.map((output) => {
+      const normalizedOutput = normalizeTaskOutputRecord(output, asOf);
+      const shouldBeExpired = isTaskOutputExpired({
+        expiresAt: normalizedOutput.expiresAt,
+        now: asOf
+      });
+
+      if (!shouldBeExpired) {
+        return normalizedOutput;
+      }
+
       if (output.expired) {
-        return output;
+        return {
+          ...normalizedOutput,
+          expired: true
+        };
       }
 
-      if (output.expiresAt > asOf) {
-        return output;
-      }
-
-      expiredOutputIds.push(output.id);
+      expiredOutputIds.push(normalizedOutput.id);
       return {
-        ...output,
+        ...normalizedOutput,
         expired: true
       };
     });
@@ -278,4 +297,25 @@ export function expireTaskOutputs({
 
 export function resetTaskOutputStore() {
   taskOutputStore.clear();
+}
+
+function normalizeTaskOutputRecord(
+  output: TaskOutputRecord,
+  now = new Date().toISOString()
+): TaskOutputRecord {
+  const expiresAt = resolveTaskOutputExpiresAt({
+    createdAt: output.createdAt,
+    expiresAt: output.expiresAt
+  });
+
+  return {
+    ...output,
+    expiresAt,
+    expired:
+      output.expired ||
+      isTaskOutputExpired({
+        expiresAt,
+        now
+      })
+  };
 }
