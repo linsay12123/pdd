@@ -5,7 +5,6 @@ import {
   shouldUseLocalTestPersistence,
   shouldUseSupabasePersistence
 } from "@/src/lib/persistence/runtime-mode";
-import { mapReferenceVerdictLabel } from "@/src/lib/references/verification-rules";
 import { createSupabaseAdminClient } from "@/src/lib/supabase/admin";
 import { exportDocx, type DocxExportInput } from "@/src/lib/deliverables/export-docx";
 import {
@@ -225,7 +224,7 @@ export async function processApprovedTask(
       },
       entries: referenceChecks.map((check) => ({
         rawReference: check.rawReference,
-        verdictLabel: mapReferenceVerdictLabel(check.verdict),
+        verdict: check.verdict,
         reasoning: check.reasoning
       })),
       closingSummary: buildReferenceClosingSummary(referenceChecks.length)

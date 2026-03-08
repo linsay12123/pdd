@@ -143,7 +143,7 @@ describe("deliverables export in /var/task style runtime", () => {
       entries: [
         {
           rawReference: "Smith, A. (2024). Source.",
-          verdictLabel: "基本可对应",
+          verdict: "matching",
           reasoning: "Title and metadata align."
         }
       ],

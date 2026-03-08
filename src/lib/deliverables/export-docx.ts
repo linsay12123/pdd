@@ -1,3 +1,4 @@
+import "server-only";
 import {
   AlignmentType,
   Document,
@@ -75,7 +76,7 @@ async function buildDocxBuffer(payload: ReturnType<typeof prepareDocxExportPaylo
           text: payload.title,
           bold: true,
           size: 28,
-          font: "Times New Roman"
+          font: docxFontOptions()
         })
       ],
       {
@@ -95,7 +96,7 @@ async function buildDocxBuffer(payload: ReturnType<typeof prepareDocxExportPaylo
             text: section.heading,
             bold: true,
             size: 24,
-            font: "Times New Roman"
+            font: docxFontOptions()
           })
         ],
         {
@@ -114,7 +115,7 @@ async function buildDocxBuffer(payload: ReturnType<typeof prepareDocxExportPaylo
             new TextRun({
               text,
               size: 24,
-              font: "Times New Roman"
+              font: docxFontOptions()
             })
           ],
           {
@@ -134,7 +135,7 @@ async function buildDocxBuffer(payload: ReturnType<typeof prepareDocxExportPaylo
           text: "References",
           bold: true,
           size: 24,
-          font: "Times New Roman"
+          font: docxFontOptions()
         })
       ],
       {
@@ -153,7 +154,7 @@ async function buildDocxBuffer(payload: ReturnType<typeof prepareDocxExportPaylo
           new TextRun({
             text: reference,
             size: 24,
-            font: "Times New Roman"
+            font: docxFontOptions()
           })
         ],
         {
@@ -185,4 +186,13 @@ function paragraphWithRuns(runs: TextRun[], options: Omit<IParagraphOptions, "ch
     ...options,
     children: runs
   });
+}
+
+function docxFontOptions() {
+  return {
+    ascii: "Times New Roman",
+    hAnsi: "Times New Roman",
+    cs: "Times New Roman",
+    eastAsia: "SimSun"
+  };
 }

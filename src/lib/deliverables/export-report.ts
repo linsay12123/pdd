@@ -1,11 +1,18 @@
+import "server-only";
+import { fileURLToPath } from "node:url";
 import PDFDocument from "pdfkit";
 import { createTaskOutputStoragePath } from "@/src/lib/storage/task-output-files";
 import { saveTaskArtifact } from "@/src/lib/storage/task-artifacts";
 import { saveTaskOutput } from "@/src/lib/tasks/task-output-store";
+import type { ReferenceVerdict } from "@/src/lib/references/verification-rules";
+
+const NOTO_SANS_SC_REGULAR_PATH = fileURLToPath(
+  new URL("../../assets/fonts/NotoSansSC-Regular.otf", import.meta.url)
+);
 
 export type ReferenceReportEntry = {
   rawReference: string;
-  verdictLabel: string;
+  verdict: ReferenceVerdict;
   reasoning: string;
 };
 
@@ -74,6 +81,9 @@ function buildReferenceReportBuffer(payload: ReturnType<typeof prepareReferenceR
     });
     document.on("error", reject);
 
+    document.registerFont("NotoSansSC", NOTO_SANS_SC_REGULAR_PATH);
+    document.font("NotoSansSC");
+
     writeHeader(document, payload);
     writeEntries(document, payload.entries);
     writeClosingSummary(document, payload.closingSummary);
@@ -86,14 +96,14 @@ function writeHeader(
   document: PDFKit.PDFDocument,
   payload: ReturnType<typeof prepareReferenceReportPayload>
 ) {
-  document.font("Times-Roman").fontSize(20).text("Reference Verification Report", {
+  document.font("NotoSansSC").fontSize(20).text("参考文献核验报告", {
     align: "center"
   });
   document.moveDown(1);
-  document.fontSize(11).text(`Report ID: ${payload.reportId}`);
-  document.text(`Created At: ${payload.createdAt}`);
-  document.text(`Target Word Count: ${payload.taskSummary.targetWordCount}`);
-  document.text(`Citation Style: ${payload.taskSummary.citationStyle}`);
+  document.fontSize(11).text(`报告编号：${payload.reportId}`);
+  document.text(`生成时间：${payload.createdAt}`);
+  document.text(`目标字数：${payload.taskSummary.targetWordCount}`);
+  document.text(`引用格式：${payload.taskSummary.citationStyle}`);
   document.moveDown(1);
 }
 
@@ -103,27 +113,23 @@ function writeEntries(document: PDFKit.PDFDocument, entries: ReferenceReportEntr
       document.moveDown(0.5);
     }
 
-    document.font("Times-Bold").fontSize(13).text(`Reference ${index + 1}`);
-    document.font("Times-Roman").fontSize(11).text(`Reference: ${entry.rawReference}`);
-    document.text(`Verdict: ${translateVerdictLabel(entry.verdictLabel)}`);
-    document.text(`Reasoning: ${entry.reasoning}`);
+    document.font("NotoSansSC").fontSize(13).text(`参考文献 ${index + 1}`);
+    document.font("NotoSansSC").fontSize(11).text(`参考文献：${entry.rawReference}`);
+    document.text(`核验结果：${mapVerdictLabel(entry.verdict)}`);
+    document.text(`理由：${entry.reasoning}`);
   });
 }
 
 function writeClosingSummary(document: PDFKit.PDFDocument, closingSummary: string) {
   document.moveDown(1);
-  document.font("Times-Bold").fontSize(13).text("Closing Summary");
-  document.font("Times-Roman").fontSize(11).text(closingSummary);
+  document.font("NotoSansSC").fontSize(13).text("总结");
+  document.font("NotoSansSC").fontSize(11).text(closingSummary);
 }
 
-function translateVerdictLabel(label: string) {
-  if (label === "基本可对应") {
-    return "Basically matching";
+function mapVerdictLabel(verdict: ReferenceVerdict) {
+  if (verdict === "matching") {
+    return "基本可对应";
   }
 
-  if (label === "有风险") {
-    return "Risky";
-  }
-
-  return label;
+  return "有风险";
 }

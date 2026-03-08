@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   exportDocx,
   prepareDocxExportPayload
@@ -8,6 +8,8 @@ import {
   prepareReferenceReportPayload
 } from "../../src/lib/deliverables/export-report";
 import { getTaskOutputs, resetTaskOutputStore } from "../../src/lib/tasks/repository";
+
+vi.mock("server-only", () => ({}));
 
 describe("docx export contract", () => {
   it("requires the fields needed to generate the final article docx", () => {
@@ -86,7 +88,7 @@ describe("pdf report export contract", () => {
       entries: [
         {
           rawReference: "Smith, A. (2024). Source.",
-          verdictLabel: "基本可对应",
+          verdict: "matching",
           reasoning: "Title and metadata align."
         }
       ],
@@ -128,7 +130,7 @@ describe("pdf report export contract", () => {
       entries: [
         {
           rawReference: "Smith, A. (2024). Source.",
-          verdictLabel: "基本可对应",
+          verdict: "matching",
           reasoning: "Title and metadata align."
         }
       ],

@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+vi.mock("server-only", () => ({}));
+
 const uploadMock = vi.fn();
 const deactivateMock = vi.fn();
 const insertSelectSingleMock = vi.fn();
@@ -129,7 +131,7 @@ describe("deliverables persisted storage", () => {
       entries: [
         {
           rawReference: "Smith, A. (2024). Source.",
-          verdictLabel: "基本可对应",
+          verdict: "matching",
           reasoning: "Title and metadata align."
         }
       ],
