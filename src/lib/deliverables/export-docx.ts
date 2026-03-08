@@ -5,6 +5,7 @@ import { createTaskOutputStoragePath, resolveStoredFileDiskPath } from "@/src/li
 import { saveTaskArtifact } from "@/src/lib/storage/task-artifacts";
 import { saveTaskOutput } from "@/src/lib/tasks/task-output-store";
 import type { TaskOutputKind } from "@/src/types/tasks";
+import { withRuntimeTempDir } from "@/src/lib/deliverables/runtime-temp";
 
 export type DocxSection = {
   heading: string;
@@ -47,39 +48,39 @@ export async function exportDocx(input: DocxExportInput) {
   const payload = prepareDocxExportPayload(input);
   const variant = input.variant ?? "final";
   const storagePath = createTaskOutputStoragePath(input.userId, input.taskId, `${variant}.docx`);
-  const tempOutputPath = resolveStoredFileDiskPath(storagePath);
-  const tempDir = path.join(process.cwd(), "tmp", "docs");
-  const payloadPath = path.join(tempDir, `${input.taskId}-docx-payload.json`);
+  return withRuntimeTempDir(`pdd-docx-${input.taskId}-`, async (tempDir) => {
+    const tempOutputPath = path.join(tempDir, `${variant}.docx`);
+    const payloadPath = path.join(tempDir, "payload.json");
 
-  await mkdir(tempDir, { recursive: true });
-  await mkdir(path.dirname(tempOutputPath), { recursive: true });
-  await writeFile(payloadPath, JSON.stringify(payload, null, 2), "utf8");
+    await mkdir(tempDir, { recursive: true });
+    await writeFile(payloadPath, JSON.stringify(payload, null, 2), "utf8");
 
-  await runPythonWorker(
-    path.join(process.cwd(), "workers", "docs", "export_docx.py"),
-    [payloadPath, tempOutputPath]
-  );
+    await runPythonWorker(
+      path.join(process.cwd(), "workers", "docs", "export_docx.py"),
+      [payloadPath, tempOutputPath]
+    );
 
-  const artifact = await saveTaskArtifact({
-    storagePath,
-    body: await readFile(tempOutputPath),
-    contentType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    const artifact = await saveTaskArtifact({
+      storagePath,
+      body: await readFile(tempOutputPath),
+      contentType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    });
+
+    const output = await saveTaskOutput({
+      taskId: input.taskId,
+      userId: input.userId,
+      outputKind:
+        input.outputKind ?? (variant === "humanized" ? "humanized_docx" : "final_docx"),
+      storagePath
+    });
+
+    return {
+      outputId: output.id,
+      outputPath: artifact.outputPath,
+      payloadPath,
+      storagePath
+    };
   });
-
-  const output = await saveTaskOutput({
-    taskId: input.taskId,
-    userId: input.userId,
-    outputKind:
-      input.outputKind ?? (variant === "humanized" ? "humanized_docx" : "final_docx"),
-    storagePath
-  });
-
-  return {
-    outputId: output.id,
-    outputPath: artifact.outputPath,
-    payloadPath,
-    storagePath
-  };
 }
 
 function runPythonWorker(scriptPath: string, args: string[]) {

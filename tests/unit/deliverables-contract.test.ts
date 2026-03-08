@@ -1,3 +1,6 @@
+import { existsSync } from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   exportDocx,
@@ -68,6 +71,9 @@ describe("docx export contract", () => {
     expect(result.outputPath).toContain(
       "storage/users/user-1/tasks/task-docx-export/outputs/final.docx"
     );
+    expect(result.payloadPath.startsWith(os.tmpdir())).toBe(true);
+    expect(result.payloadPath).not.toContain(path.join(process.cwd(), "tmp"));
+    expect(existsSync(result.payloadPath)).toBe(false);
     expect(getTaskOutputs("task-docx-export")).toEqual([
       expect.objectContaining({
         outputKind: "final_docx",
@@ -146,6 +152,9 @@ describe("pdf report export contract", () => {
     expect(result.outputPath).toContain(
       "storage/users/user-1/tasks/task-report-export/outputs/reference-report.pdf"
     );
+    expect(result.payloadPath.startsWith(os.tmpdir())).toBe(true);
+    expect(result.payloadPath).not.toContain(path.join(process.cwd(), "tmp"));
+    expect(existsSync(result.payloadPath)).toBe(false);
     expect(getTaskOutputs("task-report-export")).toEqual([
       expect.objectContaining({
         outputKind: "reference_report_pdf",

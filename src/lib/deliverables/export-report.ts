@@ -7,6 +7,7 @@ import {
 } from "@/src/lib/storage/task-output-files";
 import { saveTaskArtifact } from "@/src/lib/storage/task-artifacts";
 import { saveTaskOutput } from "@/src/lib/tasks/task-output-store";
+import { withRuntimeTempDir } from "@/src/lib/deliverables/runtime-temp";
 
 export type ReferenceReportEntry = {
   rawReference: string;
@@ -52,37 +53,37 @@ export async function exportReferenceReport(input: ReferenceReportInput) {
     input.taskId,
     "reference-report.pdf"
   );
-  const tempOutputPath = resolveStoredFileDiskPath(storagePath);
-  const tempDir = path.join(process.cwd(), "tmp", "pdfs");
-  const payloadPath = path.join(tempDir, `${input.taskId}-reference-report.json`);
+  return withRuntimeTempDir(`pdd-report-${input.taskId}-`, async (tempDir) => {
+    const tempOutputPath = path.join(tempDir, "reference-report.pdf");
+    const payloadPath = path.join(tempDir, "payload.json");
 
-  await mkdir(tempDir, { recursive: true });
-  await mkdir(path.dirname(tempOutputPath), { recursive: true });
-  await writeFile(payloadPath, JSON.stringify(payload, null, 2), "utf8");
+    await mkdir(tempDir, { recursive: true });
+    await writeFile(payloadPath, JSON.stringify(payload, null, 2), "utf8");
 
-  await runPythonWorker(
-    path.join(process.cwd(), "workers", "pdfs", "export_reference_report.py"),
-    [payloadPath, tempOutputPath]
-  );
+    await runPythonWorker(
+      path.join(process.cwd(), "workers", "pdfs", "export_reference_report.py"),
+      [payloadPath, tempOutputPath]
+    );
 
-  const artifact = await saveTaskArtifact({
-    storagePath,
-    body: await readFile(tempOutputPath),
-    contentType: "application/pdf"
+    const artifact = await saveTaskArtifact({
+      storagePath,
+      body: await readFile(tempOutputPath),
+      contentType: "application/pdf"
+    });
+
+    await saveTaskOutput({
+      taskId: input.taskId,
+      userId: input.userId,
+      outputKind: "reference_report_pdf",
+      storagePath
+    });
+
+    return {
+      outputPath: artifact.outputPath,
+      payloadPath,
+      storagePath
+    };
   });
-
-  await saveTaskOutput({
-    taskId: input.taskId,
-    userId: input.userId,
-    outputKind: "reference_report_pdf",
-    storagePath
-  });
-
-  return {
-    outputPath: artifact.outputPath,
-    payloadPath,
-    storagePath
-  };
 }
 
 function runPythonWorker(scriptPath: string, args: string[]) {
