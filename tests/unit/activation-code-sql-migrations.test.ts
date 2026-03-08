@@ -32,5 +32,8 @@ describe("activation code sql migrations", () => {
     expect(sql).toContain("set recharge_quota = qw.recharge_quota + v_quota");
     expect(sql).toContain("where qw.user_id = p_user_id");
     expect(sql).toContain("returning qw.recharge_quota, qw.frozen_quota");
+    expect(sql).not.toContain("set recharge_quota = recharge_quota + v_quota");
+    expect(sql).not.toContain("where user_id = p_user_id");
+    expect(sql).not.toContain("returning recharge_quota, frozen_quota");
   });
 });

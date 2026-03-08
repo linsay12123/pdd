@@ -102,9 +102,6 @@ export async function applyWalletMutationWithLedgerInSupabase(input: {
     if (error.message.includes("WALLET_NEGATIVE_NOT_ALLOWED")) {
       throw new Error("WALLET_NEGATIVE_NOT_ALLOWED");
     }
-    if (isAmbiguousQuotaColumnError(error.message)) {
-      return applyWalletMutationWithDirectFallback(client, input);
-    }
     throw new Error(`原子更新积分失败：${error.message}`);
   }
 
@@ -125,105 +122,5 @@ export async function applyWalletMutationWithLedgerInSupabase(input: {
     rechargeQuota: Number(row.recharge_quota ?? 0),
     subscriptionQuota: Number(row.subscription_quota ?? 0),
     frozenQuota: Number(row.frozen_quota ?? 0)
-  } satisfies WalletSnapshot;
-}
-
-function isAmbiguousQuotaColumnError(message: string) {
-  return (
-    message.includes('column reference "recharge_quota" is ambiguous') ||
-    message.includes('column reference "subscription_quota" is ambiguous') ||
-    message.includes('column reference "frozen_quota" is ambiguous')
-  );
-}
-
-async function applyWalletMutationWithDirectFallback(
-  client: ReturnType<typeof createSupabaseAdminClient>,
-  input: {
-    userId: string;
-    taskId: string;
-    expectedWallet: WalletSnapshot;
-    nextWallet: WalletSnapshot;
-    entry: QuotaLedgerEntry;
-    metadata?: Record<string, unknown>;
-  }
-) {
-  const { error: ensureWalletError } = await client.from("quota_wallets").upsert(
-    {
-      user_id: input.userId,
-      recharge_quota: 0,
-      subscription_quota: 0,
-      frozen_quota: 0
-    },
-    {
-      onConflict: "user_id",
-      ignoreDuplicates: true
-    }
-  );
-
-  if (ensureWalletError) {
-    throw new Error(`原子更新积分失败：${ensureWalletError.message}`);
-  }
-
-  const { data: updatedWallet, error: walletError } = await client
-    .from("quota_wallets")
-    .update({
-      recharge_quota: input.nextWallet.rechargeQuota,
-      subscription_quota: input.nextWallet.subscriptionQuota,
-      frozen_quota: input.nextWallet.frozenQuota
-    })
-    .eq("user_id", input.userId)
-    .eq("recharge_quota", input.expectedWallet.rechargeQuota)
-    .eq("subscription_quota", input.expectedWallet.subscriptionQuota)
-    .eq("frozen_quota", input.expectedWallet.frozenQuota)
-    .select("recharge_quota,subscription_quota,frozen_quota")
-    .maybeSingle();
-
-  if (walletError) {
-    if (walletError.message.includes("WALLET_NEGATIVE_NOT_ALLOWED")) {
-      throw new Error("WALLET_NEGATIVE_NOT_ALLOWED");
-    }
-    throw new Error(`原子更新积分失败：${walletError.message}`);
-  }
-
-  if (!updatedWallet) {
-    throw new Error("WALLET_CONFLICT");
-  }
-
-  const { error: ledgerError } = await client.from("quota_ledger_entries").insert({
-    user_id: input.userId,
-    task_id: input.taskId,
-    entry_kind: input.entry.kind,
-    amount: input.entry.amount,
-    balance_recharge_after: input.nextWallet.rechargeQuota,
-    balance_subscription_after: input.nextWallet.subscriptionQuota,
-    balance_frozen_after: input.nextWallet.frozenQuota,
-    unique_event_key: input.entry.ledgerKey,
-    metadata: {
-      note: input.entry.note,
-      ...(input.metadata ?? {})
-    }
-  });
-
-  if (ledgerError) {
-    const { error: revertError } = await client
-      .from("quota_wallets")
-      .update({
-        recharge_quota: input.expectedWallet.rechargeQuota,
-        subscription_quota: input.expectedWallet.subscriptionQuota,
-        frozen_quota: input.expectedWallet.frozenQuota
-      })
-      .eq("user_id", input.userId)
-      .eq("recharge_quota", input.nextWallet.rechargeQuota)
-      .eq("subscription_quota", input.nextWallet.subscriptionQuota)
-      .eq("frozen_quota", input.nextWallet.frozenQuota);
-
-    const revertMessage = revertError ? `；回滚余额也失败：${revertError.message}` : "";
-    throw new Error(`原子更新积分失败：${ledgerError.message}${revertMessage}`);
-  }
-
-  return {
-    rechargeQuota: Number(updatedWallet.recharge_quota ?? 0),
-    subscriptionQuota: Number(updatedWallet.subscription_quota ?? 0),
-    frozenQuota: Number(updatedWallet.frozen_quota ?? 0)
   } satisfies WalletSnapshot;
 }

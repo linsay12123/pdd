@@ -31,5 +31,10 @@ describe("wallet atomic mutation migration", () => {
     expect(sql).toContain("and qw.subscription_quota = p_expected_subscription");
     expect(sql).toContain("and qw.frozen_quota = p_expected_frozen");
     expect(sql).toContain("returning qw.recharge_quota, qw.subscription_quota, qw.frozen_quota");
+    expect(sql).not.toContain("where user_id = p_user_id");
+    expect(sql).not.toContain("and recharge_quota = p_expected_recharge");
+    expect(sql).not.toContain("and subscription_quota = p_expected_subscription");
+    expect(sql).not.toContain("and frozen_quota = p_expected_frozen");
+    expect(sql).not.toContain("returning quota_wallets.recharge_quota");
   });
 });
