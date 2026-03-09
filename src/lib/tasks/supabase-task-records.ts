@@ -1,6 +1,11 @@
 import { createSupabaseAdminClient } from "@/src/lib/supabase/admin";
 import { normalizeAnalysisModel } from "@/src/lib/tasks/analysis-runtime-cleanup";
 import { assertStatusTransition } from "@/src/lib/tasks/status-machine";
+import {
+  buildWorkflowStageTimestamps,
+  isWorkflowStageTimestampsColumnMissingError,
+  normalizeWorkflowStageTimestamps
+} from "@/src/lib/tasks/workflow-stage-timestamps";
 import type {
   TaskHumanizeStatus,
   TaskAnalysisSnapshot,
@@ -44,6 +49,7 @@ type TaskRow = {
   humanize_completed_at: string | null;
   approval_attempt_count: number | null;
   last_workflow_stage: TaskWorkflowStage | null;
+  workflow_stage_timestamps?: unknown;
   quota_reservation?: TaskSummary["quotaReservation"];
 };
 
@@ -60,17 +66,19 @@ type DraftRow = {
   created_at: string;
 };
 
+const ownedTaskBaseSelect =
+  "id,user_id,status,target_word_count,citation_style,special_requirements,topic,requested_chapter_count,outline_revision_count,primary_requirement_file_id,analysis_snapshot,analysis_status,analysis_model,analysis_retry_count,analysis_error_message,analysis_trigger_run_id,analysis_requested_at,analysis_started_at,analysis_completed_at,latest_outline_version_id,latest_draft_version_id,current_candidate_draft_id,approval_attempt_count,last_workflow_stage,quota_reservation";
+
+const ownedTaskHumanizeSelect =
+  ",humanize_status,humanize_provider,humanize_profile_snapshot,humanize_document_id,humanize_retry_document_id,humanize_error_message,humanize_requested_at,humanize_completed_at";
+
+const ownedTaskSelectWithWorkflowStageTimestamps =
+  `${ownedTaskBaseSelect},workflow_stage_timestamps${ownedTaskHumanizeSelect}`;
+
+const ownedTaskSelectLegacy = `${ownedTaskBaseSelect}${ownedTaskHumanizeSelect}`;
+
 export async function getOwnedTaskFromSupabase(taskId: string, userId: string) {
-  const client = createSupabaseAdminClient();
-  const { data, error } = await client
-    .from("writing_tasks")
-    .select(
-      "id,user_id,status,target_word_count,citation_style,special_requirements,topic,requested_chapter_count,outline_revision_count,primary_requirement_file_id,analysis_snapshot,analysis_status,analysis_model,analysis_retry_count,analysis_error_message,analysis_trigger_run_id,analysis_requested_at,analysis_started_at,analysis_completed_at,latest_outline_version_id,latest_draft_version_id,current_candidate_draft_id,approval_attempt_count,last_workflow_stage,quota_reservation"
-      + ",humanize_status,humanize_provider,humanize_profile_snapshot,humanize_document_id,humanize_retry_document_id,humanize_error_message,humanize_requested_at,humanize_completed_at"
-    )
-    .eq("id", taskId)
-    .eq("user_id", userId)
-    .maybeSingle();
+  const { data, error } = await selectOwnedTaskRow(taskId, userId);
 
   if (error) {
     throw new Error(`读取任务失败：${error.message}`);
@@ -127,9 +135,12 @@ export async function setOwnedTaskStatusInSupabase(
   options: {
     fromStatuses?: TaskStatus[];
     lastWorkflowStage?: TaskWorkflowStage | null;
+    resetWorkflowStageTimestamps?: boolean;
+    workflowStageTimestampRecordedAt?: string;
   } = {}
 ) {
-  const currentStatus = await readOwnedTaskStatus(taskId, userId);
+  const currentTaskState = await readOwnedTaskWorkflowState(taskId, userId);
+  const currentStatus = currentTaskState.status;
 
   if (options.fromStatuses && !options.fromStatuses.includes(currentStatus)) {
     throw new Error("TASK_STATUS_CONFLICT");
@@ -145,25 +156,52 @@ export async function setOwnedTaskStatusInSupabase(
           status === "adjusting_word_count" ||
           status === "verifying_references" ||
           status === "exporting"
-        ? status
-        : undefined;
+      ? status
+      : undefined;
+  const nextWorkflowStageTimestamps = buildWorkflowStageTimestamps({
+    current: currentTaskState.workflowStageTimestamps,
+    status,
+    recordedAt: options.workflowStageTimestampRecordedAt,
+    reset: options.resetWorkflowStageTimestamps
+  });
 
-  const { data, error } = await client
-    .from("writing_tasks")
-    .update({
-      status,
-      ...(nextWorkflowStage !== undefined
-        ? { last_workflow_stage: nextWorkflowStage }
-        : {})
-    })
-    .eq("id", taskId)
-    .eq("user_id", userId)
-    .eq("status", currentStatus)
-    .select(
-      "id,user_id,status,target_word_count,citation_style,special_requirements,topic,requested_chapter_count,outline_revision_count,primary_requirement_file_id,analysis_snapshot,analysis_status,analysis_model,analysis_retry_count,analysis_error_message,analysis_trigger_run_id,analysis_requested_at,analysis_started_at,analysis_completed_at,latest_outline_version_id,latest_draft_version_id,current_candidate_draft_id,approval_attempt_count,last_workflow_stage,quota_reservation"
-      + ",humanize_status,humanize_provider,humanize_profile_snapshot,humanize_document_id,humanize_retry_document_id,humanize_error_message,humanize_requested_at,humanize_completed_at"
-    )
-    .maybeSingle();
+  const updatePayload: Record<string, unknown> = {
+    status,
+    ...(nextWorkflowStage !== undefined
+      ? { last_workflow_stage: nextWorkflowStage }
+      : {}),
+    workflow_stage_timestamps: nextWorkflowStageTimestamps
+  };
+
+  let data: TaskRow | null = null;
+  let error: { message: string } | null = null;
+
+  {
+    const result = await client
+      .from("writing_tasks")
+      .update(updatePayload)
+      .eq("id", taskId)
+      .eq("user_id", userId)
+      .eq("status", currentStatus)
+      .select(ownedTaskSelectWithWorkflowStageTimestamps)
+      .maybeSingle();
+    data = result.data as TaskRow | null;
+    error = result.error;
+  }
+
+  if (error && isWorkflowStageTimestampsColumnMissingError(error)) {
+    const { workflow_stage_timestamps: _ignored, ...legacyUpdatePayload } = updatePayload;
+    const legacyResult = await client
+      .from("writing_tasks")
+      .update(legacyUpdatePayload)
+      .eq("id", taskId)
+      .eq("user_id", userId)
+      .eq("status", currentStatus)
+      .select(ownedTaskSelectLegacy)
+      .maybeSingle();
+    data = legacyResult.data as TaskRow | null;
+    error = legacyResult.error;
+  }
 
   if (error) {
     throw new Error(`更新任务状态失败：${error.message}`);
@@ -202,16 +240,31 @@ export async function updateOwnedTaskHumanizeStateInSupabase(
   if (input.requestedAt !== undefined) patch.humanize_requested_at = input.requestedAt;
   if (input.completedAt !== undefined) patch.humanize_completed_at = input.completedAt;
 
-  const { data, error } = await client
-    .from("writing_tasks")
-    .update(patch)
-    .eq("id", taskId)
-    .eq("user_id", userId)
-    .select(
-      "id,user_id,status,target_word_count,citation_style,special_requirements,topic,requested_chapter_count,outline_revision_count,primary_requirement_file_id,analysis_snapshot,analysis_status,analysis_model,analysis_retry_count,analysis_error_message,analysis_trigger_run_id,analysis_requested_at,analysis_started_at,analysis_completed_at,latest_outline_version_id,latest_draft_version_id,current_candidate_draft_id,approval_attempt_count,last_workflow_stage,quota_reservation"
-      + ",humanize_status,humanize_provider,humanize_profile_snapshot,humanize_document_id,humanize_retry_document_id,humanize_error_message,humanize_requested_at,humanize_completed_at"
-    )
-    .maybeSingle();
+  let data: TaskRow | null = null;
+  let error: { message: string } | null = null;
+  {
+    const result = await client
+      .from("writing_tasks")
+      .update(patch)
+      .eq("id", taskId)
+      .eq("user_id", userId)
+      .select(ownedTaskSelectWithWorkflowStageTimestamps)
+      .maybeSingle();
+    data = result.data as TaskRow | null;
+    error = result.error;
+  }
+
+  if (error && isWorkflowStageTimestampsColumnMissingError(error)) {
+    const legacyResult = await client
+      .from("writing_tasks")
+      .update(patch)
+      .eq("id", taskId)
+      .eq("user_id", userId)
+      .select(ownedTaskSelectLegacy)
+      .maybeSingle();
+    data = legacyResult.data as TaskRow | null;
+    error = legacyResult.error;
+  }
 
   if (error) {
     throw new Error(`更新降AI状态失败：${error.message}`);
@@ -315,18 +368,44 @@ function mapTaskRow(row: TaskRow) {
     lastWorkflowStage: row.last_workflow_stage
       ? (String(row.last_workflow_stage) as TaskWorkflowStage)
       : null,
+    workflowStageTimestamps: normalizeWorkflowStageTimestamps(
+      row.workflow_stage_timestamps
+    ),
     quotaReservation: row.quota_reservation ?? undefined
   } satisfies TaskSummary;
 }
 
-async function readOwnedTaskStatus(taskId: string, userId: string): Promise<TaskStatus> {
+async function readOwnedTaskWorkflowState(
+  taskId: string,
+  userId: string
+): Promise<{
+  status: TaskStatus;
+  workflowStageTimestamps: TaskSummary["workflowStageTimestamps"];
+}> {
   const client = createSupabaseAdminClient();
-  const { data, error } = await client
-    .from("writing_tasks")
-    .select("status")
-    .eq("id", taskId)
-    .eq("user_id", userId)
-    .maybeSingle();
+  let data: { status: TaskStatus; workflow_stage_timestamps?: unknown } | null = null;
+  let error: { message: string } | null = null;
+  {
+    const result = await client
+      .from("writing_tasks")
+      .select("status,workflow_stage_timestamps")
+      .eq("id", taskId)
+      .eq("user_id", userId)
+      .maybeSingle();
+    data = result.data as { status: TaskStatus; workflow_stage_timestamps?: unknown } | null;
+    error = result.error;
+  }
+
+  if (error && isWorkflowStageTimestampsColumnMissingError(error)) {
+    const legacyResult = await client
+      .from("writing_tasks")
+      .select("status")
+      .eq("id", taskId)
+      .eq("user_id", userId)
+      .maybeSingle();
+    data = legacyResult.data;
+    error = legacyResult.error;
+  }
 
   if (error) {
     throw new Error(`读取任务状态失败：${error.message}`);
@@ -336,7 +415,41 @@ async function readOwnedTaskStatus(taskId: string, userId: string): Promise<Task
     throw new Error("TASK_NOT_FOUND");
   }
 
-  return data.status as TaskStatus;
+  return {
+    status: data.status as TaskStatus,
+    workflowStageTimestamps: normalizeWorkflowStageTimestamps(
+      (data as { workflow_stage_timestamps?: unknown }).workflow_stage_timestamps
+    )
+  };
+}
+
+async function selectOwnedTaskRow(taskId: string, userId: string) {
+  const client = createSupabaseAdminClient();
+  let data: TaskRow | null = null;
+  let error: { message: string } | null = null;
+  {
+    const result = await client
+      .from("writing_tasks")
+      .select(ownedTaskSelectWithWorkflowStageTimestamps)
+      .eq("id", taskId)
+      .eq("user_id", userId)
+      .maybeSingle();
+    data = result.data as TaskRow | null;
+    error = result.error;
+  }
+
+  if (error && isWorkflowStageTimestampsColumnMissingError(error)) {
+    const legacyResult = await client
+      .from("writing_tasks")
+      .select(ownedTaskSelectLegacy)
+      .eq("id", taskId)
+      .eq("user_id", userId)
+      .maybeSingle();
+    data = legacyResult.data;
+    error = legacyResult.error;
+  }
+
+  return { data, error };
 }
 
 function mapDraftRow(row: DraftRow) {

@@ -11,7 +11,11 @@ import {
   exportReferenceReport,
   type ReferenceReportInput
 } from "@/src/lib/deliverables/export-report";
-import { applyCandidateDraft } from "@/src/lib/drafts/word-count";
+import {
+  countBodyWords,
+  draftHasReferences,
+  draftHasTitle
+} from "@/src/lib/drafts/word-count";
 import { draftToDocxContent } from "@/src/lib/humanize/humanize-markdown";
 import {
   getTaskOutlineVersion,
@@ -22,6 +26,7 @@ import { setOwnedTaskStatusInSupabase } from "@/src/lib/tasks/supabase-task-reco
 import { saveDraftVersion } from "@/src/lib/tasks/save-draft-version";
 import { saveReferenceChecks } from "@/src/lib/tasks/save-reference-checks";
 import type {
+  TaskDraftVersion,
   TaskOutlineVersion,
   TaskSummary
 } from "@/src/types/tasks";
@@ -46,6 +51,11 @@ export class TaskProcessingStageError extends Error {
 type RewriteDraftResult = {
   prompt: string;
   candidateDraft: string;
+};
+
+type AdjustedDraftResult = {
+  chosenDraft: string;
+  finalDraftVersion: TaskDraftVersion;
 };
 
 type ProcessDocxExporter = (
@@ -107,6 +117,9 @@ const defaultDocxExporter: ProcessDocxExporter = async (input) => exportDocx(inp
 const defaultReferenceReportExporter: ProcessReferenceReportExporter = async (input) =>
   exportReferenceReport(input);
 
+const BODY_WORD_COUNT_TOLERANCE = 10;
+const MAX_WORD_COUNT_REWRITE_ATTEMPTS = 20;
+
 export async function processApprovedTask(
   input: ProcessApprovedTaskInput,
   dependencies: ProcessApprovedTaskDependencies = {}
@@ -141,43 +154,19 @@ export async function processApprovedTask(
 
   await setTaskStatus(input.taskId, input.userId, "adjusting_word_count");
 
-  const rewrittenDraft = await runTaskStage("adjusting_word_count", async () => {
-    return rewriteDraftToTarget({
-      currentDraft: draftResult.draft,
-      targetWordCount,
-      citationStyle,
-      safetyIdentifier: input.safetyIdentifier
-    });
-  });
-  await runTaskStage("adjusting_word_count", async () => {
-    return saveDraftVersion({
+  const wordCountResult = await runTaskStage("adjusting_word_count", async () => {
+    return rewriteDraftUntilWithinTolerance({
       taskId: input.taskId,
       userId: input.userId,
-      markdown: rewrittenDraft.candidateDraft,
-      isActive: false,
-      isCandidate: true
+      initialDraft: draftResult.draft,
+      initialDraftVersion: initialDraft,
+      targetWordCount,
+      citationStyle,
+      safetyIdentifier: input.safetyIdentifier,
+      rewriteDraftToTarget
     });
   });
-
-  const wordCountResult = await runTaskStage("adjusting_word_count", async () => {
-    return applyCandidateDraft({
-      currentDraft: draftResult.draft,
-      candidateDraft: rewrittenDraft.candidateDraft,
-      targetWordCount
-    });
-  });
-
-  const finalDraftVersion = wordCountResult.candidateWasPromoted
-    ? await runTaskStage("adjusting_word_count", async () => {
-        return saveDraftVersion({
-          taskId: input.taskId,
-          userId: input.userId,
-          markdown: wordCountResult.chosenDraft,
-          isActive: true,
-          isCandidate: false
-        });
-      })
-    : initialDraft;
+  const finalDraftVersion = wordCountResult.finalDraftVersion;
 
   await setTaskStatus(input.taskId, input.userId, "verifying_references");
 
@@ -288,11 +277,7 @@ async function requestAdjustedDraft({
   citationStyle: string;
   safetyIdentifier?: string;
 }): Promise<RewriteDraftResult> {
-  const currentWordCount = applyCandidateDraft({
-    currentDraft,
-    candidateDraft: currentDraft,
-    targetWordCount
-  }).currentWordCount;
+  const currentWordCount = countBodyWords(currentDraft);
   const prompt = buildAdjustWordCountPrompt({
     draft: currentDraft,
     currentWordCount,
@@ -309,6 +294,81 @@ async function requestAdjustedDraft({
     prompt,
     candidateDraft: response.output_text.trim() || currentDraft
   };
+}
+
+async function rewriteDraftUntilWithinTolerance(input: {
+  taskId: string;
+  userId: string;
+  initialDraft: string;
+  initialDraftVersion: TaskDraftVersion;
+  targetWordCount: number;
+  citationStyle: string;
+  safetyIdentifier?: string;
+  rewriteDraftToTarget: NonNullable<ProcessApprovedTaskDependencies["rewriteDraftToTarget"]>;
+}): Promise<AdjustedDraftResult> {
+  let currentDraft = input.initialDraft;
+
+  if (isDraftWithinWordCountTolerance(currentDraft, input.targetWordCount)) {
+    return {
+      chosenDraft: currentDraft,
+      finalDraftVersion: input.initialDraftVersion
+    };
+  }
+
+  for (let attempt = 0; attempt < MAX_WORD_COUNT_REWRITE_ATTEMPTS; attempt += 1) {
+    const rewrittenDraft = await input.rewriteDraftToTarget({
+      currentDraft,
+      targetWordCount: input.targetWordCount,
+      citationStyle: input.citationStyle,
+      safetyIdentifier: input.safetyIdentifier
+    });
+
+    await saveDraftVersion({
+      taskId: input.taskId,
+      userId: input.userId,
+      markdown: rewrittenDraft.candidateDraft,
+      isActive: false,
+      isCandidate: true
+    });
+
+    if (
+      !draftHasTitle(rewrittenDraft.candidateDraft) ||
+      !draftHasReferences(rewrittenDraft.candidateDraft)
+    ) {
+      continue;
+    }
+
+    currentDraft = rewrittenDraft.candidateDraft;
+
+    if (!isDraftWithinWordCountTolerance(currentDraft, input.targetWordCount)) {
+      continue;
+    }
+
+    const finalDraftVersion = await saveDraftVersion({
+      taskId: input.taskId,
+      userId: input.userId,
+      markdown: currentDraft,
+      isActive: true,
+      isCandidate: false
+    });
+
+    return {
+      chosenDraft: currentDraft,
+      finalDraftVersion
+    };
+  }
+
+  throw new Error(
+    `正文部分连续 ${MAX_WORD_COUNT_REWRITE_ATTEMPTS} 轮都没进目标字数正负 ${BODY_WORD_COUNT_TOLERANCE} 以内。`
+  );
+}
+
+function isDraftWithinWordCountTolerance(draft: string, targetWordCount: number) {
+  return (
+    Math.abs(countBodyWords(draft) - targetWordCount) <= BODY_WORD_COUNT_TOLERANCE &&
+    draftHasTitle(draft) &&
+    draftHasReferences(draft)
+  );
 }
 
 async function loadApprovedTaskContext(taskId: string, userId: string) {

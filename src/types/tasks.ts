@@ -19,6 +19,15 @@ export const taskWorkflowStages = [
 
 export type TaskWorkflowStage = (typeof taskWorkflowStages)[number];
 
+export const taskWorkflowStageTimestampKeys = [
+  ...taskWorkflowStages,
+  "deliverable_ready",
+  "failed"
+] as const;
+
+export type TaskWorkflowStageTimestampKey =
+  (typeof taskWorkflowStageTimestampKeys)[number];
+
 export type TaskHumanizeStatus =
   | "idle"
   | "queued"
@@ -92,6 +101,7 @@ export type TaskSummary = {
   quotaReservation?: import("@/src/types/billing").FrozenQuotaReservation;
   approvalAttemptCount?: number;
   lastWorkflowStage?: TaskWorkflowStage | null;
+  workflowStageTimestamps?: Partial<Record<TaskWorkflowStageTimestampKey, string>>;
 };
 
 export type TaskFileRole = "requirement" | "background" | "irrelevant" | "unknown";

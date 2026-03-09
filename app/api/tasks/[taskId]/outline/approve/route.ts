@@ -12,6 +12,10 @@ import {
 import { createSupabaseAdminClient } from "@/src/lib/supabase/admin";
 import { approveOutlineVersion } from "@/src/lib/tasks/save-outline-version";
 import {
+  buildWorkflowStageTimestamps,
+  isWorkflowStageTimestampsColumnMissingError
+} from "@/src/lib/tasks/workflow-stage-timestamps";
+import {
   getTaskSummary,
   saveTaskSummary
 } from "@/src/lib/tasks/repository";
@@ -47,8 +51,17 @@ type OutlineApproveDependencies = {
   ) => Promise<{
     reservation: FrozenQuotaReservation;
     approvalAttemptCount: number;
+    workflowStageTimestamps?: {
+      drafting?: string;
+      adjusting_word_count?: string;
+      verifying_references?: string;
+      exporting?: string;
+      deliverable_ready?: string;
+      failed?: string;
+    };
     previousStatus: TaskStatus;
     previousLastWorkflowStage: TaskWorkflowStage | null;
+    previousWorkflowStageTimestamps?: Record<string, string>;
   }>;
   releaseQuotaForTask?: (
     taskId: string,
@@ -148,7 +161,13 @@ export async function handleOutlineApprovalRequest(
         task: toSessionTaskPayload({
           ...approved.task,
           status: "drafting",
-          lastWorkflowStage: "drafting"
+          lastWorkflowStage: "drafting",
+          workflowStageTimestamps:
+            reservationResult.workflowStageTimestamps ??
+            buildWorkflowStageTimestamps({
+              current: null,
+              status: "drafting"
+            })
         }),
         humanize: toSessionTaskHumanizePayload({
           ...approved.task,
@@ -244,8 +263,17 @@ async function reserveQuotaForTask(
 ): Promise<{
   reservation: FrozenQuotaReservation;
   approvalAttemptCount: number;
+  workflowStageTimestamps: {
+    drafting?: string;
+    adjusting_word_count?: string;
+    verifying_references?: string;
+    exporting?: string;
+    deliverable_ready?: string;
+    failed?: string;
+  };
   previousStatus: TaskStatus;
   previousLastWorkflowStage: TaskWorkflowStage | null;
+  previousWorkflowStageTimestamps: Record<string, string>;
 }> {
   if (!shouldUseSupabasePersistence()) {
     throw new Error("REAL_PERSISTENCE_REQUIRED");
@@ -260,16 +288,53 @@ async function reserveQuotaForTaskWithSupabase(
 ): Promise<{
   reservation: FrozenQuotaReservation;
   approvalAttemptCount: number;
+  workflowStageTimestamps: {
+    drafting?: string;
+    adjusting_word_count?: string;
+    verifying_references?: string;
+    exporting?: string;
+    deliverable_ready?: string;
+    failed?: string;
+  };
   previousStatus: TaskStatus;
   previousLastWorkflowStage: TaskWorkflowStage | null;
+  previousWorkflowStageTimestamps: Record<string, string>;
 }> {
   const client = createSupabaseAdminClient();
-  const { data: currentTask, error: currentTaskError } = await client
-    .from("writing_tasks")
-    .select("id,status,target_word_count,approval_attempt_count,last_workflow_stage")
-    .eq("id", taskId)
-    .eq("user_id", userId)
-    .maybeSingle();
+  type CurrentTaskRow = {
+    id: string;
+    status: TaskStatus;
+    target_word_count: number | null;
+    approval_attempt_count: number | null;
+    last_workflow_stage: string | null;
+    workflow_stage_timestamps?: unknown;
+  };
+
+  let currentTask: CurrentTaskRow | null = null;
+  let currentTaskError: { message: string } | null = null;
+  {
+    const result = await client
+      .from("writing_tasks")
+      .select(
+        "id,status,target_word_count,approval_attempt_count,last_workflow_stage,workflow_stage_timestamps"
+      )
+      .eq("id", taskId)
+      .eq("user_id", userId)
+      .maybeSingle();
+    currentTask = result.data as CurrentTaskRow | null;
+    currentTaskError = result.error;
+  }
+
+  if (currentTaskError && isWorkflowStageTimestampsColumnMissingError(currentTaskError)) {
+    const legacyResult = await client
+      .from("writing_tasks")
+      .select("id,status,target_word_count,approval_attempt_count,last_workflow_stage")
+      .eq("id", taskId)
+      .eq("user_id", userId)
+      .maybeSingle();
+    currentTask = legacyResult.data as CurrentTaskRow | null;
+    currentTaskError = legacyResult.error;
+  }
 
   if (currentTaskError) {
     throw new Error(`读取任务失败：${currentTaskError.message}`);
@@ -283,19 +348,33 @@ async function reserveQuotaForTaskWithSupabase(
   const previousLastWorkflowStage = currentTask.last_workflow_stage
     ? (String(currentTask.last_workflow_stage) as TaskWorkflowStage)
     : null;
+  const previousWorkflowStageTimestamps = (
+    currentTask.workflow_stage_timestamps &&
+    typeof currentTask.workflow_stage_timestamps === "object"
+      ? currentTask.workflow_stage_timestamps
+      : {}
+  ) as Record<string, string>;
 
   if (!["awaiting_outline_approval", "failed"].includes(previousStatus)) {
     throw new Error("TASK_ALREADY_PROCESSING");
   }
 
   const nextApprovalAttemptCount = Number(currentTask.approval_attempt_count ?? 0) + 1;
+  const draftingRecordedAt = new Date().toISOString();
+  const workflowStageTimestamps = buildWorkflowStageTimestamps({
+    current: null,
+    status: "drafting",
+    recordedAt: draftingRecordedAt,
+    reset: true
+  });
 
-  const { data: lockedTask, error: lockError } = await client
+  let { data: lockedTask, error: lockError } = await client
     .from("writing_tasks")
     .update({
       status: "drafting",
       last_workflow_stage: "drafting",
-      approval_attempt_count: nextApprovalAttemptCount
+      approval_attempt_count: nextApprovalAttemptCount,
+      workflow_stage_timestamps: workflowStageTimestamps
     })
     .eq("id", taskId)
     .eq("user_id", userId)
@@ -303,6 +382,24 @@ async function reserveQuotaForTaskWithSupabase(
     .eq("approval_attempt_count", Number(currentTask.approval_attempt_count ?? 0))
     .select("id,target_word_count")
     .maybeSingle();
+
+  if (lockError && isWorkflowStageTimestampsColumnMissingError(lockError)) {
+    const legacyResult = await client
+      .from("writing_tasks")
+      .update({
+        status: "drafting",
+        last_workflow_stage: "drafting",
+        approval_attempt_count: nextApprovalAttemptCount
+      })
+      .eq("id", taskId)
+      .eq("user_id", userId)
+      .eq("status", previousStatus)
+      .eq("approval_attempt_count", Number(currentTask.approval_attempt_count ?? 0))
+      .select("id,target_word_count")
+      .maybeSingle();
+    lockedTask = legacyResult.data;
+    lockError = legacyResult.error;
+  }
 
   if (lockError) {
     throw new Error(`锁定任务失败：${lockError.message}`);
@@ -351,7 +448,8 @@ async function reserveQuotaForTaskWithSupabase(
     } catch {
       await revertTaskToRetriableStatus(taskId, userId, {
         previousStatus,
-        previousLastWorkflowStage
+        previousLastWorkflowStage,
+        previousWorkflowStageTimestamps
       });
       throw new Error("INSUFFICIENT_QUOTA");
     }
@@ -373,7 +471,8 @@ async function reserveQuotaForTaskWithSupabase(
       }
       await revertTaskToRetriableStatus(taskId, userId, {
         previousStatus,
-        previousLastWorkflowStage
+        previousLastWorkflowStage,
+        previousWorkflowStageTimestamps
       });
       throw error;
     }
@@ -382,7 +481,8 @@ async function reserveQuotaForTaskWithSupabase(
   if (!applied || !frozenResult) {
     await revertTaskToRetriableStatus(taskId, userId, {
       previousStatus,
-      previousLastWorkflowStage
+      previousLastWorkflowStage,
+      previousWorkflowStageTimestamps
     });
     throw new Error("INSUFFICIENT_QUOTA");
   }
@@ -407,8 +507,10 @@ async function reserveQuotaForTaskWithSupabase(
   return {
     reservation: frozenResult.reservation,
     approvalAttemptCount: nextApprovalAttemptCount,
+    workflowStageTimestamps: workflowStageTimestamps ?? {},
     previousStatus,
-    previousLastWorkflowStage
+    previousLastWorkflowStage,
+    previousWorkflowStageTimestamps
   };
 }
 
@@ -473,6 +575,7 @@ async function revertTaskToRetriableStatus(
   input: {
     previousStatus: TaskStatus;
     previousLastWorkflowStage: TaskWorkflowStage | null;
+    previousWorkflowStageTimestamps?: Record<string, string>;
   }
 ) {
   if (!shouldUseSupabasePersistence()) {
@@ -482,6 +585,7 @@ async function revertTaskToRetriableStatus(
         ...task,
         status: input.previousStatus,
         lastWorkflowStage: input.previousLastWorkflowStage,
+        workflowStageTimestamps: input.previousWorkflowStageTimestamps ?? {},
         quotaReservation: undefined
       });
     }
@@ -489,16 +593,31 @@ async function revertTaskToRetriableStatus(
   }
 
   const client = createSupabaseAdminClient();
-  const { error } = await client
+  let { error } = await client
     .from("writing_tasks")
     .update({
       status: input.previousStatus,
       last_workflow_stage: input.previousLastWorkflowStage,
+      workflow_stage_timestamps: input.previousWorkflowStageTimestamps ?? {},
       quota_reservation: null
     })
     .eq("id", taskId)
     .eq("user_id", userId)
     .eq("status", "drafting");
+
+  if (error && isWorkflowStageTimestampsColumnMissingError(error)) {
+    const legacyResult = await client
+      .from("writing_tasks")
+      .update({
+        status: input.previousStatus,
+        last_workflow_stage: input.previousLastWorkflowStage,
+        quota_reservation: null
+      })
+      .eq("id", taskId)
+      .eq("user_id", userId)
+      .eq("status", "drafting");
+    error = legacyResult.error;
+  }
 
   if (error) {
     console.warn(

@@ -74,7 +74,6 @@ const defaultHumanizeState: TaskWorkflowHumanizePayload = {
 const MAX_UPLOAD_FILE_COUNT = 10;
 const MAX_UPLOAD_FILE_BYTES = 25 * 1024 * 1024;
 const MAX_UPLOAD_FILE_MB = MAX_UPLOAD_FILE_BYTES / (1024 * 1024);
-const POST_APPROVAL_POLL_INTERVAL_MS = 5_000;
 
 export function WorkspacePageClient({
   initialQuota,
@@ -238,19 +237,11 @@ export function WorkspacePageClient({
       step === 2 &&
       activeTask.analysisStatus === "pending" &&
       !activeTask.analysisProgress.canRetry;
-    const shouldPollPostApproval =
-      step === 3 &&
-      ["drafting", "adjusting_word_count", "verifying_references", "exporting"].includes(
-        activeTask.task.status
-      );
 
-    if (!shouldPollAnalysis && !shouldPollPostApproval) {
+    if (!shouldPollAnalysis) {
       return;
     }
 
-    const intervalMs = shouldPollAnalysis
-      ? ANALYSIS_POLL_INTERVAL_MS
-      : POST_APPROVAL_POLL_INTERVAL_MS;
     let cancelled = false;
     const timer = window.setTimeout(() => {
       void requestTaskAnalysisStatus({ taskId: activeTask.task.id })
@@ -277,39 +268,21 @@ export function WorkspacePageClient({
             };
           });
 
-          if (shouldPollAnalysis) {
-            if (result.analysisStatus === "succeeded") {
-              setNotice({
-                tone: "success",
-                text: result.message
-              });
-            } else if (result.analysisStatus === "pending" && result.analysisProgress.canRetry) {
-              setNotice({
-                tone: "error",
-                text: result.message
-              });
-            } else if (result.analysisStatus === "failed") {
-              setNotice({
-                tone: "error",
-                text: result.message
-              });
-            }
-
-            return;
-          }
-
-          setNotice({
-            tone:
-              result.task.status === "deliverable_ready"
-                ? "success"
-                : result.task.status === "failed"
-                  ? "error"
-                  : "info",
-            text: result.message
-          });
-
-          if (result.task.status === "deliverable_ready" || result.task.status === "failed") {
-            await syncWallet();
+          if (result.analysisStatus === "succeeded") {
+            setNotice({
+              tone: "success",
+              text: result.message
+            });
+          } else if (result.analysisStatus === "pending" && result.analysisProgress.canRetry) {
+            setNotice({
+              tone: "error",
+              text: result.message
+            });
+          } else if (result.analysisStatus === "failed") {
+            setNotice({
+              tone: "error",
+              text: result.message
+            });
           }
         })
         .catch(() => {
@@ -319,18 +292,101 @@ export function WorkspacePageClient({
 
           setNotice({
             tone: "error",
-            text: shouldPollAnalysis
-              ? "读取分析进度失败，请稍后再试。"
-              : "读取正文写作进度失败，请稍后再试。"
+            text: "读取分析进度失败，请稍后再试。"
           });
         });
-    }, intervalMs);
+    }, ANALYSIS_POLL_INTERVAL_MS);
 
     return () => {
       cancelled = true;
       window.clearTimeout(timer);
     };
   }, [activeTask, step]);
+
+  useEffect(() => {
+    if (!activeTask || step !== 3) {
+      return;
+    }
+
+    if (
+      !["drafting", "adjusting_word_count", "verifying_references", "exporting"].includes(
+        activeTask.task.status
+      )
+    ) {
+      return;
+    }
+
+    let closed = false;
+    const stream = new EventSource(`/api/tasks/${activeTask.task.id}/workflow/stream`);
+
+    const handleWorkflowEvent = (event: MessageEvent<string>) => {
+      if (closed) {
+        return;
+      }
+
+      const result = JSON.parse(event.data) as {
+        task: WorkspaceTaskState["task"];
+        downloads: NonNullable<WorkspaceTaskState["downloads"]>;
+        finalWordCount: number | null;
+        message: string;
+      };
+
+      setActiveTask((currentTask) => {
+        if (!currentTask || currentTask.task.id !== activeTask.task.id) {
+          return currentTask;
+        }
+
+        return {
+          ...currentTask,
+          task: result.task,
+          downloads: result.downloads ?? currentTask.downloads,
+          finalWordCount:
+            typeof result.finalWordCount === "number"
+              ? result.finalWordCount
+              : currentTask.finalWordCount,
+          humanize: currentTask.humanize ?? defaultHumanizeState,
+          message: result.message
+        };
+      });
+
+      setNotice({
+        tone:
+          result.task.status === "deliverable_ready"
+            ? "success"
+            : result.task.status === "failed"
+              ? "error"
+              : "info",
+        text: result.message
+      });
+
+      if (result.task.status === "deliverable_ready" || result.task.status === "failed") {
+        closed = true;
+        stream.close();
+        void syncWallet();
+      }
+    };
+
+    const handleStreamError = () => {
+      if (closed) {
+        return;
+      }
+
+      setNotice({
+        tone: "error",
+        text: "读取正文写作进度失败，请稍后再试。"
+      });
+    };
+
+    stream.addEventListener("workflow", handleWorkflowEvent as EventListener);
+    stream.addEventListener("error", handleStreamError as EventListener);
+
+    return () => {
+      closed = true;
+      stream.removeEventListener("workflow", handleWorkflowEvent as EventListener);
+      stream.removeEventListener("error", handleStreamError as EventListener);
+      stream.close();
+    };
+  }, [activeTask?.task.id, activeTask?.task.status, step]);
 
   useEffect(() => {
     if (!activeTask || step !== 3) {
@@ -1338,6 +1394,24 @@ export function WorkspacePageClient({
                     <p className="text-brand-700">您的文章与核验报告已生成完毕，请下载查阅。</p>
                   </div>
 
+                  {getCompletedWorkflowStages(activeTask?.task.workflowStageTimestamps).length > 0 && (
+                    <div className="relative z-10 mb-8 rounded-xl border border-white/5 bg-brand-950/70 p-5">
+                      <h3 className="text-sm font-bold text-emerald-300 uppercase tracking-wider mb-4">
+                        已完成阶段
+                      </h3>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                        {getCompletedWorkflowStages(activeTask?.task.workflowStageTimestamps).map((stage) => (
+                          <div
+                            key={stage.key}
+                            className="rounded-xl border border-white/5 bg-brand-900/60 px-4 py-3 text-sm text-cream-100"
+                          >
+                            {stage.label}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
                   <div
                     className={`grid grid-cols-1 gap-6 mb-10 ${
                       activeTask?.downloads?.humanizedDocxOutputId ? "md:grid-cols-3" : "md:grid-cols-2"
@@ -1670,7 +1744,6 @@ function deriveInitialStep(task: WorkspaceTaskState | null) {
     task.task.status === "verifying_references" ||
     task.task.status === "exporting" ||
     task.task.status === "deliverable_ready" ||
-    task.task.status === "humanizing" ||
     (task.task.status === "failed" && Boolean(task.task.lastWorkflowStage))
   ) {
     return 3;
@@ -1739,6 +1812,19 @@ function deriveWorkflowStageIndex(input: {
   return 1;
 }
 
+function getCompletedWorkflowStages(
+  workflowStageTimestamps: WorkspaceTaskState["task"]["workflowStageTimestamps"] | undefined
+) {
+  const stageLabels = [
+    { key: "drafting", label: "正文写作" },
+    { key: "adjusting_word_count", label: "字数校正" },
+    { key: "verifying_references", label: "引用核验" },
+    { key: "exporting", label: "导出生成" }
+  ] as const;
+
+  return stageLabels.filter((stage) => workflowStageTimestamps?.[stage.key]);
+}
+
 function getPostApprovalStage(
   taskStatus: string | null,
   _lastWorkflowStage: WorkspaceTaskState["task"]["lastWorkflowStage"] | null
@@ -1763,7 +1849,11 @@ function getPostApprovalStage(
     return "failed";
   }
 
-  return "deliverable_ready";
+  if (taskStatus === "deliverable_ready") {
+    return "deliverable_ready";
+  }
+
+  return "drafting";
 }
 
 function getPostApprovalStageCard(

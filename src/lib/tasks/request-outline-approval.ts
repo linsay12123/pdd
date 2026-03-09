@@ -8,6 +8,14 @@ export type OutlineApprovalPayload = {
     citationStyle: string | null;
     specialRequirements: string;
     lastWorkflowStage?: "drafting" | "adjusting_word_count" | "verifying_references" | "exporting" | null;
+    workflowStageTimestamps?: {
+      drafting?: string;
+      adjusting_word_count?: string;
+      verifying_references?: string;
+      exporting?: string;
+      deliverable_ready?: string;
+      failed?: string;
+    };
   };
   outlineVersion: {
     id: string;

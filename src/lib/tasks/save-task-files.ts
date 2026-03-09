@@ -22,6 +22,10 @@ import {
   replaceTaskFiles,
   saveTaskFileRecords
 } from "@/src/lib/tasks/repository";
+import {
+  isWorkflowStageTimestampsColumnMissingError,
+  normalizeWorkflowStageTimestamps
+} from "@/src/lib/tasks/workflow-stage-timestamps";
 import type {
   TaskAnalysisSnapshot,
   TaskFileRecord,
@@ -62,7 +66,10 @@ type PersistedTaskFilesResult = {
   outline: OutlineScaffold | null;
 };
 
-export async function getOwnedTaskSummary(taskId: string, userId: string) {
+export async function getOwnedTaskSummary(
+  taskId: string,
+  userId: string
+): Promise<TaskSummary | null> {
   if (!shouldUseSupabasePersistence()) {
     if (!shouldUseLocalTestPersistence()) {
       requireFormalPersistence();
@@ -78,14 +85,59 @@ export async function getOwnedTaskSummary(taskId: string, userId: string) {
   }
 
   const client = createSupabaseAdminClient();
-  const { data, error } = await client
-    .from("writing_tasks")
-    .select(
-      "id,status,target_word_count,citation_style,special_requirements,primary_requirement_file_id,topic,requested_chapter_count,outline_revision_count,latest_outline_version_id,latest_draft_version_id,analysis_snapshot,analysis_status,analysis_model,analysis_retry_count,analysis_error_message,analysis_trigger_run_id,analysis_requested_at,analysis_started_at,analysis_completed_at,approval_attempt_count,last_workflow_stage"
-    )
-    .eq("id", taskId)
-    .eq("user_id", userId)
-    .maybeSingle();
+  type OwnedTaskRow = {
+    id: string;
+    status: TaskStatus;
+    target_word_count: number | null;
+    citation_style: string | null;
+    special_requirements: string | null;
+    primary_requirement_file_id: string | null;
+    topic: string | null;
+    requested_chapter_count: number | null;
+    outline_revision_count: number | null;
+    latest_outline_version_id: string | null;
+    latest_draft_version_id: string | null;
+    analysis_snapshot: unknown;
+    analysis_status: "pending" | "succeeded" | "failed" | null;
+    analysis_model: string | null;
+    analysis_retry_count: number | null;
+    analysis_error_message: string | null;
+    analysis_trigger_run_id: string | null;
+    analysis_requested_at: string | null;
+    analysis_started_at: string | null;
+    analysis_completed_at: string | null;
+    approval_attempt_count?: number | null;
+    last_workflow_stage?: string | null;
+    workflow_stage_timestamps?: unknown;
+  };
+
+  let data: OwnedTaskRow | null = null;
+  let error: { message: string } | null = null;
+  {
+    const result = await client
+      .from("writing_tasks")
+      .select(
+        "id,status,target_word_count,citation_style,special_requirements,primary_requirement_file_id,topic,requested_chapter_count,outline_revision_count,latest_outline_version_id,latest_draft_version_id,analysis_snapshot,analysis_status,analysis_model,analysis_retry_count,analysis_error_message,analysis_trigger_run_id,analysis_requested_at,analysis_started_at,analysis_completed_at,approval_attempt_count,last_workflow_stage,workflow_stage_timestamps"
+      )
+      .eq("id", taskId)
+      .eq("user_id", userId)
+      .maybeSingle();
+    data = result.data as OwnedTaskRow | null;
+    error = result.error;
+  }
+
+  if (error && isWorkflowStageTimestampsColumnMissingError(error)) {
+    const legacyResult = await client
+      .from("writing_tasks")
+      .select(
+        "id,status,target_word_count,citation_style,special_requirements,primary_requirement_file_id,topic,requested_chapter_count,outline_revision_count,latest_outline_version_id,latest_draft_version_id,analysis_snapshot,analysis_status,analysis_model,analysis_retry_count,analysis_error_message,analysis_trigger_run_id,analysis_requested_at,analysis_started_at,analysis_completed_at,approval_attempt_count,last_workflow_stage"
+      )
+      .eq("id", taskId)
+      .eq("user_id", userId)
+      .maybeSingle();
+    data = legacyResult.data as OwnedTaskRow | null;
+    error = legacyResult.error;
+  }
 
   if (error) {
     throw new Error(`读取任务失败：${error.message}`);
@@ -149,7 +201,10 @@ export async function getOwnedTaskSummary(taskId: string, userId: string) {
     lastWorkflowStage:
       (data as { last_workflow_stage?: string | null }).last_workflow_stage
         ? String((data as { last_workflow_stage?: string | null }).last_workflow_stage) as TaskSummary["lastWorkflowStage"]
-        : null
+        : null,
+    workflowStageTimestamps: normalizeWorkflowStageTimestamps(
+      (data as { workflow_stage_timestamps?: unknown }).workflow_stage_timestamps
+    )
   } satisfies TaskSummary;
 }
 

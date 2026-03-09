@@ -23,7 +23,9 @@ const referencesHeadingPattern = /^#{0,2}\s*References\s*$/im;
 
 function normalizeBodyMarkdown(markdown: string) {
   return markdown
-    .replace(/^#{1,6}\s+/gm, "")
+    .split("\n")
+    .map((line) => (/^#{1,6}\s+/.test(line.trim()) ? "" : line))
+    .join("\n")
     .replace(/[*_`>-]/g, " ");
 }
 

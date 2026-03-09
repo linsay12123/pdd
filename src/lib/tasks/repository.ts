@@ -4,6 +4,10 @@ import {
   isTaskOutputExpired,
   resolveTaskOutputExpiresAt
 } from "@/src/lib/tasks/task-output-expiry";
+import {
+  buildWorkflowStageTimestamps,
+  normalizeWorkflowStageTimestamps
+} from "@/src/lib/tasks/workflow-stage-timestamps";
 import { assertStatusTransition } from "@/src/lib/tasks/status-machine";
 import type {
   TaskDraftVersion,
@@ -29,8 +33,14 @@ const taskReferenceCheckStore = new Map<string, TaskReferenceCheck[]>();
 const taskOutputStore = new Map<string, TaskOutputRecord[]>();
 
 export function saveTaskSummary(task: TaskSummary) {
-  taskStore.set(task.id, task);
-  return task;
+  const normalizedTask = {
+    ...task,
+    workflowStageTimestamps: normalizeWorkflowStageTimestamps(
+      task.workflowStageTimestamps ?? null
+    )
+  };
+  taskStore.set(task.id, normalizedTask);
+  return normalizedTask;
 }
 
 export function resetTaskStore() {
@@ -54,7 +64,11 @@ export function patchTaskSummary(taskId: string, patch: Partial<TaskSummary>) {
 
   const nextTask = {
     ...existing,
-    ...patch
+    ...patch,
+    workflowStageTimestamps:
+      patch.workflowStageTimestamps !== undefined
+        ? normalizeWorkflowStageTimestamps(patch.workflowStageTimestamps)
+        : existing.workflowStageTimestamps ?? {}
   };
 
   taskStore.set(taskId, nextTask);
@@ -86,6 +100,8 @@ export function updateTaskStatus(
   status: TaskStatus,
   options: {
     lastWorkflowStage?: TaskWorkflowStage | null;
+    resetWorkflowStageTimestamps?: boolean;
+    workflowStageTimestampRecordedAt?: string;
   } = {}
 ) {
   const existing = taskStore.get(taskId);
@@ -106,7 +122,13 @@ export function updateTaskStatus(
             options.lastWorkflowStage
           )
         }
-      : {})
+      : {}),
+    workflowStageTimestamps: buildWorkflowStageTimestamps({
+      current: existing.workflowStageTimestamps ?? {},
+      status,
+      recordedAt: options.workflowStageTimestampRecordedAt,
+      reset: options.resetWorkflowStageTimestamps
+    })
   };
 
   taskStore.set(taskId, nextTask);

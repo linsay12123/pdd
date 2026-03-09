@@ -6,7 +6,7 @@ import {
 } from "../../src/lib/drafts/word-count";
 
 describe("word count adjustment", () => {
-  it("counts only the article body and ignores the references section", () => {
+  it("counts only the article body paragraphs and ignores headings plus the references section", () => {
     const markdown = [
       "# Title",
       "",
@@ -19,7 +19,7 @@ describe("word count adjustment", () => {
       "Author, A. (2024). Source."
     ].join("\n");
 
-    expect(countBodyWords(markdown)).toBe(11);
+    expect(countBodyWords(markdown)).toBe(10);
   });
 
   it("returns zero for an empty body", () => {

@@ -23,6 +23,10 @@ const taskWorkflowAttemptStageMigration = resolve(
   migrationsDir,
   "202603090001_task_workflow_attempt_stage.sql"
 );
+const taskWorkflowStageTimestampsMigration = resolve(
+  migrationsDir,
+  "202603090002_task_workflow_stage_timestamps.sql"
+);
 
 describe("database cleanup migrations", () => {
   it("keeps task creation nullable until model analysis fills the requirements", () => {
@@ -96,5 +100,15 @@ describe("database cleanup migrations", () => {
     expect(sql).toContain("'adjusting_word_count'");
     expect(sql).toContain("'verifying_references'");
     expect(sql).toContain("'exporting'");
+  });
+
+  it("ships a workflow-stage migration that stores the real timestamps for each post-approval phase", () => {
+    expect(existsSync(taskWorkflowStageTimestampsMigration)).toBe(true);
+
+    const sql = readFileSync(taskWorkflowStageTimestampsMigration, "utf8");
+
+    expect(sql).toContain("add column if not exists workflow_stage_timestamps jsonb");
+    expect(sql).toContain("default '{}'::jsonb");
+    expect(sql).toContain("update public.writing_tasks");
   });
 });

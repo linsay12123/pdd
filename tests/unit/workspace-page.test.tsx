@@ -761,4 +761,72 @@ describe("WorkspacePage", () => {
     expect(html).not.toContain("任务已完成");
     expect(html).not.toContain("下载文档");
   });
+
+  it("shows the completed stage history before the download area when the task already finished", () => {
+    const html = renderToStaticMarkup(
+      <WorkspacePageClient
+        initialQuota={1500}
+        initialActiveTask={{
+          task: {
+            id: "task-finished-with-history",
+            status: "deliverable_ready",
+            targetWordCount: 1000,
+            citationStyle: "Harvard",
+            specialRequirements: "",
+            lastWorkflowStage: "exporting",
+            workflowStageTimestamps: {
+              drafting: "2026-03-09T10:00:00.000Z",
+              adjusting_word_count: "2026-03-09T10:05:00.000Z",
+              verifying_references: "2026-03-09T10:08:00.000Z",
+              exporting: "2026-03-09T10:12:00.000Z",
+              deliverable_ready: "2026-03-09T10:14:00.000Z"
+            }
+          },
+          files: [],
+          classification: {
+            primaryRequirementFileId: "file-1",
+            needsUserConfirmation: false
+          },
+          analysisStatus: "succeeded",
+          analysisProgress: {
+            requestedAt: null,
+            startedAt: null,
+            completedAt: null,
+            elapsedSeconds: 0,
+            maxWaitSeconds: 600,
+            canRetry: false
+          },
+          analysis: null,
+          analysisRenderMode: "structured",
+          rawModelResponse: null,
+          providerStatusCode: null,
+          providerErrorBody: null,
+          providerErrorKind: null,
+          ruleCard: null,
+          outline: null,
+          downloads: {
+            finalDocxOutputId: "docx-1",
+            referenceReportOutputId: "pdf-1",
+            humanizedDocxOutputId: null
+          },
+          finalWordCount: 1001,
+          humanize: {
+            status: "idle",
+            provider: "undetectable",
+            requestedAt: null,
+            completedAt: null,
+            errorMessage: null
+          },
+          message: "任务已完成。"
+        } as any}
+      />
+    );
+
+    expect(html).toContain("已完成阶段");
+    expect(html).toContain("正文写作");
+    expect(html).toContain("字数校正");
+    expect(html).toContain("引用核验");
+    expect(html).toContain("导出生成");
+    expect(html).toContain("下载文档");
+  });
 });

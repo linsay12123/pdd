@@ -3,6 +3,7 @@ import type { TaskAnalysisSnapshot } from "@/src/types/tasks";
 import type { TaskHumanizeStatus } from "@/src/types/tasks";
 import type { TaskAnalysisRenderMode, TaskProviderErrorKind } from "@/src/types/tasks";
 import type { AnalysisProgressPayload } from "@/src/lib/tasks/analysis-progress";
+import type { TaskSummary } from "@/src/types/tasks";
 
 export type TaskWorkflowTaskPayload = {
   id: string;
@@ -10,7 +11,8 @@ export type TaskWorkflowTaskPayload = {
   targetWordCount: number | null;
   citationStyle: string | null;
   specialRequirements: string;
-  lastWorkflowStage?: "drafting" | "adjusting_word_count" | "verifying_references" | "exporting" | null;
+  lastWorkflowStage?: TaskSummary["lastWorkflowStage"] | null;
+  workflowStageTimestamps?: TaskSummary["workflowStageTimestamps"];
 };
 
 export type TaskWorkflowFilePayload = {

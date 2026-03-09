@@ -21,6 +21,11 @@ import {
   toSessionTaskPayload
 } from "@/src/lib/tasks/session-task";
 import { getLatestOwnedDraftFromSupabase } from "@/src/lib/tasks/supabase-task-records";
+import {
+  buildWorkflowDownloads,
+  getWorkflowFinalWordCount,
+  mapPostApprovalWorkflowMessage
+} from "@/src/lib/tasks/workflow-snapshot";
 import type { OutlineScaffold } from "@/src/lib/ai/prompts/generate-outline";
 import type { TaskAnalysisSnapshot } from "@/src/types/tasks";
 import type { SessionUser } from "@/src/types/auth";
@@ -316,39 +321,24 @@ function mapWorkflowMessage(input: {
   analysisErrorMessage?: string | null;
 }) {
   if (input.taskStatus === "drafting") {
-    return "系统正在根据你确认的大纲一次性写完整篇文章。";
+    return mapPostApprovalWorkflowMessage({
+      taskStatus: input.taskStatus,
+      lastWorkflowStage: input.lastWorkflowStage
+    });
   }
 
-  if (input.taskStatus === "adjusting_word_count") {
-    return "系统正在把正文部分校正到目标字数的正负 10 以内。";
-  }
-
-  if (input.taskStatus === "verifying_references") {
-    return "系统正在逐条核对参考文献与来源链接。";
-  }
-
-  if (input.taskStatus === "exporting") {
-    return "系统正在生成最终文档和引用核验报告。";
-  }
-
-  if (input.taskStatus === "deliverable_ready") {
-    return "任务已完成，最终文档和引用核验报告已经准备好。";
-  }
-
-  if (input.taskStatus === "failed" && input.analysisStatus === "succeeded") {
-    if (input.lastWorkflowStage === "adjusting_word_count") {
-      return "字数校正这一步失败了，你可以重新开始正文生成。";
-    }
-
-    if (input.lastWorkflowStage === "verifying_references") {
-      return "引用核验这一步失败了，你可以重新开始正文生成。";
-    }
-
-    if (input.lastWorkflowStage === "exporting") {
-      return "导出生成这一步失败了，你可以重新开始正文生成。";
-    }
-
-    return "正文写作这一步失败了，你可以重新开始正文生成。";
+  if (
+    (input.taskStatus === "adjusting_word_count" ||
+      input.taskStatus === "verifying_references" ||
+      input.taskStatus === "exporting" ||
+      input.taskStatus === "deliverable_ready" ||
+      input.taskStatus === "failed") &&
+    input.analysisStatus === "succeeded"
+  ) {
+    return mapPostApprovalWorkflowMessage({
+      taskStatus: input.taskStatus,
+      lastWorkflowStage: input.lastWorkflowStage
+    });
   }
 
   if (input.analysisStatus === "failed") {
@@ -369,75 +359,6 @@ function mapWorkflowMessage(input: {
   }
 
   return "系统正在后台分析你上传的文件，请稍等。";
-}
-
-async function buildWorkflowDownloads(
-  task: Awaited<ReturnType<typeof getOwnedTaskSummary>>,
-  taskId: string,
-  userId: string
-) {
-  const status = task?.status ?? null;
-
-  if (
-    status !== "exporting" &&
-    status !== "deliverable_ready" &&
-    status !== "humanizing" &&
-    status !== "humanized_ready"
-  ) {
-    return {
-      finalDocxOutputId: null,
-      referenceReportOutputId: null,
-      humanizedDocxOutputId: null
-    };
-  }
-
-  const outputs = await listOwnedTaskOutputs({
-    taskId,
-    userId
-  });
-
-  const findLatestOutputId = (outputKind: string) =>
-    [...outputs]
-      .reverse()
-      .find((output) => output.outputKind === outputKind && output.isActive)?.id ?? null;
-
-  return {
-    finalDocxOutputId: findLatestOutputId("final_docx"),
-    referenceReportOutputId: findLatestOutputId("reference_report_pdf"),
-    humanizedDocxOutputId: findLatestOutputId("humanized_docx")
-  };
-}
-
-async function getWorkflowFinalWordCount(
-  task: Awaited<ReturnType<typeof getOwnedTaskSummary>>,
-  taskId: string,
-  userId: string
-) {
-  if (
-    task?.status !== "verifying_references" &&
-    task?.status !== "exporting" &&
-    task?.status !== "deliverable_ready" &&
-    !(task?.status === "failed" && task?.latestDraftVersionId)
-  ) {
-    return null;
-  }
-
-  if (!task?.latestDraftVersionId) {
-    return null;
-  }
-
-  if (shouldUseSupabasePersistence()) {
-    const draft = await getLatestOwnedDraftFromSupabase(taskId, userId);
-    return draft?.bodyWordCount ?? null;
-  }
-
-  if (!shouldUseLocalTestPersistence()) {
-    requireFormalPersistence();
-  }
-
-  const { getTaskDraftVersion } = await import("@/src/lib/tasks/repository");
-  const draft = getTaskDraftVersion(taskId, task.latestDraftVersionId);
-  return draft?.bodyWordCount ?? null;
 }
 
 function buildDefaultAnalysisRuntime(
