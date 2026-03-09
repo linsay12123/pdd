@@ -678,4 +678,34 @@ describe("task analysis status route", () => {
     expect(payload.task.lastWorkflowStage).toBe("verifying_references");
     expect(String(payload.message)).toContain("正文");
   });
+
+  it("prefers the persisted workflow error message when the post-approval pipeline fails before writing starts", async () => {
+    saveTaskSummary({
+      id: "task-post-approval-startup-failed",
+      userId: "user-1",
+      status: "failed",
+      targetWordCount: 1000,
+      citationStyle: "Harvard",
+      specialRequirements: "",
+      latestOutlineVersionId: "outline-startup-failed",
+      analysisStatus: "succeeded",
+      lastWorkflowStage: "drafting",
+      workflowErrorMessage: "后台正文任务版本还没准备好，请稍后重试。"
+    } as any);
+
+    const response = await handleTaskAnalysisStatusRequest(
+      new Request("http://localhost/api/tasks/task-post-approval-startup-failed/analysis"),
+      { taskId: "task-post-approval-startup-failed" },
+      {
+        isPersistenceReady: () => true,
+        requireUser: async () => makeUser()
+      }
+    );
+    const payload = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(payload.task.status).toBe("failed");
+    expect(payload.task.lastWorkflowStage).toBe("drafting");
+    expect(String(payload.message)).toBe("后台正文任务版本还没准备好，请稍后重试。");
+  });
 });

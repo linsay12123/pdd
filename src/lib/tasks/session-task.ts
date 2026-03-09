@@ -7,6 +7,7 @@ export type SessionTaskPayload = {
   targetWordCount: number | null;
   citationStyle: string | null;
   specialRequirements: string;
+  workflowErrorMessage?: string | null;
   lastWorkflowStage?: TaskSummary["lastWorkflowStage"] | null;
   workflowStageTimestamps?: TaskSummary["workflowStageTimestamps"];
 };
@@ -18,6 +19,7 @@ export function toSessionTaskPayload(task: TaskSummary): SessionTaskPayload {
     targetWordCount: task.targetWordCount,
     citationStyle: task.citationStyle,
     specialRequirements: task.specialRequirements ?? "",
+    workflowErrorMessage: task.workflowErrorMessage ?? null,
     lastWorkflowStage: task.lastWorkflowStage ?? null,
     workflowStageTimestamps: task.workflowStageTimestamps ?? {}
   };

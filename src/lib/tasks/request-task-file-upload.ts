@@ -11,6 +11,7 @@ export type TaskWorkflowTaskPayload = {
   targetWordCount: number | null;
   citationStyle: string | null;
   specialRequirements: string;
+  workflowErrorMessage?: string | null;
   lastWorkflowStage?: TaskSummary["lastWorkflowStage"] | null;
   workflowStageTimestamps?: TaskSummary["workflowStageTimestamps"];
 };

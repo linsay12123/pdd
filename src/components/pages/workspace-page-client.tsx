@@ -94,6 +94,7 @@ export function WorkspacePageClient({
   const [isApprovingOutline, setIsApprovingOutline] = useState(false);
   const [downloadingOutputId, setDownloadingOutputId] = useState<string | null>(null);
   const [isSubmittingHumanize, setIsSubmittingHumanize] = useState(false);
+  const [workflowFallbackTaskId, setWorkflowFallbackTaskId] = useState<string | null>(null);
 
   async function syncWallet() {
     try {
@@ -319,6 +320,20 @@ export function WorkspacePageClient({
     let closed = false;
     const stream = new EventSource(`/api/tasks/${activeTask.task.id}/workflow/stream`);
 
+    const enterFallbackPolling = (message?: string) => {
+      if (closed) {
+        return;
+      }
+
+      closed = true;
+      stream.close();
+      setWorkflowFallbackTaskId(activeTask.task.id);
+      setNotice({
+        tone: "info",
+        text: message ?? "正文进度连接断了一次，系统正在自动恢复读取。"
+      });
+    };
+
     const handleWorkflowEvent = (event: MessageEvent<string>) => {
       if (closed) {
         return;
@@ -348,6 +363,7 @@ export function WorkspacePageClient({
           message: result.message
         };
       });
+      setWorkflowFallbackTaskId(null);
 
       setNotice({
         tone:
@@ -366,27 +382,109 @@ export function WorkspacePageClient({
       }
     };
 
-    const handleStreamError = () => {
-      if (closed) {
-        return;
+    const handleWorkflowErrorEvent = (event: MessageEvent<string>) => {
+      let message: string | undefined;
+
+      try {
+        const payload = JSON.parse(event.data) as { message?: string };
+        if (typeof payload.message === "string" && payload.message.trim()) {
+          message = payload.message;
+        }
+      } catch {
+        // Fall back to the generic reconnect copy below.
       }
 
-      setNotice({
-        tone: "error",
-        text: "读取正文写作进度失败，请稍后再试。"
-      });
+      enterFallbackPolling(message);
+    };
+
+    const handleStreamError = () => {
+      enterFallbackPolling();
     };
 
     stream.addEventListener("workflow", handleWorkflowEvent as EventListener);
+    stream.addEventListener("workflow_error", handleWorkflowErrorEvent as EventListener);
     stream.addEventListener("error", handleStreamError as EventListener);
 
     return () => {
       closed = true;
       stream.removeEventListener("workflow", handleWorkflowEvent as EventListener);
+      stream.removeEventListener("workflow_error", handleWorkflowErrorEvent as EventListener);
       stream.removeEventListener("error", handleStreamError as EventListener);
       stream.close();
     };
   }, [activeTask?.task.id, activeTask?.task.status, step]);
+
+  useEffect(() => {
+    if (!activeTask || step !== 3) {
+      return;
+    }
+
+    if (workflowFallbackTaskId !== activeTask.task.id) {
+      return;
+    }
+
+    if (activeTask.task.status === "deliverable_ready" || activeTask.task.status === "failed") {
+      setWorkflowFallbackTaskId(null);
+      return;
+    }
+
+    let cancelled = false;
+    const timer = window.setTimeout(() => {
+      void requestTaskAnalysisStatus({ taskId: activeTask.task.id })
+        .then(async (result) => {
+          if (cancelled) {
+            return;
+          }
+
+          setActiveTask((currentTask) => {
+            if (!currentTask || currentTask.task.id !== activeTask.task.id) {
+              return currentTask;
+            }
+
+            return {
+              ...currentTask,
+              ...result,
+              downloads: result.downloads ?? currentTask.downloads,
+              finalWordCount:
+                typeof result.finalWordCount === "number"
+                  ? result.finalWordCount
+                  : currentTask.finalWordCount,
+              humanize: result.humanize ?? currentTask.humanize ?? defaultHumanizeState
+            };
+          });
+
+          setNotice({
+            tone:
+              result.task.status === "failed"
+                ? "error"
+                : result.task.status === "deliverable_ready"
+                  ? "success"
+                  : "info",
+            text: result.message
+          });
+
+          if (result.task.status === "deliverable_ready" || result.task.status === "failed") {
+            setWorkflowFallbackTaskId(null);
+            await syncWallet();
+          }
+        })
+        .catch(() => {
+          if (cancelled) {
+            return;
+          }
+
+          setNotice({
+            tone: "error",
+            text: "读取正文写作进度失败，请稍后再试。"
+          });
+        });
+    }, 3_000);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [activeTask?.task.id, activeTask?.task.status, step, workflowFallbackTaskId]);
 
   useEffect(() => {
     if (!activeTask || step !== 3) {
@@ -682,14 +780,51 @@ export function WorkspacePageClient({
         tone: "info",
         text: result.message
       });
+      setWorkflowFallbackTaskId(null);
       setStep(3);
       await syncWallet();
     } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "确认大纲失败，请稍后再试。";
+
       setNotice({
         tone: "error",
-        text:
-          error instanceof Error ? error.message : "确认大纲失败，请稍后再试。"
+        text: message
       });
+
+      try {
+        const result = await requestTaskAnalysisStatus({
+          taskId: activeTask.task.id
+        });
+
+        setActiveTask((currentTask) =>
+          currentTask
+            ? {
+                ...currentTask,
+                ...result,
+                downloads: result.downloads ?? currentTask.downloads,
+                finalWordCount:
+                  typeof result.finalWordCount === "number"
+                    ? result.finalWordCount
+                    : currentTask.finalWordCount,
+                humanize: result.humanize ?? currentTask.humanize ?? defaultHumanizeState
+              }
+            : currentTask
+        );
+
+        if (
+          result.task.status === "drafting" ||
+          result.task.status === "adjusting_word_count" ||
+          result.task.status === "verifying_references" ||
+          result.task.status === "exporting" ||
+          result.task.status === "failed" ||
+          result.task.status === "deliverable_ready"
+        ) {
+          setStep(3);
+        }
+      } catch {
+        // Keep the original approval failure notice when the fallback snapshot also fails.
+      }
     } finally {
       setIsApprovingOutline(false);
     }
@@ -798,7 +933,8 @@ export function WorkspacePageClient({
   );
   const postApprovalCard = getPostApprovalStageCard(
     postApprovalStage,
-    activeTask?.task.lastWorkflowStage ?? null
+    activeTask?.task.lastWorkflowStage ?? null,
+    activeTask?.task.workflowErrorMessage ?? null
   );
   const PostApprovalIcon = postApprovalCard.icon;
 
@@ -1858,7 +1994,8 @@ function getPostApprovalStage(
 
 function getPostApprovalStageCard(
   stage: ReturnType<typeof getPostApprovalStage>,
-  lastWorkflowStage: WorkspaceTaskState["task"]["lastWorkflowStage"] | null
+  lastWorkflowStage: WorkspaceTaskState["task"]["lastWorkflowStage"] | null,
+  workflowErrorMessage: string | null
 ) {
   if (stage === "drafting") {
     return {
@@ -1915,7 +2052,9 @@ function getPostApprovalStageCard(
             : "正文写作";
 
     const failedDetail =
-      lastWorkflowStage === "adjusting_word_count"
+      workflowErrorMessage?.trim()
+        ? workflowErrorMessage.trim()
+        : lastWorkflowStage === "adjusting_word_count"
         ? "正文已经写出来了，但系统在把正文校到目标字数正负 10 以内这一步停住了。你可以直接重新开始正文生成。"
         : lastWorkflowStage === "verifying_references"
           ? "正文和字数校正已经完成，但系统在逐条核对参考文献与来源链接这一步停住了。你可以直接重新开始正文生成。"

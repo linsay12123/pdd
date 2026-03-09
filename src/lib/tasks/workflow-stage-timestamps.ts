@@ -81,3 +81,18 @@ export function isWorkflowStageTimestampsColumnMissingError(error: unknown) {
     (message.includes("does not exist") || message.includes("42703"))
   );
 }
+
+export function isWorkflowErrorMessageColumnMissingError(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error ?? "");
+  return (
+    message.includes("workflow_error_message") &&
+    (message.includes("does not exist") || message.includes("42703"))
+  );
+}
+
+export function isWorkflowMetadataColumnMissingError(error: unknown) {
+  return (
+    isWorkflowStageTimestampsColumnMissingError(error) ||
+    isWorkflowErrorMessageColumnMissingError(error)
+  );
+}

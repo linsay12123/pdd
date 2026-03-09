@@ -102,6 +102,7 @@ export function updateTaskStatus(
     lastWorkflowStage?: TaskWorkflowStage | null;
     resetWorkflowStageTimestamps?: boolean;
     workflowStageTimestampRecordedAt?: string;
+    workflowErrorMessage?: string | null;
   } = {}
 ) {
   const existing = taskStore.get(taskId);
@@ -115,6 +116,12 @@ export function updateTaskStatus(
   const nextTask = {
     ...existing,
     status,
+    workflowErrorMessage:
+      options.workflowErrorMessage !== undefined
+        ? options.workflowErrorMessage
+        : status === "failed"
+          ? existing.workflowErrorMessage ?? null
+          : null,
     ...(resolveWorkflowStageForStatus(status, options.lastWorkflowStage) !== undefined
       ? {
           lastWorkflowStage: resolveWorkflowStageForStatus(

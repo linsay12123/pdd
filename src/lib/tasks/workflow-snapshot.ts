@@ -41,7 +41,8 @@ export async function buildTaskWorkflowSnapshot(input: {
     finalWordCount,
     message: mapPostApprovalWorkflowMessage({
       taskStatus: task.status,
-      lastWorkflowStage: task.lastWorkflowStage ?? null
+      lastWorkflowStage: task.lastWorkflowStage ?? null,
+      workflowErrorMessage: task.workflowErrorMessage ?? null
     })
   };
 }
@@ -49,6 +50,7 @@ export async function buildTaskWorkflowSnapshot(input: {
 export function mapPostApprovalWorkflowMessage(input: {
   taskStatus: string;
   lastWorkflowStage: "drafting" | "adjusting_word_count" | "verifying_references" | "exporting" | null;
+  workflowErrorMessage?: string | null;
 }) {
   if (input.taskStatus === "drafting") {
     return "系统正在根据你确认的大纲一次性写完整篇文章。";
@@ -71,6 +73,10 @@ export function mapPostApprovalWorkflowMessage(input: {
   }
 
   if (input.taskStatus === "failed") {
+    if (input.workflowErrorMessage?.trim()) {
+      return input.workflowErrorMessage.trim();
+    }
+
     if (input.lastWorkflowStage === "adjusting_word_count") {
       return "字数校正这一步失败了，你可以重新开始正文生成。";
     }

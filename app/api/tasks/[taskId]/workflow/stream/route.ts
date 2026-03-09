@@ -17,15 +17,16 @@ type WorkflowStreamDependencies = {
     userId: string;
   }) => Promise<{
     ok: true;
-    task: {
-      id: string;
-      status: string;
-      targetWordCount: number | null;
-      citationStyle: string | null;
-      specialRequirements: string;
-      lastWorkflowStage?: string | null;
-      workflowStageTimestamps?: Record<string, string>;
-    };
+        task: {
+          id: string;
+          status: string;
+          targetWordCount: number | null;
+          citationStyle: string | null;
+          specialRequirements: string;
+          workflowErrorMessage?: string | null;
+          lastWorkflowStage?: string | null;
+          workflowStageTimestamps?: Record<string, string>;
+        };
     downloads: {
       finalDocxOutputId: string | null;
       referenceReportOutputId: string | null;
@@ -107,7 +108,7 @@ export async function handleTaskWorkflowStreamRequest(
               error instanceof Error ? error.message : "读取正文流程进度失败";
             controller.enqueue(
               encoder.encode(
-                `event: error\ndata: ${JSON.stringify({ message })}\n\n`
+                `event: workflow_error\ndata: ${JSON.stringify({ message })}\n\n`
               )
             );
           }

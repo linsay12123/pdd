@@ -152,6 +152,7 @@ export async function handleTaskAnalysisStatusRequest(
     const message = mapWorkflowMessage({
       taskStatus: task.status,
       lastWorkflowStage: task.lastWorkflowStage ?? null,
+      workflowErrorMessage: task.workflowErrorMessage ?? null,
       analysisStatus,
       analysisProgress,
       analysisRuntime,
@@ -312,6 +313,7 @@ function mapAnalysisFailureMessage(input: {
 function mapWorkflowMessage(input: {
   taskStatus: string;
   lastWorkflowStage: "drafting" | "adjusting_word_count" | "verifying_references" | "exporting" | null;
+  workflowErrorMessage?: string | null;
   analysisStatus: "pending" | "succeeded" | "failed";
   analysisProgress: {
     canRetry: boolean;
@@ -323,7 +325,8 @@ function mapWorkflowMessage(input: {
   if (input.taskStatus === "drafting") {
     return mapPostApprovalWorkflowMessage({
       taskStatus: input.taskStatus,
-      lastWorkflowStage: input.lastWorkflowStage
+      lastWorkflowStage: input.lastWorkflowStage,
+      workflowErrorMessage: input.workflowErrorMessage
     });
   }
 
@@ -337,7 +340,8 @@ function mapWorkflowMessage(input: {
   ) {
     return mapPostApprovalWorkflowMessage({
       taskStatus: input.taskStatus,
-      lastWorkflowStage: input.lastWorkflowStage
+      lastWorkflowStage: input.lastWorkflowStage,
+      workflowErrorMessage: input.workflowErrorMessage
     });
   }
 

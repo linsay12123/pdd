@@ -762,6 +762,64 @@ describe("WorkspacePage", () => {
     expect(html).not.toContain("下载文档");
   });
 
+  it("shows the real workflow failure reason when the backend task never actually starts", () => {
+    const html = renderToStaticMarkup(
+      <WorkspacePageClient
+        initialQuota={1500}
+        initialActiveTask={{
+          task: {
+            id: "task-writing-startup-failed",
+            status: "failed",
+            targetWordCount: 1000,
+            citationStyle: "Harvard",
+            specialRequirements: "",
+            lastWorkflowStage: "drafting",
+            workflowErrorMessage: "后台正文任务版本还没准备好，请稍后重试。"
+          },
+          files: [],
+          classification: {
+            primaryRequirementFileId: "file-1",
+            needsUserConfirmation: false
+          },
+          analysisStatus: "succeeded",
+          analysisProgress: {
+            requestedAt: null,
+            startedAt: null,
+            completedAt: null,
+            elapsedSeconds: 0,
+            maxWaitSeconds: 600,
+            canRetry: false
+          },
+          analysis: null,
+          analysisRenderMode: "structured",
+          rawModelResponse: null,
+          providerStatusCode: null,
+          providerErrorBody: null,
+          providerErrorKind: null,
+          ruleCard: null,
+          outline: null,
+          downloads: {
+            finalDocxOutputId: null,
+            referenceReportOutputId: null,
+            humanizedDocxOutputId: null
+          },
+          humanize: {
+            status: "idle",
+            provider: "undetectable",
+            requestedAt: null,
+            completedAt: null,
+            errorMessage: null
+          },
+          message: "后台正文任务版本还没准备好，请稍后重试。"
+        } as any}
+      />
+    );
+
+    expect(html).toContain("正文生成失败");
+    expect(html).toContain("后台正文任务版本还没准备好，请稍后重试。");
+    expect(html).not.toContain("任务已完成");
+  });
+
   it("shows the completed stage history before the download area when the task already finished", () => {
     const html = renderToStaticMarkup(
       <WorkspacePageClient

@@ -1,5 +1,4 @@
 import { NextResponse } from "next/server";
-import { tasks } from "@trigger.dev/sdk/v3";
 import { requireCurrentSessionUser } from "@/src/lib/auth/current-user";
 import { buildSafetyIdentifier } from "@/src/lib/ai/safety-identifier";
 import { freezeQuota } from "@/src/lib/billing/freeze-quota";
@@ -13,13 +12,20 @@ import { createSupabaseAdminClient } from "@/src/lib/supabase/admin";
 import { approveOutlineVersion } from "@/src/lib/tasks/save-outline-version";
 import {
   buildWorkflowStageTimestamps,
-  isWorkflowStageTimestampsColumnMissingError
+  isWorkflowMetadataColumnMissingError
 } from "@/src/lib/tasks/workflow-stage-timestamps";
+import {
+  startApprovedTaskRun,
+  type StartApprovedTaskRunResult
+} from "@/src/lib/tasks/start-approved-task-run";
 import {
   getTaskSummary,
   saveTaskSummary
 } from "@/src/lib/tasks/repository";
-import { setOwnedTaskQuotaReservationInSupabase } from "@/src/lib/tasks/supabase-task-records";
+import {
+  setOwnedTaskQuotaReservationInSupabase,
+  setOwnedTaskStatusInSupabase
+} from "@/src/lib/tasks/supabase-task-records";
 import {
   toSessionTaskHumanizePayload,
   toSessionTaskPayload
@@ -62,11 +68,20 @@ type OutlineApproveDependencies = {
     previousStatus: TaskStatus;
     previousLastWorkflowStage: TaskWorkflowStage | null;
     previousWorkflowStageTimestamps?: Record<string, string>;
+    previousWorkflowErrorMessage?: string | null;
   }>;
   releaseQuotaForTask?: (
     taskId: string,
     userId: string,
     reservation: FrozenQuotaReservation
+  ) => Promise<void>;
+  markTaskWorkflowFailed?: (
+    taskId: string,
+    userId: string,
+    input: {
+      message: string;
+      lastWorkflowStage: TaskWorkflowStage;
+    }
   ) => Promise<void>;
   revertTaskToRetriableStatus?: (
     taskId: string,
@@ -74,6 +89,7 @@ type OutlineApproveDependencies = {
     input: {
       previousStatus: TaskStatus;
       previousLastWorkflowStage: TaskWorkflowStage | null;
+      previousWorkflowErrorMessage?: string | null;
     }
   ) => Promise<void>;
   enqueueApprovedTaskProcessing?: (input: {
@@ -81,7 +97,13 @@ type OutlineApproveDependencies = {
     userId: string;
     safetyIdentifier: string;
     approvalAttemptCount: number;
-  }) => Promise<void>;
+  }) => Promise<string | null>;
+  startApprovedTaskRun?: (input: {
+    taskId: string;
+    userId: string;
+    safetyIdentifier: string;
+    approvalAttemptCount: number;
+  }) => Promise<StartApprovedTaskRunResult>;
 };
 
 export async function handleOutlineApprovalRequest(
@@ -132,14 +154,37 @@ export async function handleOutlineApprovalRequest(
     }
 
     try {
-      await (
-        dependencies.enqueueApprovedTaskProcessing ?? enqueueApprovedTaskProcessingWithTrigger
+      const startupResult = await (
+        dependencies.startApprovedTaskRun ?? startApprovedTaskRun
       )({
         taskId: params.taskId,
         userId: user.id,
         safetyIdentifier: buildSafetyIdentifier(user.id),
-        approvalAttemptCount: reservationResult.approvalAttemptCount
+        approvalAttemptCount: reservationResult.approvalAttemptCount,
+        enqueueApprovedTaskProcessing: dependencies.enqueueApprovedTaskProcessing
       });
+
+      if (!startupResult.ok) {
+        await (dependencies.releaseQuotaForTask ?? releaseQuotaForTask)(
+          params.taskId,
+          user.id,
+          reservationResult.reservation
+        );
+        await (
+          dependencies.markTaskWorkflowFailed ?? markTaskWorkflowFailed
+        )(params.taskId, user.id, {
+          message: startupResult.message,
+          lastWorkflowStage: "drafting"
+        });
+
+        return NextResponse.json(
+          {
+            ok: false,
+            message: startupResult.message
+          },
+          { status: 503 }
+        );
+      }
     } catch (enqueueError) {
       await (dependencies.releaseQuotaForTask ?? releaseQuotaForTask)(
         params.taskId,
@@ -150,7 +195,8 @@ export async function handleOutlineApprovalRequest(
         dependencies.revertTaskToRetriableStatus ?? revertTaskToRetriableStatus
       )(params.taskId, user.id, {
         previousStatus: reservationResult.previousStatus,
-        previousLastWorkflowStage: reservationResult.previousLastWorkflowStage
+        previousLastWorkflowStage: reservationResult.previousLastWorkflowStage,
+        previousWorkflowErrorMessage: reservationResult.previousWorkflowErrorMessage
       });
       throw enqueueError;
     }
@@ -161,6 +207,7 @@ export async function handleOutlineApprovalRequest(
         task: toSessionTaskPayload({
           ...approved.task,
           status: "drafting",
+          workflowErrorMessage: null,
           lastWorkflowStage: "drafting",
           workflowStageTimestamps:
             reservationResult.workflowStageTimestamps ??
@@ -274,6 +321,7 @@ async function reserveQuotaForTask(
   previousStatus: TaskStatus;
   previousLastWorkflowStage: TaskWorkflowStage | null;
   previousWorkflowStageTimestamps: Record<string, string>;
+  previousWorkflowErrorMessage: string | null;
 }> {
   if (!shouldUseSupabasePersistence()) {
     throw new Error("REAL_PERSISTENCE_REQUIRED");
@@ -299,6 +347,7 @@ async function reserveQuotaForTaskWithSupabase(
   previousStatus: TaskStatus;
   previousLastWorkflowStage: TaskWorkflowStage | null;
   previousWorkflowStageTimestamps: Record<string, string>;
+  previousWorkflowErrorMessage: string | null;
 }> {
   const client = createSupabaseAdminClient();
   type CurrentTaskRow = {
@@ -308,6 +357,7 @@ async function reserveQuotaForTaskWithSupabase(
     approval_attempt_count: number | null;
     last_workflow_stage: string | null;
     workflow_stage_timestamps?: unknown;
+    workflow_error_message?: string | null;
   };
 
   let currentTask: CurrentTaskRow | null = null;
@@ -316,7 +366,7 @@ async function reserveQuotaForTaskWithSupabase(
     const result = await client
       .from("writing_tasks")
       .select(
-        "id,status,target_word_count,approval_attempt_count,last_workflow_stage,workflow_stage_timestamps"
+        "id,status,target_word_count,approval_attempt_count,last_workflow_stage,workflow_stage_timestamps,workflow_error_message"
       )
       .eq("id", taskId)
       .eq("user_id", userId)
@@ -325,7 +375,7 @@ async function reserveQuotaForTaskWithSupabase(
     currentTaskError = result.error;
   }
 
-  if (currentTaskError && isWorkflowStageTimestampsColumnMissingError(currentTaskError)) {
+  if (currentTaskError && isWorkflowMetadataColumnMissingError(currentTaskError)) {
     const legacyResult = await client
       .from("writing_tasks")
       .select("id,status,target_word_count,approval_attempt_count,last_workflow_stage")
@@ -348,6 +398,10 @@ async function reserveQuotaForTaskWithSupabase(
   const previousLastWorkflowStage = currentTask.last_workflow_stage
     ? (String(currentTask.last_workflow_stage) as TaskWorkflowStage)
     : null;
+  const previousWorkflowErrorMessage =
+    typeof currentTask.workflow_error_message === "string"
+      ? String(currentTask.workflow_error_message)
+      : null;
   const previousWorkflowStageTimestamps = (
     currentTask.workflow_stage_timestamps &&
     typeof currentTask.workflow_stage_timestamps === "object"
@@ -373,6 +427,7 @@ async function reserveQuotaForTaskWithSupabase(
     .update({
       status: "drafting",
       last_workflow_stage: "drafting",
+      workflow_error_message: null,
       approval_attempt_count: nextApprovalAttemptCount,
       workflow_stage_timestamps: workflowStageTimestamps
     })
@@ -383,12 +438,13 @@ async function reserveQuotaForTaskWithSupabase(
     .select("id,target_word_count")
     .maybeSingle();
 
-  if (lockError && isWorkflowStageTimestampsColumnMissingError(lockError)) {
+  if (lockError && isWorkflowMetadataColumnMissingError(lockError)) {
     const legacyResult = await client
       .from("writing_tasks")
       .update({
         status: "drafting",
         last_workflow_stage: "drafting",
+        workflow_error_message: null,
         approval_attempt_count: nextApprovalAttemptCount
       })
       .eq("id", taskId)
@@ -427,7 +483,8 @@ async function reserveQuotaForTaskWithSupabase(
   if (typeof lockedTask.target_word_count !== "number") {
     await revertTaskToRetriableStatus(taskId, userId, {
       previousStatus,
-      previousLastWorkflowStage
+      previousLastWorkflowStage,
+      previousWorkflowErrorMessage
     });
     throw new Error("TASK_REQUIREMENTS_NOT_READY");
   }
@@ -449,6 +506,7 @@ async function reserveQuotaForTaskWithSupabase(
       await revertTaskToRetriableStatus(taskId, userId, {
         previousStatus,
         previousLastWorkflowStage,
+        previousWorkflowErrorMessage,
         previousWorkflowStageTimestamps
       });
       throw new Error("INSUFFICIENT_QUOTA");
@@ -472,6 +530,7 @@ async function reserveQuotaForTaskWithSupabase(
       await revertTaskToRetriableStatus(taskId, userId, {
         previousStatus,
         previousLastWorkflowStage,
+        previousWorkflowErrorMessage,
         previousWorkflowStageTimestamps
       });
       throw error;
@@ -482,6 +541,7 @@ async function reserveQuotaForTaskWithSupabase(
     await revertTaskToRetriableStatus(taskId, userId, {
       previousStatus,
       previousLastWorkflowStage,
+      previousWorkflowErrorMessage,
       previousWorkflowStageTimestamps
     });
     throw new Error("INSUFFICIENT_QUOTA");
@@ -499,7 +559,8 @@ async function reserveQuotaForTaskWithSupabase(
     });
     await revertTaskToRetriableStatus(taskId, userId, {
       previousStatus,
-      previousLastWorkflowStage
+      previousLastWorkflowStage,
+      previousWorkflowErrorMessage
     });
     throw new Error(`写入冻结积分凭证失败：${reservationError.message}`);
   }
@@ -510,6 +571,7 @@ async function reserveQuotaForTaskWithSupabase(
     workflowStageTimestamps: workflowStageTimestamps ?? {},
     previousStatus,
     previousLastWorkflowStage,
+    previousWorkflowErrorMessage,
     previousWorkflowStageTimestamps
   };
 }
@@ -576,6 +638,7 @@ async function revertTaskToRetriableStatus(
     previousStatus: TaskStatus;
     previousLastWorkflowStage: TaskWorkflowStage | null;
     previousWorkflowStageTimestamps?: Record<string, string>;
+    previousWorkflowErrorMessage?: string | null;
   }
 ) {
   if (!shouldUseSupabasePersistence()) {
@@ -586,6 +649,7 @@ async function revertTaskToRetriableStatus(
         status: input.previousStatus,
         lastWorkflowStage: input.previousLastWorkflowStage,
         workflowStageTimestamps: input.previousWorkflowStageTimestamps ?? {},
+        workflowErrorMessage: input.previousWorkflowErrorMessage ?? null,
         quotaReservation: undefined
       });
     }
@@ -598,6 +662,7 @@ async function revertTaskToRetriableStatus(
     .update({
       status: input.previousStatus,
       last_workflow_stage: input.previousLastWorkflowStage,
+      workflow_error_message: input.previousWorkflowErrorMessage ?? null,
       workflow_stage_timestamps: input.previousWorkflowStageTimestamps ?? {},
       quota_reservation: null
     })
@@ -605,12 +670,13 @@ async function revertTaskToRetriableStatus(
     .eq("user_id", userId)
     .eq("status", "drafting");
 
-  if (error && isWorkflowStageTimestampsColumnMissingError(error)) {
+  if (error && isWorkflowMetadataColumnMissingError(error)) {
     const legacyResult = await client
       .from("writing_tasks")
       .update({
         status: input.previousStatus,
         last_workflow_stage: input.previousLastWorkflowStage,
+        workflow_error_message: input.previousWorkflowErrorMessage ?? null,
         quota_reservation: null
       })
       .eq("id", taskId)
@@ -627,17 +693,55 @@ async function revertTaskToRetriableStatus(
   }
 }
 
+async function markTaskWorkflowFailed(
+  taskId: string,
+  userId: string,
+  input: {
+    message: string;
+    lastWorkflowStage: TaskWorkflowStage;
+  }
+) {
+  if (!shouldUseSupabasePersistence()) {
+    const task = getTaskSummary(taskId);
+
+    if (!task || task.userId !== userId) {
+      return;
+    }
+
+    saveTaskSummary({
+      ...task,
+      status: "failed",
+      lastWorkflowStage: input.lastWorkflowStage,
+      workflowErrorMessage: input.message,
+      workflowStageTimestamps: buildWorkflowStageTimestamps({
+        current: task.workflowStageTimestamps ?? {},
+        status: "failed"
+      }),
+      quotaReservation: undefined
+    });
+    return;
+  }
+
+  await setOwnedTaskStatusInSupabase(taskId, userId, "failed", {
+    lastWorkflowStage: input.lastWorkflowStage,
+    workflowErrorMessage: input.message
+  });
+}
+
 async function enqueueApprovedTaskProcessingWithTrigger(input: {
   taskId: string;
   userId: string;
   safetyIdentifier: string;
   approvalAttemptCount: number;
 }) {
-  await tasks.trigger("process-approved-task", input, {
+  const { tasks } = await import("@trigger.dev/sdk/v3");
+  const handle = await tasks.trigger("process-approved-task", input, {
     queue: "process-approved-task",
     concurrencyKey: `process-approved-task-${input.taskId}`,
     idempotencyKey: `process-approved-task-${input.taskId}-attempt-${input.approvalAttemptCount}`
   });
+
+  return typeof handle?.id === "string" ? handle.id : null;
 }
 
 export async function POST(request: Request, context: RouteContext) {

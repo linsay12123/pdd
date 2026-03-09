@@ -74,6 +74,7 @@ export type TaskSummary = {
   targetWordCount: number | null;
   citationStyle: string | null;
   specialRequirements?: string;
+  workflowErrorMessage?: string | null;
   topic?: string | null;
   requestedChapterCount?: number | null;
   outlineRevisionCount?: number;

@@ -7,6 +7,7 @@ export type OutlineApprovalPayload = {
     targetWordCount: number | null;
     citationStyle: string | null;
     specialRequirements: string;
+    workflowErrorMessage?: string | null;
     lastWorkflowStage?: "drafting" | "adjusting_word_count" | "verifying_references" | "exporting" | null;
     workflowStageTimestamps?: {
       drafting?: string;

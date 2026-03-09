@@ -3,7 +3,7 @@ import { normalizeAnalysisModel } from "@/src/lib/tasks/analysis-runtime-cleanup
 import { assertStatusTransition } from "@/src/lib/tasks/status-machine";
 import {
   buildWorkflowStageTimestamps,
-  isWorkflowStageTimestampsColumnMissingError,
+  isWorkflowMetadataColumnMissingError,
   normalizeWorkflowStageTimestamps
 } from "@/src/lib/tasks/workflow-stage-timestamps";
 import type {
@@ -50,6 +50,7 @@ type TaskRow = {
   approval_attempt_count: number | null;
   last_workflow_stage: TaskWorkflowStage | null;
   workflow_stage_timestamps?: unknown;
+  workflow_error_message?: string | null;
   quota_reservation?: TaskSummary["quotaReservation"];
 };
 
@@ -67,7 +68,7 @@ type DraftRow = {
 };
 
 const ownedTaskBaseSelect =
-  "id,user_id,status,target_word_count,citation_style,special_requirements,topic,requested_chapter_count,outline_revision_count,primary_requirement_file_id,analysis_snapshot,analysis_status,analysis_model,analysis_retry_count,analysis_error_message,analysis_trigger_run_id,analysis_requested_at,analysis_started_at,analysis_completed_at,latest_outline_version_id,latest_draft_version_id,current_candidate_draft_id,approval_attempt_count,last_workflow_stage,quota_reservation";
+  "id,user_id,status,target_word_count,citation_style,special_requirements,topic,requested_chapter_count,outline_revision_count,primary_requirement_file_id,analysis_snapshot,analysis_status,analysis_model,analysis_retry_count,analysis_error_message,analysis_trigger_run_id,analysis_requested_at,analysis_started_at,analysis_completed_at,latest_outline_version_id,latest_draft_version_id,current_candidate_draft_id,approval_attempt_count,last_workflow_stage,workflow_error_message,quota_reservation";
 
 const ownedTaskHumanizeSelect =
   ",humanize_status,humanize_provider,humanize_profile_snapshot,humanize_document_id,humanize_retry_document_id,humanize_error_message,humanize_requested_at,humanize_completed_at";
@@ -137,6 +138,7 @@ export async function setOwnedTaskStatusInSupabase(
     lastWorkflowStage?: TaskWorkflowStage | null;
     resetWorkflowStageTimestamps?: boolean;
     workflowStageTimestampRecordedAt?: string;
+    workflowErrorMessage?: string | null;
   } = {}
 ) {
   const currentTaskState = await readOwnedTaskWorkflowState(taskId, userId);
@@ -167,6 +169,12 @@ export async function setOwnedTaskStatusInSupabase(
 
   const updatePayload: Record<string, unknown> = {
     status,
+    workflow_error_message:
+      options.workflowErrorMessage !== undefined
+        ? options.workflowErrorMessage
+        : status === "failed"
+          ? currentTaskState.workflowErrorMessage ?? null
+          : null,
     ...(nextWorkflowStage !== undefined
       ? { last_workflow_stage: nextWorkflowStage }
       : {}),
@@ -189,8 +197,12 @@ export async function setOwnedTaskStatusInSupabase(
     error = result.error;
   }
 
-  if (error && isWorkflowStageTimestampsColumnMissingError(error)) {
-    const { workflow_stage_timestamps: _ignored, ...legacyUpdatePayload } = updatePayload;
+  if (error && isWorkflowMetadataColumnMissingError(error)) {
+    const {
+      workflow_stage_timestamps: _ignoredWorkflowStageTimestamps,
+      workflow_error_message: _ignoredWorkflowErrorMessage,
+      ...legacyUpdatePayload
+    } = updatePayload;
     const legacyResult = await client
       .from("writing_tasks")
       .update(legacyUpdatePayload)
@@ -254,7 +266,7 @@ export async function updateOwnedTaskHumanizeStateInSupabase(
     error = result.error;
   }
 
-  if (error && isWorkflowStageTimestampsColumnMissingError(error)) {
+  if (error && isWorkflowMetadataColumnMissingError(error)) {
     const legacyResult = await client
       .from("writing_tasks")
       .update(patch)
@@ -365,6 +377,9 @@ function mapTaskRow(row: TaskRow) {
       ? String(row.humanize_completed_at)
       : null,
     approvalAttemptCount: Number(row.approval_attempt_count ?? 0),
+    workflowErrorMessage: row.workflow_error_message
+      ? String(row.workflow_error_message)
+      : null,
     lastWorkflowStage: row.last_workflow_stage
       ? (String(row.last_workflow_stage) as TaskWorkflowStage)
       : null,
@@ -381,14 +396,21 @@ async function readOwnedTaskWorkflowState(
 ): Promise<{
   status: TaskStatus;
   workflowStageTimestamps: TaskSummary["workflowStageTimestamps"];
+  workflowErrorMessage: string | null;
 }> {
   const client = createSupabaseAdminClient();
-  let data: { status: TaskStatus; workflow_stage_timestamps?: unknown } | null = null;
+  let data:
+    | {
+        status: TaskStatus;
+        workflow_stage_timestamps?: unknown;
+        workflow_error_message?: string | null;
+      }
+    | null = null;
   let error: { message: string } | null = null;
   {
     const result = await client
       .from("writing_tasks")
-      .select("status,workflow_stage_timestamps")
+      .select("status,workflow_stage_timestamps,workflow_error_message")
       .eq("id", taskId)
       .eq("user_id", userId)
       .maybeSingle();
@@ -396,7 +418,7 @@ async function readOwnedTaskWorkflowState(
     error = result.error;
   }
 
-  if (error && isWorkflowStageTimestampsColumnMissingError(error)) {
+  if (error && isWorkflowMetadataColumnMissingError(error)) {
     const legacyResult = await client
       .from("writing_tasks")
       .select("status")
@@ -419,7 +441,12 @@ async function readOwnedTaskWorkflowState(
     status: data.status as TaskStatus,
     workflowStageTimestamps: normalizeWorkflowStageTimestamps(
       (data as { workflow_stage_timestamps?: unknown }).workflow_stage_timestamps
-    )
+    ),
+    workflowErrorMessage:
+      typeof (data as { workflow_error_message?: string | null }).workflow_error_message ===
+      "string"
+        ? String((data as { workflow_error_message?: string | null }).workflow_error_message)
+        : null
   };
 }
 
@@ -438,7 +465,7 @@ async function selectOwnedTaskRow(taskId: string, userId: string) {
     error = result.error;
   }
 
-  if (error && isWorkflowStageTimestampsColumnMissingError(error)) {
+  if (error && isWorkflowMetadataColumnMissingError(error)) {
     const legacyResult = await client
       .from("writing_tasks")
       .select(ownedTaskSelectLegacy)

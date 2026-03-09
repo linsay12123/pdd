@@ -59,4 +59,29 @@ describe("task workflow stream route", () => {
 
     await reader!.cancel();
   });
+
+  it("emits a workflow_error event when the snapshot cannot be read", async () => {
+    const response = await handleTaskWorkflowStreamRequest(
+      new Request("http://localhost/api/tasks/task-stream-error/workflow/stream"),
+      { taskId: "task-stream-error" },
+      {
+        isPersistenceReady: () => true,
+        requireUser: async () => makeUser(),
+        getWorkflowSnapshot: async () => {
+          throw new Error("后台正文任务版本还没准备好，请稍后重试。");
+        }
+      }
+    );
+
+    const reader = response.body?.getReader();
+    expect(reader).toBeTruthy();
+
+    const firstChunk = await reader!.read();
+    const text = new TextDecoder().decode(firstChunk.value);
+
+    expect(text).toContain("event: workflow_error");
+    expect(text).toContain("后台正文任务版本还没准备好");
+
+    await reader!.cancel();
+  });
 });
