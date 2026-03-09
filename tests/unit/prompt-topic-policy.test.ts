@@ -110,6 +110,15 @@ describe("topic selection policy prompts", () => {
 
     expect(prompt).not.toContain("1000 words or fewer = exactly 3 chapters");
     expect(prompt).not.toContain("Each section must contain 3 to 5 specific bullet points");
+    expect(prompt).toContain("write the entire article at once");
+    expect(prompt).toContain("write all these chapters");
+    expect(prompt).toContain("The reasoning effort should be high");
+    expect(prompt).toContain("Write in paragraphs, no bullet point");
+    expect(prompt).toContain("This is supposed to be an critical argumentative discussion");
+    expect(prompt).toContain("Do not Use straight quotation marks");
+    expect(prompt).toContain("Do not use em dash");
+    expect(prompt).toContain("avoid using “不是…而是..”句式");
+    expect(prompt).toContain("each references should come with proper link");
   });
 
   it("keeps the outline chapter rule out of word-count adjustment prompts", () => {
@@ -121,5 +130,10 @@ describe("topic selection policy prompts", () => {
 
     expect(prompt).not.toContain("1000 words or fewer = exactly 3 chapters");
     expect(prompt).not.toContain("Each section must contain 3 to 5 specific bullet points");
+    expect(prompt).toContain("Adjust only the main article body");
+    expect(prompt).toContain("Do not remove the title");
+    expect(prompt).toContain("Do not remove or rewrite the References section");
+    expect(prompt).toContain("References do not count toward the target body word count");
+    expect(prompt).toContain("The final body word count must land within plus or minus 10 words");
   });
 });

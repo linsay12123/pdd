@@ -52,7 +52,7 @@ export async function exportReferenceReport(input: ReferenceReportInput) {
     contentType: "application/pdf"
   });
 
-  await saveTaskOutput({
+  const output = await saveTaskOutput({
     taskId: input.taskId,
     userId: input.userId,
     outputKind: "reference_report_pdf",
@@ -60,6 +60,7 @@ export async function exportReferenceReport(input: ReferenceReportInput) {
   });
 
   return {
+    outputId: output.id,
     outputPath: artifact.outputPath,
     storagePath
   };

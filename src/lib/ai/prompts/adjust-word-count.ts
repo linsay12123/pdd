@@ -10,8 +10,11 @@ export function buildAdjustWordCountPrompt({
   targetWordCount
 }: AdjustWordCountPromptInput) {
   return [
-    "Adjust the article body so it lands closer to the target word count.",
-    "Do not remove the title. Do not remove or rewrite the References section.",
+    "Adjust only the main article body so it lands within the target word count range.",
+    "Do not remove the title.",
+    "Do not remove or rewrite the References section.",
+    "References do not count toward the target body word count.",
+    "The final body word count must land within plus or minus 10 words of the target word count.",
     "",
     `CURRENT_BODY_WORD_COUNT: ${currentWordCount}`,
     `TARGET_WORD_COUNT: ${targetWordCount}`,
