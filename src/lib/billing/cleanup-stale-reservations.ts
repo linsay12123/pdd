@@ -4,6 +4,7 @@ import {
   getUserWalletFromSupabase
 } from "@/src/lib/payments/supabase-wallet";
 import { createSupabaseAdminClient } from "@/src/lib/supabase/admin";
+import { isWorkflowStartupFailureMessage } from "@/src/lib/tasks/workflow-runtime-errors";
 import type { FrozenQuotaReservation } from "@/src/types/billing";
 
 const generationProcessingStatuses = [
@@ -31,6 +32,7 @@ type CleanupTaskRow = {
   user_id: string;
   status: string;
   quota_reservation: unknown;
+  workflow_error_message: string | null;
   updated_at: string | null;
   humanize_status: string | null;
   humanize_requested_at: string | null;
@@ -66,7 +68,7 @@ export async function cleanupStaleQuotaReservations(
   const { data, error } = await client
     .from("writing_tasks")
     .select(
-      "id,user_id,status,quota_reservation,updated_at,humanize_status,humanize_requested_at"
+      "id,user_id,status,quota_reservation,workflow_error_message,updated_at,humanize_status,humanize_requested_at"
     )
     .not("quota_reservation", "is", null)
     .limit(batchSize);
@@ -208,6 +210,13 @@ function resolveStaleReason(input: {
       return {
         isStale: false,
         reason: `任务状态 ${input.row.status} 不属于正文处理中`
+      };
+    }
+
+    if (isWorkflowStartupFailureMessage(input.row.workflow_error_message ?? null)) {
+      return {
+        isStale: false,
+        reason: "正文启动失败已经被单独记录，不再按超时重复处理"
       };
     }
 

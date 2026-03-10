@@ -35,6 +35,7 @@ import {
   patchTaskSummary,
   resetTaskOutlineStore,
   resetTaskStore,
+  saveTaskSummary,
   updateTaskStatus
 } from "../../src/lib/tasks/repository";
 import {
@@ -117,6 +118,7 @@ describe("outline approval routes", () => {
           approvalAttemptCount: getTaskSummary(taskId)?.approvalAttemptCount ?? 1,
           previousStatus,
           previousLastWorkflowStage,
+          previousWorkflowStageTimestamps: getTaskSummary(taskId)?.workflowStageTimestamps ?? {},
           previousWorkflowErrorMessage
         };
       },
@@ -129,49 +131,33 @@ describe("outline approval routes", () => {
           quotaReservation: undefined
         });
       },
-      releaseQuotaForTask: async (_taskId: string, releaseUserId: string, reservation: any) => {
-        const wallet = getUserWallet(releaseUserId);
-        const released = releaseQuota({ wallet, reservation });
-        setUserWallet(releaseUserId, released.wallet);
-        appendPaymentLedgerEntry(releaseUserId, released.entry);
-        patchTaskSummary(taskId, {
-          quotaReservation: undefined
-        });
-      },
-      markTaskWorkflowFailed: async (_taskId: string, _taskUserId: string, input: any) => {
-        updateTaskStatus(taskId, "failed");
-        patchTaskSummary(taskId, {
-          quotaReservation: undefined,
-          lastWorkflowStage: input?.lastWorkflowStage ?? "drafting",
-          workflowErrorMessage: input?.message ?? null
-        });
-      },
-      startApprovedTaskRun: async () => ({
-        ok: true as const,
-        triggerRunId: (
-          await triggerTaskMock(
-            "process-approved-task",
-            {
-              taskId,
-              userId,
-              safetyIdentifier: "safety-user-1",
-              approvalAttemptCount: getTaskSummary(taskId)?.approvalAttemptCount ?? 1
-            },
-            {
-              queue: "process-approved-task",
-              concurrencyKey: `process-approved-task-${taskId}`,
-              idempotencyKey: `process-approved-task-${taskId}-attempt-${
-                getTaskSummary(taskId)?.approvalAttemptCount ?? 1
-              }`
-            }
-          )
-        )?.id ?? "run-approved-task-default",
-        runtime: {
-          state: "active" as const,
-          status: "QUEUED"
-        },
-        detail: "后台正文任务已经真正开始执行。"
-      })
+      finalizeStartupFailure: async (_input: any) => {
+        const task = getTaskSummary(taskId);
+        const reservation = task?.quotaReservation;
+        if (reservation) {
+          const wallet = getUserWallet(userId);
+          const released = releaseQuota({ wallet, reservation });
+          setUserWallet(userId, released.wallet);
+          appendPaymentLedgerEntry(userId, released.entry);
+        }
+
+        if (task) {
+          saveTaskSummary({
+            ...task,
+            status: "awaiting_outline_approval",
+            quotaReservation: undefined,
+            lastWorkflowStage: null,
+            workflowStageTimestamps: {},
+            workflowErrorMessage: null
+          });
+        }
+
+        return {
+          applied: true,
+          released: Boolean(reservation),
+          status: "awaiting_outline_approval"
+        };
+      }
     };
   }
 
@@ -409,7 +395,10 @@ describe("outline approval routes", () => {
       }
     });
 
-    const enqueueSpy = vi.fn().mockResolvedValue(undefined);
+    const enqueueApprovedTaskRun = vi.fn().mockResolvedValue("run-approved-task-1");
+    const enqueueApprovedTaskStartupCheck = vi
+      .fn()
+      .mockResolvedValue("run-approved-task-startup-check-1");
 
     const response = await handleOutlineApprovalRequest(
       new Request("http://localhost/api/tasks/task-outline-3/outline/approve", {
@@ -426,19 +415,8 @@ describe("outline approval routes", () => {
       },
       {
         ...makeApprovedOutlineDeps("task-outline-3", initialVersion.id),
-        startApprovedTaskRun: async (input) => {
-          const triggerRunId = await enqueueSpy(input);
-
-          return {
-            ok: true as const,
-            triggerRunId,
-            runtime: {
-              state: "active" as const,
-              status: "QUEUED"
-            },
-            detail: "后台正文任务已经真正开始执行。"
-          };
-        }
+        enqueueApprovedTaskRun,
+        enqueueApprovedTaskStartupCheck
       }
     );
     const payload = await response.json();
@@ -450,7 +428,15 @@ describe("outline approval routes", () => {
     expect(payload.downloads.referenceReportOutputId).toBeNull();
     expect(payload.finalWordCount).toBeNull();
     expect(payload.message).toContain("正文写作");
-    expect(enqueueSpy).toHaveBeenCalledTimes(1);
+    expect(enqueueApprovedTaskRun).toHaveBeenCalledTimes(1);
+    expect(enqueueApprovedTaskStartupCheck).toHaveBeenCalledTimes(1);
+    expect(enqueueApprovedTaskRun).toHaveBeenCalledWith(
+      expect.objectContaining({
+        taskId: "task-outline-3",
+        userId: "user-1",
+        approvalAttemptCount: 1
+      })
+    );
     expect(getTaskSummary("task-outline-3")?.latestOutlineVersionId).toBe(initialVersion.id);
   });
 
@@ -491,7 +477,7 @@ describe("outline approval routes", () => {
       },
       {
         ...makeApprovedOutlineDeps("task-outline-4", initialVersion.id),
-        startApprovedTaskRun: async () => {
+        enqueueApprovedTaskRun: async () => {
           throw new Error("queue exploded");
         }
       }
@@ -642,7 +628,15 @@ describe("outline approval routes", () => {
       }
     });
 
-    const deps1 = makeApprovedOutlineDeps("task-outline-retry", initialVersion.id) as any;
+    const enqueueApprovedTaskRun1 = vi.fn().mockResolvedValue("run-approved-task-1");
+    const enqueueApprovedTaskStartupCheck1 = vi
+      .fn()
+      .mockResolvedValue("run-approved-task-startup-check-1");
+    const deps1 = {
+      ...makeApprovedOutlineDeps("task-outline-retry", initialVersion.id),
+      enqueueApprovedTaskRun: enqueueApprovedTaskRun1,
+      enqueueApprovedTaskStartupCheck: enqueueApprovedTaskStartupCheck1
+    } as any;
 
     const response1 = await handleOutlineApprovalRequest(
       new Request("http://localhost/api/tasks/task-outline-retry/outline/approve", {
@@ -664,16 +658,15 @@ describe("outline approval routes", () => {
     expect(response1.status).toBe(202);
     expect(payload1.task.status).toBe("drafting");
     expect(payload1.task.lastWorkflowStage).toBe("drafting");
-    expect(triggerTaskMock).toHaveBeenNthCalledWith(
-      1,
-      "process-approved-task",
+    expect(enqueueApprovedTaskRun1).toHaveBeenCalledWith(
       expect.objectContaining({
         taskId: "task-outline-retry",
         userId: "user-1"
       }),
+    );
+    expect(enqueueApprovedTaskRun1).toHaveBeenCalledWith(
       expect.objectContaining({
-        concurrencyKey: "process-approved-task-task-outline-retry",
-        idempotencyKey: "process-approved-task-task-outline-retry-attempt-1"
+        approvalAttemptCount: 1
       })
     );
 
@@ -683,7 +676,15 @@ describe("outline approval routes", () => {
       lastWorkflowStage: "exporting"
     });
 
-    const deps2 = makeApprovedOutlineDeps("task-outline-retry", initialVersion.id) as any;
+    const enqueueApprovedTaskRun2 = vi.fn().mockResolvedValue("run-approved-task-2");
+    const enqueueApprovedTaskStartupCheck2 = vi
+      .fn()
+      .mockResolvedValue("run-approved-task-startup-check-2");
+    const deps2 = {
+      ...makeApprovedOutlineDeps("task-outline-retry", initialVersion.id),
+      enqueueApprovedTaskRun: enqueueApprovedTaskRun2,
+      enqueueApprovedTaskStartupCheck: enqueueApprovedTaskStartupCheck2
+    } as any;
 
     const response2 = await handleOutlineApprovalRequest(
       new Request("http://localhost/api/tasks/task-outline-retry/outline/approve", {
@@ -705,81 +706,16 @@ describe("outline approval routes", () => {
     expect(response2.status).toBe(202);
     expect(payload2.task.status).toBe("drafting");
     expect(payload2.task.lastWorkflowStage).toBe("drafting");
-    expect(triggerTaskMock).toHaveBeenNthCalledWith(
-      2,
-      "process-approved-task",
+    expect(enqueueApprovedTaskRun2).toHaveBeenCalledWith(
       expect.objectContaining({
         taskId: "task-outline-retry",
         userId: "user-1"
       }),
+    );
+    expect(enqueueApprovedTaskRun2).toHaveBeenCalledWith(
       expect.objectContaining({
-        concurrencyKey: "process-approved-task-task-outline-retry",
-        idempotencyKey: "process-approved-task-task-outline-retry-attempt-2"
+        approvalAttemptCount: 2
       })
     );
-  });
-
-  it("fails fast when the approved-task run stays stuck in pending version", async () => {
-    const initialVersion = await saveOutlineVersion({
-      task: {
-        id: "task-outline-pending-version",
-        userId: "user-1",
-        status: "awaiting_outline_approval",
-        targetWordCount: 1000,
-        citationStyle: "APA 7",
-        specialRequirements: "",
-        topic: "Corporate Governance",
-        outlineRevisionCount: 0
-      },
-      userId: "user-1",
-      outline: {
-        articleTitle: "Corporate Governance: A Structured Analysis",
-        targetWordCount: 1000,
-        citationStyle: "APA 7",
-        chineseMirrorPending: true,
-        sections: []
-      }
-    });
-
-    const response = await handleOutlineApprovalRequest(
-      new Request("http://localhost/api/tasks/task-outline-pending-version/outline/approve", {
-        method: "POST",
-        body: JSON.stringify({
-          outlineVersionId: initialVersion.id
-        }),
-        headers: {
-          "content-type": "application/json"
-        }
-      }),
-      {
-        taskId: "task-outline-pending-version"
-      },
-      {
-        ...makeApprovedOutlineDeps("task-outline-pending-version", initialVersion.id),
-        startApprovedTaskRun: async () => ({
-          ok: false as const,
-          triggerRunId: "run-pending-version",
-          runtime: {
-            state: "pending_version" as const,
-            status: "PENDING_VERSION"
-          },
-          reason: "TRIGGER_DEPLOYMENT_UNAVAILABLE",
-          message: "后台正文任务版本还没准备好，请稍后重试。",
-          detail: "后台当前没有可执行版本，正文任务一直停在等待接版本。"
-        })
-      } as any
-    );
-    const payload = await response.json();
-    const wallet = getUserWallet("user-1");
-    const task = getTaskSummary("task-outline-pending-version");
-
-    expect(response.status).toBe(503);
-    expect(payload.ok).toBe(false);
-    expect(payload.message).toContain("后台正文任务版本还没准备好");
-    expect(task?.status).toBe("failed");
-    expect(task?.lastWorkflowStage).toBe("drafting");
-    expect(task?.quotaReservation).toBeUndefined();
-    expect(task?.workflowErrorMessage).toContain("后台正文任务版本还没准备好");
-    expect(wallet.frozenQuota).toBe(0);
   });
 });

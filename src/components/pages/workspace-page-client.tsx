@@ -21,6 +21,10 @@ import { requestTaskAnalysisStatus } from "@/src/lib/tasks/request-task-analysis
 import { requestTaskAnalysisRetry } from "@/src/lib/tasks/request-task-analysis-retry";
 import { getTaskAnalysisDisplayState } from "@/src/lib/tasks/analysis-render-mode";
 import { isProviderRequestSchemaError } from "@/src/lib/tasks/provider-error";
+import {
+  WORKFLOW_PROGRESS_RETRYING_MESSAGE,
+  WORKFLOW_STREAM_RECONNECTING_MESSAGE
+} from "@/src/lib/tasks/workflow-runtime-errors";
 import type {
   TaskWorkflowHumanizePayload,
   TaskWorkflowPayload
@@ -40,7 +44,7 @@ import {
   ArrowRight,
   Sparkles
 } from "lucide-react";
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 
 type WorkspacePageClientProps = {
@@ -95,6 +99,8 @@ export function WorkspacePageClient({
   const [downloadingOutputId, setDownloadingOutputId] = useState<string | null>(null);
   const [isSubmittingHumanize, setIsSubmittingHumanize] = useState(false);
   const [workflowFallbackTaskId, setWorkflowFallbackTaskId] = useState<string | null>(null);
+  const [workflowReconnectTaskId, setWorkflowReconnectTaskId] = useState<string | null>(null);
+  const workflowStreamRef = useRef<EventSource | null>(null);
 
   async function syncWallet() {
     try {
@@ -309,6 +315,10 @@ export function WorkspacePageClient({
       return;
     }
 
+    if (workflowFallbackTaskId === activeTask.task.id) {
+      return;
+    }
+
     if (
       !["drafting", "adjusting_word_count", "verifying_references", "exporting"].includes(
         activeTask.task.status
@@ -319,20 +329,7 @@ export function WorkspacePageClient({
 
     let closed = false;
     const stream = new EventSource(`/api/tasks/${activeTask.task.id}/workflow/stream`);
-
-    const enterFallbackPolling = (message?: string) => {
-      if (closed) {
-        return;
-      }
-
-      closed = true;
-      stream.close();
-      setWorkflowFallbackTaskId(activeTask.task.id);
-      setNotice({
-        tone: "info",
-        text: message ?? "正文进度连接断了一次，系统正在自动恢复读取。"
-      });
-    };
+    workflowStreamRef.current = stream;
 
     const handleWorkflowEvent = (event: MessageEvent<string>) => {
       if (closed) {
@@ -363,6 +360,7 @@ export function WorkspacePageClient({
           message: result.message
         };
       });
+      setWorkflowReconnectTaskId(null);
       setWorkflowFallbackTaskId(null);
 
       setNotice({
@@ -382,23 +380,26 @@ export function WorkspacePageClient({
       }
     };
 
-    const handleWorkflowErrorEvent = (event: MessageEvent<string>) => {
-      let message: string | undefined;
-
-      try {
-        const payload = JSON.parse(event.data) as { message?: string };
-        if (typeof payload.message === "string" && payload.message.trim()) {
-          message = payload.message;
-        }
-      } catch {
-        // Fall back to the generic reconnect copy below.
+    const enterReconnectWindow = () => {
+      if (closed) {
+        return;
       }
 
-      enterFallbackPolling(message);
+      setWorkflowReconnectTaskId((currentTaskId) =>
+        currentTaskId === activeTask.task.id ? currentTaskId : activeTask.task.id
+      );
+      setNotice({
+        tone: "info",
+        text: WORKFLOW_STREAM_RECONNECTING_MESSAGE
+      });
+    };
+
+    const handleWorkflowErrorEvent = () => {
+      enterReconnectWindow();
     };
 
     const handleStreamError = () => {
-      enterFallbackPolling();
+      enterReconnectWindow();
     };
 
     stream.addEventListener("workflow", handleWorkflowEvent as EventListener);
@@ -411,8 +412,46 @@ export function WorkspacePageClient({
       stream.removeEventListener("workflow_error", handleWorkflowErrorEvent as EventListener);
       stream.removeEventListener("error", handleStreamError as EventListener);
       stream.close();
+      if (workflowStreamRef.current === stream) {
+        workflowStreamRef.current = null;
+      }
     };
-  }, [activeTask?.task.id, activeTask?.task.status, step]);
+  }, [activeTask?.task.id, activeTask?.task.status, step, workflowFallbackTaskId]);
+
+  useEffect(() => {
+    if (!activeTask || step !== 3) {
+      return;
+    }
+
+    if (workflowReconnectTaskId !== activeTask.task.id) {
+      return;
+    }
+
+    if (activeTask.task.status === "deliverable_ready" || activeTask.task.status === "failed") {
+      setWorkflowReconnectTaskId(null);
+      return;
+    }
+
+    let cancelled = false;
+    const timer = window.setTimeout(() => {
+      if (cancelled) {
+        return;
+      }
+
+      workflowStreamRef.current?.close();
+      workflowStreamRef.current = null;
+      setWorkflowFallbackTaskId(activeTask.task.id);
+      setNotice({
+        tone: "info",
+        text: WORKFLOW_PROGRESS_RETRYING_MESSAGE
+      });
+    }, 10_000);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [activeTask?.task.id, activeTask?.task.status, step, workflowReconnectTaskId]);
 
   useEffect(() => {
     if (!activeTask || step !== 3) {
@@ -429,60 +468,65 @@ export function WorkspacePageClient({
     }
 
     let cancelled = false;
-    const timer = window.setTimeout(() => {
-      void requestTaskAnalysisStatus({ taskId: activeTask.task.id })
-        .then(async (result) => {
-          if (cancelled) {
-            return;
+    const poll = async () => {
+      try {
+        const result = await requestTaskAnalysisStatus({ taskId: activeTask.task.id });
+        if (cancelled) {
+          return;
+        }
+
+        setActiveTask((currentTask) => {
+          if (!currentTask || currentTask.task.id !== activeTask.task.id) {
+            return currentTask;
           }
 
-          setActiveTask((currentTask) => {
-            if (!currentTask || currentTask.task.id !== activeTask.task.id) {
-              return currentTask;
-            }
-
-            return {
-              ...currentTask,
-              ...result,
-              downloads: result.downloads ?? currentTask.downloads,
-              finalWordCount:
-                typeof result.finalWordCount === "number"
-                  ? result.finalWordCount
-                  : currentTask.finalWordCount,
-              humanize: result.humanize ?? currentTask.humanize ?? defaultHumanizeState
-            };
-          });
-
-          setNotice({
-            tone:
-              result.task.status === "failed"
-                ? "error"
-                : result.task.status === "deliverable_ready"
-                  ? "success"
-                  : "info",
-            text: result.message
-          });
-
-          if (result.task.status === "deliverable_ready" || result.task.status === "failed") {
-            setWorkflowFallbackTaskId(null);
-            await syncWallet();
-          }
-        })
-        .catch(() => {
-          if (cancelled) {
-            return;
-          }
-
-          setNotice({
-            tone: "error",
-            text: "读取正文写作进度失败，请稍后再试。"
-          });
+          return {
+            ...currentTask,
+            ...result,
+            downloads: result.downloads ?? currentTask.downloads,
+            finalWordCount:
+              typeof result.finalWordCount === "number"
+                ? result.finalWordCount
+                : currentTask.finalWordCount,
+            humanize: result.humanize ?? currentTask.humanize ?? defaultHumanizeState
+          };
         });
+
+        setWorkflowReconnectTaskId(null);
+        setNotice({
+          tone:
+            result.task.status === "failed"
+              ? "error"
+              : result.task.status === "deliverable_ready"
+                ? "success"
+                : "info",
+          text: result.message
+        });
+
+        if (result.task.status === "deliverable_ready" || result.task.status === "failed") {
+          setWorkflowFallbackTaskId(null);
+          await syncWallet();
+        }
+      } catch {
+        if (cancelled) {
+          return;
+        }
+
+        setNotice({
+          tone: "info",
+          text: WORKFLOW_PROGRESS_RETRYING_MESSAGE
+        });
+      }
+    };
+
+    void poll();
+    const interval = window.setInterval(() => {
+      void poll();
     }, 3_000);
 
     return () => {
       cancelled = true;
-      window.clearTimeout(timer);
+      window.clearInterval(interval);
     };
   }, [activeTask?.task.id, activeTask?.task.status, step, workflowFallbackTaskId]);
 

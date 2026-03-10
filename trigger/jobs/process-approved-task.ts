@@ -5,6 +5,7 @@ export type ProcessApprovedTaskJobInput = {
   taskId: string;
   userId: string;
   safetyIdentifier?: string;
+  approvalAttemptCount: number;
 };
 
 export const processApprovedTaskJob = task({

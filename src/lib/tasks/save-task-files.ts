@@ -23,7 +23,9 @@ import {
   saveTaskFileRecords
 } from "@/src/lib/tasks/repository";
 import {
+  buildWorkflowMetadataSelect,
   isWorkflowMetadataColumnMissingError,
+  resolveWorkflowMetadataColumnAvailability,
   normalizeWorkflowStageTimestamps
 } from "@/src/lib/tasks/workflow-stage-timestamps";
 import type {
@@ -129,10 +131,14 @@ export async function getOwnedTaskSummary(
   }
 
   if (error && isWorkflowMetadataColumnMissingError(error)) {
+    const availability = resolveWorkflowMetadataColumnAvailability(error);
     const legacyResult = await client
       .from("writing_tasks")
       .select(
-        "id,status,target_word_count,citation_style,special_requirements,primary_requirement_file_id,topic,requested_chapter_count,outline_revision_count,latest_outline_version_id,latest_draft_version_id,analysis_snapshot,analysis_status,analysis_model,analysis_retry_count,analysis_error_message,analysis_trigger_run_id,analysis_requested_at,analysis_started_at,analysis_completed_at,approval_attempt_count,last_workflow_stage"
+        buildWorkflowMetadataSelect(
+          "id,status,target_word_count,citation_style,special_requirements,primary_requirement_file_id,topic,requested_chapter_count,outline_revision_count,latest_outline_version_id,latest_draft_version_id,analysis_snapshot,analysis_status,analysis_model,analysis_retry_count,analysis_error_message,analysis_trigger_run_id,analysis_requested_at,analysis_started_at,analysis_completed_at,approval_attempt_count,last_workflow_stage",
+          availability
+        )
       )
       .eq("id", taskId)
       .eq("user_id", userId)

@@ -27,6 +27,10 @@ const taskWorkflowStageTimestampsMigration = resolve(
   migrationsDir,
   "202603090002_task_workflow_stage_timestamps.sql"
 );
+const finalizeTaskStartupFailureMigration = resolve(
+  migrationsDir,
+  "202603100001_finalize_task_startup_failure.sql"
+);
 
 describe("database cleanup migrations", () => {
   it("keeps task creation nullable until model analysis fills the requirements", () => {
@@ -110,5 +114,18 @@ describe("database cleanup migrations", () => {
     expect(sql).toContain("add column if not exists workflow_stage_timestamps jsonb");
     expect(sql).toContain("default '{}'::jsonb");
     expect(sql).toContain("update public.writing_tasks");
+  });
+
+  it("ships a startup-failure rpc migration that atomically releases quota and marks the task", () => {
+    expect(existsSync(finalizeTaskStartupFailureMigration)).toBe(true);
+
+    const sql = readFileSync(finalizeTaskStartupFailureMigration, "utf8");
+
+    expect(sql).toContain("create or replace function public.finalize_approved_task_startup_failure");
+    expect(sql).toContain("p_expected_approval_attempt_count");
+    expect(sql).toContain("workflow_error_message");
+    expect(sql).toContain("quota_reservation");
+    expect(sql).toContain("task_release");
+    expect(sql).toContain("grant execute on function public.finalize_approved_task_startup_failure");
   });
 });

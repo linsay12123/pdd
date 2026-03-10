@@ -2,8 +2,11 @@ import { createSupabaseAdminClient } from "@/src/lib/supabase/admin";
 import { normalizeAnalysisModel } from "@/src/lib/tasks/analysis-runtime-cleanup";
 import { assertStatusTransition } from "@/src/lib/tasks/status-machine";
 import {
+  buildWorkflowMetadataSelect,
   buildWorkflowStageTimestamps,
   isWorkflowMetadataColumnMissingError,
+  resolveWorkflowMetadataColumnAvailability,
+  stripUnavailableWorkflowMetadata,
   normalizeWorkflowStageTimestamps
 } from "@/src/lib/tasks/workflow-stage-timestamps";
 import type {
@@ -68,15 +71,25 @@ type DraftRow = {
 };
 
 const ownedTaskBaseSelect =
-  "id,user_id,status,target_word_count,citation_style,special_requirements,topic,requested_chapter_count,outline_revision_count,primary_requirement_file_id,analysis_snapshot,analysis_status,analysis_model,analysis_retry_count,analysis_error_message,analysis_trigger_run_id,analysis_requested_at,analysis_started_at,analysis_completed_at,latest_outline_version_id,latest_draft_version_id,current_candidate_draft_id,approval_attempt_count,last_workflow_stage,workflow_error_message,quota_reservation";
+  "id,user_id,status,target_word_count,citation_style,special_requirements,topic,requested_chapter_count,outline_revision_count,primary_requirement_file_id,analysis_snapshot,analysis_status,analysis_model,analysis_retry_count,analysis_error_message,analysis_trigger_run_id,analysis_requested_at,analysis_started_at,analysis_completed_at,latest_outline_version_id,latest_draft_version_id,current_candidate_draft_id,approval_attempt_count,last_workflow_stage,quota_reservation";
 
 const ownedTaskHumanizeSelect =
   ",humanize_status,humanize_provider,humanize_profile_snapshot,humanize_document_id,humanize_retry_document_id,humanize_error_message,humanize_requested_at,humanize_completed_at";
 
-const ownedTaskSelectWithWorkflowStageTimestamps =
-  `${ownedTaskBaseSelect},workflow_stage_timestamps${ownedTaskHumanizeSelect}`;
+const workflowMetadataColumnsAvailable = {
+  missingWorkflowStageTimestamps: false,
+  missingWorkflowErrorMessage: false
+} as const;
 
-const ownedTaskSelectLegacy = `${ownedTaskBaseSelect}${ownedTaskHumanizeSelect}`;
+function buildOwnedTaskSelect(
+  availability: ReturnType<typeof resolveWorkflowMetadataColumnAvailability> =
+    workflowMetadataColumnsAvailable
+) {
+  return buildWorkflowMetadataSelect(
+    `${ownedTaskBaseSelect}${ownedTaskHumanizeSelect}`,
+    availability
+  );
+}
 
 export async function getOwnedTaskFromSupabase(taskId: string, userId: string) {
   const { data, error } = await selectOwnedTaskRow(taskId, userId);
@@ -191,25 +204,21 @@ export async function setOwnedTaskStatusInSupabase(
       .eq("id", taskId)
       .eq("user_id", userId)
       .eq("status", currentStatus)
-      .select(ownedTaskSelectWithWorkflowStageTimestamps)
+      .select(buildOwnedTaskSelect())
       .maybeSingle();
     data = result.data as TaskRow | null;
     error = result.error;
   }
 
   if (error && isWorkflowMetadataColumnMissingError(error)) {
-    const {
-      workflow_stage_timestamps: _ignoredWorkflowStageTimestamps,
-      workflow_error_message: _ignoredWorkflowErrorMessage,
-      ...legacyUpdatePayload
-    } = updatePayload;
+    const availability = resolveWorkflowMetadataColumnAvailability(error);
     const legacyResult = await client
       .from("writing_tasks")
-      .update(legacyUpdatePayload)
+      .update(stripUnavailableWorkflowMetadata(updatePayload, availability))
       .eq("id", taskId)
       .eq("user_id", userId)
       .eq("status", currentStatus)
-      .select(ownedTaskSelectLegacy)
+      .select(buildOwnedTaskSelect(availability))
       .maybeSingle();
     data = legacyResult.data as TaskRow | null;
     error = legacyResult.error;
@@ -260,19 +269,20 @@ export async function updateOwnedTaskHumanizeStateInSupabase(
       .update(patch)
       .eq("id", taskId)
       .eq("user_id", userId)
-      .select(ownedTaskSelectWithWorkflowStageTimestamps)
+      .select(buildOwnedTaskSelect())
       .maybeSingle();
     data = result.data as TaskRow | null;
     error = result.error;
   }
 
   if (error && isWorkflowMetadataColumnMissingError(error)) {
+    const availability = resolveWorkflowMetadataColumnAvailability(error);
     const legacyResult = await client
       .from("writing_tasks")
-      .update(patch)
+      .update(stripUnavailableWorkflowMetadata(patch, availability))
       .eq("id", taskId)
       .eq("user_id", userId)
-      .select(ownedTaskSelectLegacy)
+      .select(buildOwnedTaskSelect(availability))
       .maybeSingle();
     data = legacyResult.data as TaskRow | null;
     error = legacyResult.error;
@@ -419,13 +429,20 @@ async function readOwnedTaskWorkflowState(
   }
 
   if (error && isWorkflowMetadataColumnMissingError(error)) {
+    const availability = resolveWorkflowMetadataColumnAvailability(error);
     const legacyResult = await client
       .from("writing_tasks")
-      .select("status")
+      .select(buildWorkflowMetadataSelect("status", availability))
       .eq("id", taskId)
       .eq("user_id", userId)
       .maybeSingle();
-    data = legacyResult.data;
+    data = legacyResult.data as
+      | {
+          status: TaskStatus;
+          workflow_stage_timestamps?: unknown;
+          workflow_error_message?: string | null;
+        }
+      | null;
     error = legacyResult.error;
   }
 
@@ -457,7 +474,7 @@ async function selectOwnedTaskRow(taskId: string, userId: string) {
   {
     const result = await client
       .from("writing_tasks")
-      .select(ownedTaskSelectWithWorkflowStageTimestamps)
+      .select(buildOwnedTaskSelect())
       .eq("id", taskId)
       .eq("user_id", userId)
       .maybeSingle();
@@ -466,13 +483,14 @@ async function selectOwnedTaskRow(taskId: string, userId: string) {
   }
 
   if (error && isWorkflowMetadataColumnMissingError(error)) {
+    const availability = resolveWorkflowMetadataColumnAvailability(error);
     const legacyResult = await client
       .from("writing_tasks")
-      .select(ownedTaskSelectLegacy)
+      .select(buildOwnedTaskSelect(availability))
       .eq("id", taskId)
       .eq("user_id", userId)
       .maybeSingle();
-    data = legacyResult.data;
+    data = legacyResult.data as TaskRow | null;
     error = legacyResult.error;
   }
 

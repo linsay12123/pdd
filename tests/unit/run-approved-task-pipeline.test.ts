@@ -15,6 +15,68 @@ const reservation: FrozenQuotaReservation = {
 };
 
 describe("run approved task pipeline", () => {
+  it("skips stale runs when the approval attempt count no longer matches", async () => {
+    const processApprovedTask = vi.fn();
+
+    const result = await runApprovedTaskPipeline(
+      {
+        taskId: "task-1",
+        userId: "user-1",
+        approvalAttemptCount: 2
+      },
+      {
+        getOwnedTask: async () => ({
+          id: "task-1",
+          userId: "user-1",
+          status: "failed",
+          targetWordCount: 1000,
+          citationStyle: "Harvard",
+          specialRequirements: "",
+          approvalAttemptCount: 3,
+          quotaReservation: undefined
+        }),
+        processApprovedTask
+      } as any
+    );
+
+    expect(result).toEqual({
+      skipped: true,
+      reason: "STALE_APPROVAL_ATTEMPT"
+    });
+    expect(processApprovedTask).not.toHaveBeenCalled();
+  });
+
+  it("skips stale runs when quota has already been released", async () => {
+    const processApprovedTask = vi.fn();
+
+    const result = await runApprovedTaskPipeline(
+      {
+        taskId: "task-1",
+        userId: "user-1",
+        approvalAttemptCount: 2
+      },
+      {
+        getOwnedTask: async () => ({
+          id: "task-1",
+          userId: "user-1",
+          status: "failed",
+          targetWordCount: 1000,
+          citationStyle: "Harvard",
+          specialRequirements: "",
+          approvalAttemptCount: 2,
+          quotaReservation: undefined
+        }),
+        processApprovedTask
+      } as any
+    );
+
+    expect(result).toEqual({
+      skipped: true,
+      reason: "TASK_QUOTA_RESERVATION_NOT_FOUND"
+    });
+    expect(processApprovedTask).not.toHaveBeenCalled();
+  });
+
   it("marks the task deliverable_ready only after quota settlement succeeds", async () => {
     const setOwnedTaskStatusInSupabase = vi.fn().mockResolvedValue({
       id: "task-1",
@@ -88,6 +150,10 @@ describe("run approved task pipeline", () => {
     expect(setOwnedTaskStatusInSupabase).toHaveBeenCalledWith("task-1", "user-1", "deliverable_ready", {
       lastWorkflowStage: "exporting"
     });
+    expect("skipped" in result).toBe(false);
+    if ("skipped" in result) {
+      throw new Error("expected deliverable_ready result");
+    }
     expect(result.task.status).toBe("deliverable_ready");
   });
 

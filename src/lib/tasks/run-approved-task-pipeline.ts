@@ -24,6 +24,7 @@ type RunApprovedTaskPipelineInput = {
   taskId: string;
   userId: string;
   safetyIdentifier?: string;
+  approvalAttemptCount?: number;
 };
 
 type GeneratedOutputRecord = {
@@ -58,11 +59,27 @@ export async function runApprovedTaskPipeline(
   const currentTask = await getOwnedTask(input.taskId, input.userId);
 
   if (!currentTask) {
-    throw new Error("TASK_NOT_FOUND");
+    return {
+      skipped: true as const,
+      reason: "TASK_NOT_FOUND"
+    };
+  }
+
+  if (
+    typeof input.approvalAttemptCount === "number" &&
+    (currentTask.approvalAttemptCount ?? 0) !== input.approvalAttemptCount
+  ) {
+    return {
+      skipped: true as const,
+      reason: "STALE_APPROVAL_ATTEMPT"
+    };
   }
 
   if (!currentTask.quotaReservation) {
-    throw new Error("TASK_QUOTA_RESERVATION_NOT_FOUND");
+    return {
+      skipped: true as const,
+      reason: "TASK_QUOTA_RESERVATION_NOT_FOUND"
+    };
   }
 
   const reservation = currentTask.quotaReservation;

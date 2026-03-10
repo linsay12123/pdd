@@ -90,9 +90,53 @@ export function isWorkflowErrorMessageColumnMissingError(error: unknown) {
   );
 }
 
+export function resolveWorkflowMetadataColumnAvailability(error: unknown) {
+  return {
+    missingWorkflowStageTimestamps: isWorkflowStageTimestampsColumnMissingError(error),
+    missingWorkflowErrorMessage: isWorkflowErrorMessageColumnMissingError(error)
+  };
+}
+
 export function isWorkflowMetadataColumnMissingError(error: unknown) {
+  const availability = resolveWorkflowMetadataColumnAvailability(error);
   return (
-    isWorkflowStageTimestampsColumnMissingError(error) ||
-    isWorkflowErrorMessageColumnMissingError(error)
+    availability.missingWorkflowStageTimestamps ||
+    availability.missingWorkflowErrorMessage
   );
+}
+
+export function stripUnavailableWorkflowMetadata<
+  T extends {
+    workflow_stage_timestamps?: unknown;
+    workflow_error_message?: unknown;
+  }
+>(payload: T, availability: ReturnType<typeof resolveWorkflowMetadataColumnAvailability>) {
+  const next = { ...payload };
+
+  if (availability.missingWorkflowStageTimestamps) {
+    delete next.workflow_stage_timestamps;
+  }
+
+  if (availability.missingWorkflowErrorMessage) {
+    delete next.workflow_error_message;
+  }
+
+  return next;
+}
+
+export function buildWorkflowMetadataSelect(
+  base: string,
+  availability: ReturnType<typeof resolveWorkflowMetadataColumnAvailability>
+) {
+  const fields = [base];
+
+  if (!availability.missingWorkflowStageTimestamps) {
+    fields.push("workflow_stage_timestamps");
+  }
+
+  if (!availability.missingWorkflowErrorMessage) {
+    fields.push("workflow_error_message");
+  }
+
+  return fields.join(",");
 }
