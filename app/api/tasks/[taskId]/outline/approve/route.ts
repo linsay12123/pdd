@@ -11,9 +11,11 @@ import {
 import { createSupabaseAdminClient } from "@/src/lib/supabase/admin";
 import { approveOutlineVersion } from "@/src/lib/tasks/save-outline-version";
 import {
+  buildWorkflowMetadataSelect,
   buildWorkflowStageTimestamps,
-  isWorkflowErrorMessageColumnMissingError,
-  isWorkflowStageTimestampsColumnMissingError
+  isWorkflowMetadataColumnMissingError,
+  resolveWorkflowMetadataColumnAvailability,
+  stripUnavailableWorkflowMetadata
 } from "@/src/lib/tasks/workflow-stage-timestamps";
 import {
   enqueueApprovedTaskRun,
@@ -33,6 +35,11 @@ import type { FrozenQuotaReservation } from "@/src/types/billing";
 import type { TaskStatus, TaskWorkflowStage } from "@/src/types/tasks";
 
 export const maxDuration = 300;
+
+const workflowMetadataColumnsAvailable = {
+  missingWorkflowStageTimestamps: false,
+  missingWorkflowErrorMessage: false
+} as const;
 
 type RouteContext = {
   params: Promise<{
@@ -332,11 +339,17 @@ async function reserveQuotaForTaskWithSupabase(
 
   let currentTask: CurrentTaskRow | null = null;
   let currentTaskError: { message: string } | null = null;
+  let workflowMetadataAvailability: ReturnType<
+    typeof resolveWorkflowMetadataColumnAvailability
+  > = workflowMetadataColumnsAvailable;
   {
     const result = await client
       .from("writing_tasks")
       .select(
-        "id,status,target_word_count,approval_attempt_count,last_workflow_stage,workflow_stage_timestamps,workflow_error_message"
+        buildWorkflowMetadataSelect(
+          "id,status,target_word_count,approval_attempt_count,last_workflow_stage",
+          workflowMetadataAvailability
+        )
       )
       .eq("id", taskId)
       .eq("user_id", userId)
@@ -345,23 +358,16 @@ async function reserveQuotaForTaskWithSupabase(
     currentTaskError = result.error;
   }
 
-  if (
-    currentTaskError &&
-    (isWorkflowStageTimestampsColumnMissingError(currentTaskError) ||
-      isWorkflowErrorMessageColumnMissingError(currentTaskError))
-  ) {
+  if (currentTaskError && isWorkflowMetadataColumnMissingError(currentTaskError)) {
+    workflowMetadataAvailability =
+      resolveWorkflowMetadataColumnAvailability(currentTaskError);
     const legacyResult = await client
       .from("writing_tasks")
       .select(
-        `id,status,target_word_count,approval_attempt_count,last_workflow_stage${
-          isWorkflowErrorMessageColumnMissingError(currentTaskError)
-            ? ""
-            : ",workflow_error_message"
-        }${
-          isWorkflowStageTimestampsColumnMissingError(currentTaskError)
-            ? ""
-            : ",workflow_stage_timestamps"
-        }`
+        buildWorkflowMetadataSelect(
+          "id,status,target_word_count,approval_attempt_count,last_workflow_stage",
+          workflowMetadataAvailability
+        )
       )
       .eq("id", taskId)
       .eq("user_id", userId)
@@ -422,24 +428,22 @@ async function reserveQuotaForTaskWithSupabase(
     .select("id,target_word_count")
     .maybeSingle();
 
-  if (
-    lockError &&
-    (isWorkflowStageTimestampsColumnMissingError(lockError) ||
-      isWorkflowErrorMessageColumnMissingError(lockError))
-  ) {
-    const legacyPatch: Record<string, unknown> = {
-      status: "drafting",
-      last_workflow_stage: "drafting",
-      approval_attempt_count: nextApprovalAttemptCount
-    };
-
-    if (!isWorkflowErrorMessageColumnMissingError(lockError)) {
-      legacyPatch.workflow_error_message = null;
-    }
-
+  if (lockError && isWorkflowMetadataColumnMissingError(lockError)) {
+    const availability = resolveWorkflowMetadataColumnAvailability(lockError);
     const legacyResult = await client
       .from("writing_tasks")
-      .update(legacyPatch)
+      .update(
+        stripUnavailableWorkflowMetadata(
+          {
+            status: "drafting",
+            last_workflow_stage: "drafting",
+            workflow_error_message: null,
+            approval_attempt_count: nextApprovalAttemptCount,
+            workflow_stage_timestamps: workflowStageTimestamps
+          },
+          availability
+        )
+      )
       .eq("id", taskId)
       .eq("user_id", userId)
       .eq("status", previousStatus)
@@ -610,24 +614,22 @@ async function revertTaskToRetriableStatus(
     .eq("user_id", userId)
     .eq("status", "drafting");
 
-  if (
-    error &&
-    (isWorkflowStageTimestampsColumnMissingError(error) ||
-      isWorkflowErrorMessageColumnMissingError(error))
-  ) {
-    const legacyPatch: Record<string, unknown> = {
-      status: input.previousStatus,
-      last_workflow_stage: input.previousLastWorkflowStage,
-      quota_reservation: null
-    };
-
-    if (!isWorkflowErrorMessageColumnMissingError(error)) {
-      legacyPatch.workflow_error_message = input.previousWorkflowErrorMessage ?? null;
-    }
-
+  if (error && isWorkflowMetadataColumnMissingError(error)) {
+    const availability = resolveWorkflowMetadataColumnAvailability(error);
     const legacyResult = await client
       .from("writing_tasks")
-      .update(legacyPatch)
+      .update(
+        stripUnavailableWorkflowMetadata(
+          {
+            status: input.previousStatus,
+            last_workflow_stage: input.previousLastWorkflowStage,
+            workflow_error_message: input.previousWorkflowErrorMessage ?? null,
+            workflow_stage_timestamps: input.previousWorkflowStageTimestamps ?? {},
+            quota_reservation: null
+          },
+          availability
+        )
+      )
       .eq("id", taskId)
       .eq("user_id", userId)
       .eq("status", "drafting");
